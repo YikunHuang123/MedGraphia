@@ -211,8 +211,7 @@ Every node carries a `cui` (UMLS CUI) property as the cross-lingual anchor, plus
 | **Safety** | Llama Guard 4 / NeMo Guardrails | Input + output filtering |
 | **Observability** | Langfuse (self-hosted) | GDPR-safe; prompt/token/latency/cost tracing |
 | **Evaluation** | RAGAS | Faithfulness · Answer Relevance · Context Precision/Recall |
-| **Auth (lite)** | API Key (X-API-Key) | Invite-token flow |
-| **Auth (enterprise)** | Keycloak SSO + OPA | OIDC + row-level ACL by clinical role |
+| **Auth** | API Key / Keycloak SSO | Configurable strategy: `none`, `apikey`, or `oidc` |
 | **Pipeline Orchestration** | Prefect 3 / Airflow 2 | Incremental build DAG |
 | **UI** | Streamlit | Chat · KG explorer · pipeline monitor · admin |
 | **Containerization** | Docker + Docker Compose | Multi-target Dockerfiles |
@@ -311,7 +310,7 @@ MedGraphia supports two deployment configurations that share the same codebase. 
 | **Target** | Production server / cloud | 16 GB Mac / PC (M1/M2 or RTX 3060+) |
 | **Data scope** | Full multi-domain corpus | Single domain (e.g. T2DM), 100–500 abstracts + 50 drug labels |
 | **UMLS** | Full Metathesaurus | MetamorphoSys subset (SNOMED CT + RxNorm + MeSH, EN+ZH only) |
-| **Vector DB** | Qdrant (dense + sparse hybrid) | Qdrant or Chroma |
+| **Vector DB** | Qdrant (dense + sparse hybrid) | Qdrant (native dense + sparse hybrid) |
 | **Neo4j memory** | 16 GB+ page cache | 1–2 GB page cache (< 100K nodes / 500K edges) |
 | **LLM** | vLLM/SGLang self-hosted 70B + cloud routed | Ollama 7B 4-bit GGUF or DeepSeek/Qwen API |
 | **Auth** | Keycloak SSO + OPA role-based ACL | API key invite flow |
@@ -427,8 +426,8 @@ LLM_BASE_URL=http://host.docker.internal:11434
 EMBEDDING_PROVIDER=ollama
 EMBEDDING_MODEL=nomic-embed-text
 
-# Chroma as zero-infra vector store alternative
-VECTOR_STORE=chroma             # or qdrant
+# Qdrant for vector storage
+VECTOR_STORE=qdrant
 
 # Reduce Neo4j memory footprint
 NEO4J_PAGE_CACHE=1G
@@ -466,7 +465,7 @@ docker compose -f docker-compose.lite.yml exec worker python scripts/build_graph
 
 ### Option C — Local Development (without Docker)
 
-**Prerequisites:** Python 3.12, Conda/uv, running Neo4j 5.x, Qdrant or Chroma, Ollama (optional).
+**Prerequisites:** Python 3.12, Conda/uv, running Neo4j 5.x, Qdrant (native dense + sparse hybrid), Ollama (optional).
 
 ```bash
 git clone https://github.com/YikunHuang123/MedGraphia.git
@@ -600,26 +599,22 @@ All settings are loaded from `.env` via Pydantic Settings. Key variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `DEPLOYMENT_MODE` | `lite` | `enterprise` or `lite` — controls defaults and component selection |
+| **Architecture** | | |
+| `STORAGE_BACKEND` | `local` | `local` (disk) or `s3` (MinIO/AWS S3) |
+| `AUTH_STRATEGY` | `apikey` | `none`, `apikey`, or `oidc` (Keycloak) |
+| **Neo4j** | | |
 | `NEO4J_URI` | `bolt://localhost:7687` | Neo4j connection URI |
-| `NEO4J_PAGE_CACHE` | `4G` | Neo4j page cache; set to `1G` in lite mode |
-| `VECTOR_STORE` | `qdrant` | `qdrant` or `chroma` |
-| `QDRANT_URL` | `http://localhost:6333` | Qdrant service URL |
-| `LLM_PROVIDER` | `deepseek` | `deepseek` \| `openai` \| `anthropic` \| `ollama` \| `local` |
-| `LLM_MODEL` | `deepseek-chat` | Model name / path |
-| `LLM_BASE_URL` | _(provider default)_ | Custom inference endpoint (vLLM / Ollama / LiteLLM) |
-| `EMBEDDING_MODEL` | `BAAI/bge-m3` | Embedding model; `nomic-embed-text` for Ollama |
-| `GRAPHRAG_FRAMEWORK` | `lightrag` | `lightrag` — LightRAG is the default; see notes on MS GraphRAG cost |
-| `COMMUNITY_SUMMARY_LLM` | _(same as LLM_MODEL)_ | Model used for Leiden community summary generation |
-| `GUARDRAILS_ENABLED` | `true` | Toggle Llama Guard 4 safety filtering |
-| `RAGAS_FAITHFULNESS_THRESHOLD` | `0.75` | Answers scoring below this are downgraded or refused |
-| `AUTH_MODE` | `apikey` | `apikey` (lite) or `keycloak` (enterprise) |
-| `ADMIN_BOOTSTRAP_KEY` | _(required)_ | Initial admin API key |
-| `LANGFUSE_HOST` | `http://localhost:3000` | Langfuse self-hosted URL |
-| `DEFAULT_DOMAIN` | `general` | Domain filter for lite mode (e.g. `t2dm`, `cardiovascular`) |
-| `PUBMED_MAX_RESULTS` | `500` | Cap on PubMed abstracts fetched per domain |
-| `DRUG_LABEL_LIMIT` | `50` | Cap on drug label documents per domain |
-| `PII_DEIDENTIFY` | `true` | Run Microsoft Presidio de-identification on all ingested text |
+| `NEO4J_PAGE_CACHE` | `1G` | Page cache size (e.g., `1G` for laptop, `32G` for server) |
+| **Vector Store** | | |
+| `VECTOR_STORE` | `qdrant` | Only `qdrant` is supported |
+| **LLM & Embedding** | | |
+| `LLM_PROVIDER` | `ollama` | `openai` \| `anthropic` \| `deepseek` \| `ollama` \| `local` |
+| `EMBEDDING_PROVIDER`| `ollama` | `huggingface` \| `openai` \| `ollama` |
+| **Observability** | | |
+| `TRACING_ENABLED` | `false` | Enable Langfuse tracing |
+| `METRICS_ENABLED` | `false` | Enable Prometheus metrics |
+| **Compliance** | | |
+| `PII_DEIDENTIFY` | `false` | Run Microsoft Presidio PHI de-identification |
 
 ---
 
@@ -774,3 +769,6 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 **GitHub:** [@YikunHuang123](https://github.com/YikunHuang123)
 
 > Built as a production-oriented medical GraphRAG system — covering multilingual NLP pipelines, knowledge graph construction, three-path hybrid retrieval, and compliance-aware LLM generation across Chinese, English, and German.
+, and German.
+rman.
+, and German.

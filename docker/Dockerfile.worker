@@ -1,0 +1,27 @@
+# ============================================================================
+# MedGraphia — Pipeline worker image (Prefect agent)
+# Includes heavier ML dependencies: torch, transformers, FlagEmbedding
+# ============================================================================
+
+FROM python:3.12-slim AS runtime
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc g++ libxml2-dev libxslt-dev libjpeg-dev zlib1g-dev \
+        tesseract-ocr tesseract-ocr-eng tesseract-ocr-deu tesseract-ocr-chi-sim \
+        curl git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml .
+RUN pip install --no-cache-dir .
+
+COPY src/ /app/src/
+COPY scripts/ /app/scripts/
+
+ENV PYTHONPATH=/app/src
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Default: start Prefect worker; override for one-off pipeline runs
+CMD ["prefect", "worker", "start", "--pool", "default-agent-pool"]
