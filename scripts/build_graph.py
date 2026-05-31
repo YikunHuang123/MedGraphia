@@ -193,9 +193,27 @@ async def _stage_fetch(
                 docs.extend(fda_docs)
         click.echo(f"      FDA DailyMed: {len(docs) - len(pubmed_docs)} labels")
 
-    # EMA SmPC (stub — expensive, skip in lite mode by default)
+    # EMA SmPC (Load locally downloaded PDFs)
     if include_ema:
-        click.echo("      EMA SmPC: run scripts/fetch_ema_smpc.py separately for large downloads.")
+        ema_dir = Path("data/raw/ema_smpc")
+        if ema_dir.exists():
+            ema_pdfs = list(ema_dir.glob("*.pdf"))
+            for pdf_path in ema_pdfs:
+                # Wrap local PDF in a RawDocument so the parser can see it
+                from medgraphia.domain import SourceMeta, Language, RawDocument
+                from datetime import datetime
+                
+                source = SourceMeta(
+                    source_id=f"ema_local:{pdf_path.stem}",
+                    source_title=pdf_path.stem.replace("_", " "),
+                    retrieved_at=datetime.fromtimestamp(pdf_path.stat().st_mtime),
+                    language=Language.EN
+                )
+                docs.append(RawDocument(source=source, file_path=str(pdf_path), format="pdf"))
+            
+            click.echo(f"      EMA SmPC: loaded {len(ema_pdfs)} local PDFs")
+        else:
+            click.echo("      EMA SmPC: No local PDFs found in data/raw/ema_smpc/")
 
     # DrugBank XML (local file, no network call)
     if include_drugbank and drugbank_xml:
@@ -210,17 +228,29 @@ async def _stage_fetch(
 
 def _stage_parse(raw_docs: list) -> list:
     """
-    For text-format documents (PubMed abstracts, DailyMed XML) no additional
-    parsing is needed — they are already RawDocument objects with full_text set.
-    PDF documents require Docling / MinerU (handled in Phase 2).
+    Parse documents.  PDF documents use Docling to extract structure (sections, tables).
     """
+    click.echo(f"[{2}/8] Parsing documents…")
+    from medgraphia.ingestion.parsers.docling_parser import DoclingParser
+    
+    parser = DoclingParser()
     parsed = []
+    
     for doc in raw_docs:
         if doc.format in ("text", "xml"):
             parsed.append(doc)
         elif doc.format == "pdf" and doc.file_path:
-            # PDF parsing will be wired up in Phase 2
-            parsed.append(doc)
+            try:
+                # Actual parsing of the PDF file downloaded in Stage 1
+                parsed_doc = parser.parse(doc.file_path, source_meta=doc.source, language=doc.language)
+                parsed.append(parsed_doc)
+                click.echo(f"      ✓ Parsed PDF: {doc.title[:40]}...")
+            except Exception as exc:
+                click.echo(f"      ✗ Failed to parse PDF {doc.title}: {exc}")
+                # Fallback to unparsed doc to keep it in the pipeline
+                parsed.append(doc)
+                
+    click.echo(f"      → {len(parsed)} documents parsed.")
     return parsed
 
 
