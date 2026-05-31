@@ -4,7 +4,7 @@ All models are immutable Pydantic dataclasses / BaseModel subclasses.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -63,7 +63,7 @@ class SourceMeta(BaseModel):
     source_title: str = ""
     source_version: str = ""
     source_url: str = ""
-    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     language: Language = Language.EN
 
 
@@ -176,7 +176,7 @@ class Message(BaseModel):
     model_used: str = ""
     faithfulness_score: float | None = None
     retrieval_paths_used: list[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Session(BaseModel):
@@ -185,5 +185,5 @@ class Session(BaseModel):
     language: Language = Language.EN
     domain: str = ""
     messages: list[Message] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
