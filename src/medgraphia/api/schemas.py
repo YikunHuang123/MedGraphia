@@ -3,7 +3,7 @@ Pydantic request / response DTOs for the FastAPI application.
 """
 from __future__ import annotations
 
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -32,7 +32,7 @@ class ChatResponse(BaseModel):
     faithfulness_score: float | None = None
     query_type: QueryType | None = None
     disclaimer: str = ""
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 # ---------------------------------------------------------------------------
