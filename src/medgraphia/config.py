@@ -120,11 +120,11 @@ class Settings(BaseSettings):
     # NER (Named Entity Recognition)
     # ------------------------------------------------------------------
     ner_gliner_model: str = "urchade/gliner_mediumv2.1"
-    ner_gliner_threshold: float = 0.45
+    ner_gliner_threshold: float = 0.30  # lowered further
     ner_bert_en_model: str = "d4data/biomedical-ner-all"
-    ner_bert_zh_model: str = "uer/roberta-base-finetuned-cluener2020-chinese"
-    ner_bert_de_model: str = ""          # empty = skip BERT precision pass for DE
-    ner_confidence_threshold: float = 0.40  # minimum confidence to keep a span
+    ner_bert_zh_model: str = "iioSnail/bert-base-chinese-medical-ner" # High-quality Chinese medical NER
+    ner_bert_de_model: str = ""
+    ner_confidence_threshold: float = 0.25
 
     # ------------------------------------------------------------------
     # Entity Linking (EL)

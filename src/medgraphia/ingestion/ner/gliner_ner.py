@@ -29,34 +29,11 @@ except ImportError:
 # Natural-language labels passed to GLiNER — one per concept type per language.
 # Multilingual labels improve recall for DE / ZH documents processed by the same model.
 _ENTITY_LABELS: dict[EntityType, list[str]] = {
-    EntityType.DISEASE: [
-        "disease", "medical condition", "disorder", "syndrome",
-        "cancer", "tumor", "infection",
-        "疾病", "病症", "综合征",
-        "Erkrankung", "Krankheit", "Syndrom",
-    ],
-    EntityType.DRUG: [
-        "drug", "medication", "pharmaceutical substance",
-        "medicine", "therapeutic agent", "chemical compound",
-        "药物", "药品", "药剂",
-        "Medikament", "Arzneimittel", "Wirkstoff",
-    ],
-    EntityType.SYMPTOM: [
-        "symptom", "clinical sign", "finding", "complaint",
-        "症状", "体征", "临床表现",
-        "Symptom", "klinisches Zeichen",
-    ],
-    EntityType.GENE: [
-        "gene", "protein", "biomarker", "receptor",
-        "基因", "蛋白质", "生物标志物",
-        "Gen", "Protein", "Biomarker",
-    ],
-    EntityType.PROCEDURE: [
-        "medical procedure", "surgery", "diagnostic test",
-        "therapeutic intervention", "clinical therapy",
-        "手术", "诊断", "治疗",
-        "Operation", "Therapie", "Diagnose",
-    ],
+    EntityType.DISEASE: ["disease", "疾病", "Erkrankung"],
+    EntityType.DRUG: ["drug", "药物", "Medikament"],
+    EntityType.SYMPTOM: ["symptom", "症状", "Symptom"],
+    EntityType.GENE: ["gene", "基因", "Gen"],
+    EntityType.PROCEDURE: ["procedure", "手术", "Operation"],
 }
 
 _ALL_LABELS: list[str] = [

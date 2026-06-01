@@ -113,3 +113,25 @@ class MeSHLoader:
 
     def iter_concepts(self) -> Iterator[dict[str, Any]]:
         yield from self._index.values()
+
+
+# ---------------------------------------------------------------------------
+# Module-level helper (importable by tests)
+# ---------------------------------------------------------------------------
+
+def _resolve_entity_type(tree_numbers: list[str]) -> str:
+    """
+    Map MeSH tree numbers to EntityType value string.
+    Mirrors MeSHLoader._resolve_entity_type but as a standalone function
+    so it can be imported and unit-tested without instantiating a loader.
+    """
+    for tn in tree_numbers:
+        if tn.startswith("C") or tn.startswith("F03"):
+            return EntityType.DISEASE.value
+        if tn.startswith("D"):
+            return EntityType.DRUG.value
+        if (tn.startswith("G") or tn.startswith("A")) and (
+            "gen" in tn.lower() or "prot" in tn.lower()
+        ):
+            return EntityType.GENE.value
+    return EntityType.UNKNOWN.value

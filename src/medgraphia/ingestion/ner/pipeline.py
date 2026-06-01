@@ -87,13 +87,45 @@ class MedicalNERPipeline:
     # ------------------------------------------------------------------
 
     def _run(self, text: str, language: Language) -> list[MentionSpan]:
-        """Run both stages and return deduplicated, confidence-filtered spans."""
+        """Run both stages and return deduplicated, combined spans."""
         gliner_spans = self._gliner.predict(text, language)
         bert_spans = self._bert.predict(text, language)
 
         combined = _merge_spans(gliner_spans, bert_spans)
-        filtered = [s for s in combined if s.confidence >= self._min_confidence]
+        
+        # Final pass: merge adjacent fragments (handle subword splitting)
+        final_merged = self._merge_adjacent_spans(combined)
+
+        filtered = [s for s in final_merged if s.confidence >= self._min_confidence]
         return filtered
+
+    def _merge_adjacent_spans(self, spans: list[MentionSpan]) -> list[MentionSpan]:
+        if not spans:
+            return []
+        # Sort by start offset
+        sorted_spans = sorted(spans, key=lambda s: s.start)
+        merged = []
+        
+        current = sorted_spans[0]
+        for next_span in sorted_spans[1:]:
+            # If spans are of same type and very close (0 or 1 char gap)
+            if (next_span.entity_type == current.entity_type and 
+                next_span.start <= current.end + 1):
+                # Merge them
+                new_text = current.text + next_span.text
+                current = MentionSpan.from_text(
+                    text=new_text,
+                    start=current.start,
+                    end=next_span.end,
+                    entity_type=current.entity_type,
+                    confidence=max(current.confidence, next_span.confidence),
+                    source=f"{current.source}+{next_span.source}"
+                )
+            else:
+                merged.append(current)
+                current = next_span
+        merged.append(current)
+        return merged
 
     def _spans_to_entities(self, spans: list[MentionSpan], chunk: Chunk) -> list[Entity]:
         """
@@ -114,11 +146,16 @@ class MedicalNERPipeline:
 
             # Build a provisional CUI that entity_linker.py will replace
             prov_cui = f"{_MENTION_PREFIX}{span.normalized}"
+            
+            # Ensure the entity_type matches the domain's expected string case
+            # (e.g., "drug" -> "Drug")
+            etype = span.entity_type
+            
             result.append(
                 Entity(
                     cui=prov_cui,
                     label=span.text,
-                    entity_type=span.entity_type,
+                    entity_type=etype,
                     confidence=span.confidence,
                     source_ids=[chunk.source.source_id],
                 )

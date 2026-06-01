@@ -45,6 +45,9 @@ _LABEL_TO_TYPE: dict[str, EntityType] = {
     "condition": EntityType.DISEASE,
     "disorder": EntityType.DISEASE,
     "med_dis": EntityType.DISEASE,
+    "疾病": EntityType.DISEASE,
+    "病症": EntityType.DISEASE,
+    "disease_disorder": EntityType.DISEASE,  # From debug logs
     # Drug / chemical
     "drug": EntityType.DRUG,
     "chemical": EntityType.DRUG,
@@ -53,22 +56,42 @@ _LABEL_TO_TYPE: dict[str, EntityType] = {
     "med": EntityType.DRUG,
     "pharma": EntityType.DRUG,
     "substance": EntityType.DRUG,
+    "medicine": EntityType.DRUG,
+    "药物": EntityType.DRUG,
+    "药品": EntityType.DRUG,
+    "dru": EntityType.DRUG,
+    "m": EntityType.DRUG, # iioSnail often outputs 'M' for all medical entities
     # Symptom / sign
     "symptom": EntityType.SYMPTOM,
     "sign": EntityType.SYMPTOM,
     "finding": EntityType.SYMPTOM,
     "phenotype": EntityType.SYMPTOM,
+    "症状": EntityType.SYMPTOM,
+    "体征": EntityType.SYMPTOM,
+    "sym": EntityType.SYMPTOM,
+    "sign_symptom": EntityType.SYMPTOM,  # From debug logs
     # Gene / protein
     "gene": EntityType.GENE,
     "protein": EntityType.GENE,
     "dna": EntityType.GENE,
     "rna": EntityType.GENE,
     "cell_type": EntityType.GENE,
+    "基因": EntityType.GENE,
+    "蛋白质": EntityType.GENE,
+    "biological_structure": EntityType.GENE, # From debug logs, approximate mapping
     # Procedure
     "procedure": EntityType.PROCEDURE,
     "therapy": EntityType.PROCEDURE,
     "treatment": EntityType.PROCEDURE,
     "test": EntityType.PROCEDURE,
+    "手术": EntityType.PROCEDURE,
+    "治疗": EntityType.PROCEDURE,
+    "检查": EntityType.PROCEDURE,
+    "pro": EntityType.PROCEDURE,
+    "ite": EntityType.PROCEDURE,  # item/test
+    # Generic mappings for Chinese fallback (shibing624 models)
+    "org": EntityType.DRUG,    # Medical companies or drugs often misclassified as ORG
+    "misc": EntityType.DISEASE, # Symptoms/Diseases often misclassified as MISC
 }
 
 
@@ -149,8 +172,21 @@ class BertNER:
             label_key = ent.get("entity_group") or ent.get("entity", "")
             entity_type = _resolve_label(label_key)
             if entity_type is None:
+                # DEBUG INJECTION: Log the rejected label to understand why it failed
+                logger.debug("bert_ner_rejected", lang=language.value, label=label_key, word=ent.get("word", ""))
                 continue
+            
             word = ent.get("word", "")
+            # Clean up BERT subword fragments (e.g., "##pirin" -> "pirin")
+            word = word.replace("##", "").strip()
+            
+            # Chinese space-cleanup: some tokenizers insert spaces between characters
+            if language == Language.ZH:
+                word = word.replace(" ", "")
+                
+            if not word:
+                continue
+
             start = ent.get("start", 0)
             end = ent.get("end", start + len(word))
             score = float(ent.get("score", 1.0))
