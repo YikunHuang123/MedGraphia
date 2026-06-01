@@ -36,9 +36,9 @@
 | Feature | Description |
 |---|---|
 | 🧠 GraphRAG Retrieval | Three-path hybrid: Neo4j subgraph traversal + BGE-M3 dense/sparse vector search + Leiden community summaries — combined via RRF |
-| 🌐 Multilingual (ZH / EN / DE) | All surface forms of the same concept ("心肌梗死 / myocardial infarction / Myokardinfarkt") are aligned to a single UMLS CUI via SapBERT-XLMR — cross-lingual retrieval |
+| 🌐 Multilingual (ZH / EN / DE) | All surface forms of the same concept ("心肌梗死 / myocardial infarction / Myokardinfarkt") are aligned to a single MeSH ID via SapBERT-XLMR — cross-lingual retrieval |
 | 🔗 Mandatory Evidence Citations | Every answer is traceable to a specific chunk, section path, and versioned source — unanswerable questions are refused rather than fabricated |
-| 🏥 Medical NER + Entity Linking | GLiNER-biomed (zero-shot, multilingual) + language-specific fine models (BioBERT EN / ClinicalBERT-CN ZH / GerMedBERT DE) → SapBERT-XLMR linking to UMLS CUI |
+| 🏥 Medical NER + Entity Linking | GLiNER-biomed (zero-shot, multilingual) + language-specific fine models (BioBERT EN / ClinicalBERT-CN ZH / GerMedBERT DE) → SapBERT-XLMR linking to MeSH ID |
 | ⚡ Schema-Constrained Relation Extraction | LLM relation extraction limited to a closed medical schema (TREATS, CAUSES, INTERACTS_WITH, DOSAGE_FOR…) — no hallucinated relationship types |
 | 🛡️ Safety Guardrails | Llama Guard 4 input/output filtering; faithfulness scoring via RAGAS; hard refusal for unanswerable queries; mandatory disclaimer on patient-facing responses |
 | 🔀 Multi-Model LLM Router | Routes by risk level and query complexity: Qwen2.5/DeepSeek (ZH), LeoLM/EuroLLM+BioMistral (DE+medical EN), Claude/GPT-4 (high-risk clinical decisions) |
@@ -70,8 +70,8 @@
                                                                     └─────────┬─────────┘
                                                                               │
                     ┌─────────────────────────────────────────────────────────▼──────────┐
-                    │  Entity Linking: SapBERT-XLMR + BM25 candidates → UMLS CUI         │
-                    │  ZH / EN / DE surface forms → single node (e.g. C0027051 = MI)     │
+                    │  Entity Linking: SapBERT-XLMR + BM25 candidates → MeSH ID         │
+                    │  ZH / EN / DE surface forms → MeSH ID (e.g. D009203 = MI)     │
                     └─────────────────────────────────────┬──────────────────────────────┘
                                                           │
                     ┌─────────────────────────────────────▼──────────────────────────────┐
@@ -167,7 +167,7 @@
 | `Chunk` | Source text chunk with `section_path` + `source_version` | PubMed · Guidelines · Labels |
 | `Community` | Leiden-detected entity cluster with LLM summary | Computed |
 
-Every node carries a `cui` (UMLS CUI) property as the cross-lingual anchor, plus `lang_labels` for ZH/EN/DE surface forms.
+Every node carries a `cui` (MeSH ID) property as the cross-lingual anchor, plus `lang_labels` for ZH/EN/DE surface forms.
 
 ### Relationship Types
 
@@ -198,7 +198,7 @@ Every node carries a `cui` (UMLS CUI) property as the cross-lingual anchor, plus
 | **Object Storage** | MinIO + Apache Iceberg | Raw docs, parse artifacts, provenance snapshots |
 | **Embedding** | BGE-M3 (BAAI) | Dense + sparse + ColBERT; 100+ languages; 8192 token ctx |
 | **Entity NER** | GLiNER-biomed · BioBERT · ClinicalBERT-CN · GerMedBERT | Multi-lang, domain-specialized |
-| **Entity Linking** | SapBERT-XLMR + BM25 | Cross-lingual → UMLS CUI |
+| **Entity Linking** | SapBERT-XLMR + BM25 | Cross-lingual → MeSH ID |
 | **Reranker** | bge-reranker-v2-m3 | Cross-encoder, multilingual |
 | **Community Detection** | Leiden algorithm | Graph clustering for global QA |
 | **Document Parsing** | Docling (EN/DE) · MinerU (ZH) | Section-aware; table / formula extraction |
@@ -245,9 +245,9 @@ A two-stage pipeline extracts medical entities:
 
 This hybrid approach is dramatically cheaper than asking an LLM to perform NER directly over the full corpus.
 
-**Stage 4 — Entity Linking to UMLS CUI**
+**Stage 4 — Entity Linking to MeSH ID**
 
-Each recognized mention is resolved to a UMLS CUI via SapBERT-XLMR (trained on UMLS synonym pairs with contrastive learning):
+Each recognized mention is resolved to a MeSH ID via SapBERT-XLMR (trained on UMLS synonym pairs with contrastive learning):
 
 1. BM25 retrieves the top-50 UMLS concept candidates.
 2. SapBERT cross-encoder reranks them by semantic similarity.
@@ -647,7 +647,8 @@ MedGraphia/
     │   ├── ema_smpc.py             # EMA SmPC XML bulk downloader
     │   ├── fda_dailymed.py         # FDA DailyMed REST API
     │   ├── drugbank.py             # DrugBank connector (academic / commercial license)
-    │   └── umls.py                 # UMLS Metathesaurus loader (MetamorphoSys subset)
+    │   └── mesh.py                 # MeSH Descriptor Index loader (automatic download)
+
     │
     ├── ingestion/                  # Offline build pipeline
     │   ├── pipeline.py             # Prefect / Airflow DAG — stages orchestration
@@ -662,7 +663,7 @@ MedGraphia/
     │   │   ├── biobert_ner.py      # BioBERT / PubMedBERT fine NER (English)
     │   │   ├── clinicalbert_cn.py  # ClinicalBERT-CN BiLSTM+CRF (Chinese EMR)
     │   │   └── germedbert_ner.py   # GerMedBERT / bert-base-german-clinical (German)
-    │   ├── entity_linker.py        # SapBERT-XLMR + BM25 → UMLS CUI cross-lingual alignment
+    │   ├── entity_linker.py        # SapBERT-XLMR + BM25 → MeSH ID cross-lingual alignment
     │   ├── relation_extractor.py   # LLM schema-guided RE (closed relation type set)
     │   ├── community_builder.py    # Leiden algorithm + LLM community summary generation
     │   └── embedder.py             # BGE-M3: dense + sparse + ColBERT (100+ languages)
@@ -772,3 +773,4 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 , and German.
 rman.
 , and German.
+ and German.
