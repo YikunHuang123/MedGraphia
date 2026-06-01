@@ -61,6 +61,7 @@ dependencies = [
 
     # LLM gateway
     "litellm>=1.40.0",
+    "pydantic-ai>=0.0.14",
 
     # Observability
     "langfuse>=2.30.0",

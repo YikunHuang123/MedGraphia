@@ -96,6 +96,10 @@ _EN_FREQ_RULES: list[_FreqRule] = [
     # Flex qXh (q4h, q6h, etc.)
     *_compile_freq("q4h", [r"\bevery\s+4\s*h(?:rs?|ours?)?\b", r"\bq\.?4\.?h\b"]),
     *_compile_freq("q6h", [r"\bevery\s+6\s*h(?:rs?|ours?)?\b", r"\bq\.?6\.?h\b"]),
+    # prn (as needed)
+    *_compile_freq(FHIR_PRN, [r"\bas\s+needed\b", r"\bp\.?r\.?n\.?\b", r"\bwhen\s+required\b"]),
+    # qhs (at bedtime / hora somni)
+    *_compile_freq(FHIR_QHS, [r"\bat\s+bedtime\b", r"\bh\.?s\.?\b", r"\bq\.?h\.?s\.?\b", r"\bbefore\s+sleep\b"]),
 ]
 
 
@@ -128,6 +132,10 @@ _DE_FREQ_RULES: list[_FreqRule] = [
         r"\b1\s*(?:mal|×|x)\s+(?:pro\s+)?Tag\b",
         r"\btäglich\b",
     ]),
+    # prn (bei Bedarf)
+    *_compile_freq(FHIR_PRN, [r"\bbei\s+Bedarf\b", r"\bbei\s+Schmerzen\b"], flags=re.IGNORECASE),
+    # qhs (zur Nacht / zur Schlafenszeit)
+    *_compile_freq(FHIR_QHS, [r"\bzur\s+Nacht\b", r"\bzur\s+Schlafenszeit\b"], flags=re.IGNORECASE),
 ]
 
 

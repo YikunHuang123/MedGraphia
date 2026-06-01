@@ -120,9 +120,10 @@ class EntityLinker:
         concept_index: dict[str, Any] | None = None,
         bm25_top_k: int = 50,
         link_threshold: float = 0.70,
-        sapbert_model: str = "cambridgeltl/SapBERT-from-PubMedBERT-fulltext-mean-token-multilingual",
+        sapbert_model: str = "cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR",
         sapbert_threshold: float = 0.75,
     ) -> None:
+
         self._raw_index: dict[str, Any] = concept_index or {}
         self._bm25_top_k = bm25_top_k
         self._link_threshold = link_threshold
@@ -144,18 +145,24 @@ class EntityLinker:
         cls,
         mesh_dir: str = "data/mesh",
         limit: int | None = None,
+        sapbert_model: str | None = None,
+        sapbert_threshold: float | None = None,
         **kwargs: Any,
     ) -> "EntityLinker":
         """Load MeSH data and return a ready-to-use EntityLinker."""
         from medgraphia.data.mesh import MeSHLoader
         loader = MeSHLoader(storage_dir=mesh_dir)
         try:
-            # We assume MeSH data is already present or was downloaded
             index = loader.load(limit=limit)
             logger.info("el_mesh_loaded", concepts=len(index))
         except Exception as exc:
             logger.warning("el_mesh_load_failed", error=str(exc))
             index = {}
+        
+        # Use provided sapbert settings or fall back to defaults
+        if sapbert_model: kwargs["sapbert_model"] = sapbert_model
+        if sapbert_threshold: kwargs["sapbert_threshold"] = sapbert_threshold
+            
         return cls(concept_index=index, **kwargs)
 
     @classmethod

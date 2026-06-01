@@ -154,18 +154,34 @@ async def _run(
         click.echo("[5/8] Entity linking skipped.")
 
     # ------------------------------------------------------------------
-    # Stages 6–8: Not yet implemented (Phase 4–5)
+    # Stage 6: Relation extraction  (Phase 4)
     # ------------------------------------------------------------------
-    for stage_num, stage_name, skip_flag in [
-        (6, "Relation extraction",  skip_extract),
-        (7, "Embedding",            skip_embed),
-        (8, "Community detection",  skip_community),
-    ]:
-        if skip_flag:
-            click.echo(f"[{stage_num}/8] {stage_name} skipped.")
-        else:
-            click.echo(f"[{stage_num}/8] {stage_name} — not yet implemented (Phase 4+).")
-            logger.info("stage_not_implemented", stage=stage_name)
+    relations = []
+    if not skip_extract:
+        click.echo("[6/8] Extracting relations (LLM schema-guided)…")
+        relations = await _stage_extract(chunks)
+        click.echo(f"      → {len(relations)} relations extracted.")
+    else:
+        click.echo("[6/8] Relation extraction skipped.")
+
+    # ------------------------------------------------------------------
+    # Stage 7: Embedding  (Phase 5 — stub)
+    # ------------------------------------------------------------------
+    if skip_embed:
+        click.echo("[7/8] Embedding skipped.")
+    else:
+        click.echo("[7/8] Embedding — not yet implemented (Phase 5).")
+        logger.info("stage_not_implemented", stage="Embedding")
+
+    # ------------------------------------------------------------------
+    # Stage 8: Community detection  (Phase 4)
+    # ------------------------------------------------------------------
+    if not skip_community:
+        click.echo("[8/8] Running Leiden community detection + LLM summaries…")
+        communities = await _stage_community(chunks, relations)
+        click.echo(f"      → {len(communities)} communities detected.")
+    else:
+        click.echo("[8/8] Community detection skipped.")
 
     click.echo("\n✓ Pipeline complete.\n")
 
@@ -392,5 +408,59 @@ async def _stage_link(chunks: list) -> list:
     return result
 
 
+async def _stage_extract(chunks: list) -> list:
+    """
+    Phase 4 — Stage 6: LLM-based relation extraction.
+
+    For each chunk with ≥ 2 linked entities, calls the configured LLM to identify
+    typed semantic relations between entity pairs.  Falls back gracefully when the
+    LLM is unavailable (returns []).
+    """
+    from medgraphia.ingestion.relation_extractor import RelationExtractor
+
+    extractor = RelationExtractor.from_settings()
+    relations = await extractor.extract_batch(chunks)
+
+    try:
+        await extractor.write_relations_to_neo4j(relations)
+    except Exception as exc:
+        click.echo(
+            f"      ⚠ Neo4j relation write failed ({type(exc).__name__}: {exc})"
+        )
+
+    return relations
+
+
+async def _stage_community(chunks: list, relations: list) -> list:
+    """
+    Phase 4 — Stage 8: Leiden community detection + LLM community summaries.
+
+    Builds a graph from the extracted relations, runs Leiden (or a networkx
+    fallback), calls the LLM to generate a clinical summary per community, and
+    writes Community nodes + MEMBER_OF edges to Neo4j.
+    """
+    from medgraphia.ingestion.community_builder import CommunityBuilder
+
+    entity_map = {
+        e.cui: e
+        for chunk in chunks
+        for e in chunk.entities
+        if not e.cui.startswith("MENTION:")
+    }
+
+    builder = CommunityBuilder.from_settings()
+    communities = await builder.build_from_relations(relations, entity_map)
+
+    try:
+        await builder.write_communities_to_neo4j(communities)
+    except Exception as exc:
+        click.echo(
+            f"      ⚠ Neo4j community write failed ({type(exc).__name__}: {exc})"
+        )
+
+    return communities
+
+
 if __name__ == "__main__":
     main()
+ain()

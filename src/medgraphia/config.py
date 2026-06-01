@@ -56,8 +56,9 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # LLM
     # ------------------------------------------------------------------
-    llm_provider: Literal["deepseek", "openai", "anthropic", "ollama", "local"] = "ollama"
-    llm_model: str = "qwen2.5:3b"
+    llm_provider: Literal["deepseek", "openai", "anthropic", "ollama", "local"] = "deepseek"
+    # llm_model: str = "qwen2.5:3b"
+    llm_model: str = "deepseek-chat"
     llm_base_url: str = ""
     llm_max_tokens: int = 2048
     llm_temperature: float = 0.1
@@ -69,6 +70,8 @@ class Settings(BaseSettings):
 
     # Model used for community summary generation; defaults to llm_model if empty
     community_summary_llm: str = ""
+    community_min_size: int = 3
+    community_resolution: float = 1.0
 
     # ------------------------------------------------------------------
     # Safety guardrails
