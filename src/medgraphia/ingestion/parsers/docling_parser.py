@@ -67,14 +67,14 @@ class DoclingParser:
         # Modern Docling: export to Markdown (includes tables, structure)
         full_text = result.document.export_to_markdown()
         
-        # In this mode, we treat the markdown as the full text.
-        # Future enhancement: parse markdown into sections.
-        sections = [] 
+        # Split markdown into structured sections
+        sections = _parse_markdown_sections(full_text)
 
         logger.info(
             "docling_parsed",
             file=str(path),
             chars=len(full_text),
+            sections=len(sections),
         )
         return RawDocument(
             source=source_meta,
@@ -94,8 +94,52 @@ class DoclingParser:
 
 
 # ---------------------------------------------------------------------------
-# Section extraction from Docling JSON
+# Section extraction from Docling JSON / Markdown
 # ---------------------------------------------------------------------------
+
+def _parse_markdown_sections(md_text: str) -> list[ParsedSection]:
+    """
+    Parse a Markdown string into ParsedSection objects based on headings.
+    Works for Docling and MinerU outputs.
+    """
+    sections: list[ParsedSection] = []
+    current_path: list[str] = []
+    current_lines: list[str] = []
+
+    def flush() -> None:
+        if current_lines:
+            content = "\n".join(current_lines).strip()
+            if content:
+                sections.append(
+                    ParsedSection(
+                        section_path=" > ".join(current_path) if current_path else "Preamble",
+                        title=current_path[-1] if current_path else "",
+                        content=content,
+                    )
+                )
+
+    for line in md_text.splitlines():
+        # Look for ATX headers like # Title, ## Subtitle
+        if line.startswith("#"):
+            flush()
+            current_lines = []
+            # Calculate heading level (number of #)
+            level = 0
+            for char in line:
+                if char == "#":
+                    level += 1
+                else:
+                    break
+            
+            heading = line.lstrip("#").strip()
+            # Update current path based on level
+            current_path = current_path[: level - 1] + [heading]
+        else:
+            current_lines.append(line)
+
+    flush()
+    return sections
+
 
 def _extract_sections(doc_json: dict) -> list[ParsedSection]:
     """

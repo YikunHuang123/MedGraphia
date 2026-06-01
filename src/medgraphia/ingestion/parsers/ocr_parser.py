@@ -4,11 +4,6 @@ Used when Docling or MinerU fail or when the PDF is image-only (no text layer).
 
 Tesseract is auto-selected based on detected language.
 PaddleOCR is used for Chinese documents (better ZH accuracy than Tesseract).
-
-Install:
-  pip install pytesseract Pillow pdf2image
-  apt-get install tesseract-ocr tesseract-ocr-eng tesseract-ocr-deu tesseract-ocr-chi-sim
-  pip install paddleocr  (optional, for ZH)
 """
 from __future__ import annotations
 

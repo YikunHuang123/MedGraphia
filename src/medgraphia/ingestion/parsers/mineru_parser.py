@@ -2,9 +2,6 @@
 MinerU-based PDF parser for Chinese academic documents.
 MinerU is optimised for double-column Chinese layouts, formulas, and academic PDFs.
 It produces a structured JSON (similar to Docling) with section hierarchy.
-
-Install: pip install magic-pdf[full]
-GitHub:  https://github.com/opendatalab/MinerU
 """
 from __future__ import annotations
 

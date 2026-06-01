@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Iterator
 
-from medgraphia.domain import Language, RawDocument, SourceMeta
+from medgraphia.domain import Language, ParsedSection, RawDocument, SourceMeta
 from medgraphia.logger import get_logger
 
 logger = get_logger(__name__)
@@ -77,32 +77,31 @@ def _text(elem: ET.Element, path: str) -> str:
 def _parse_drug_element(drug: ET.Element) -> RawDocument:
     drugbank_id = _text(drug, "db:drugbank-id[@primary='true']") or _text(drug, "db:drugbank-id")
     name = _text(drug, "db:name")
-    description = _text(drug, "db:description")
-    indication = _text(drug, "db:indication")
-    mechanism = _text(drug, "db:mechanism-of-action")
-    pharmacodynamics = _text(drug, "db:pharmacodynamics")
-    toxicity = _text(drug, "db:toxicity")
-
-    # Synonyms
-    synonyms = [
-        el.text or ""
-        for el in drug.findall("db:synonyms/db:synonym", _NS)
+    
+    # Extract structural fields
+    fields = [
+        ("Description", "db:description"),
+        ("Indication", "db:indication"),
+        ("Mechanism of Action", "db:mechanism-of-action"),
+        ("Pharmacodynamics", "db:pharmacodynamics"),
+        ("Toxicity", "db:toxicity"),
+        ("Metabolism", "db:metabolism"),
+        ("Absorption", "db:absorption"),
     ]
+    
+    parsed_sections: list[ParsedSection] = []
+    for label, path in fields:
+        content = _text(drug, path)
+        if content:
+            parsed_sections.append(
+                ParsedSection(
+                    section_path=label,
+                    title=label,
+                    content=content
+                )
+            )
 
-    # ATC codes
-    atc_codes = [
-        el.get("code", "")
-        for el in drug.findall("db:atc-codes/db:atc-code", _NS)
-    ]
-
-    sections = [
-        f"Description: {description}",
-        f"Indication: {indication}",
-        f"Mechanism of Action: {mechanism}",
-        f"Pharmacodynamics: {pharmacodynamics}",
-        f"Toxicity: {toxicity}",
-    ]
-    full_text = "\n\n".join(s for s in sections if s.split(": ", 1)[1].strip())
+    full_text = "\n\n".join(f"{s.title}: {s.content}" for s in parsed_sections)
 
     source = SourceMeta(
         source_id=f"drugbank:{drugbank_id}",
@@ -115,5 +114,6 @@ def _parse_drug_element(drug: ET.Element) -> RawDocument:
         language=Language.EN,
         title=name,
         full_text=full_text,
+        sections=parsed_sections,
         format="xml",
     )

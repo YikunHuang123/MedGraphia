@@ -16,7 +16,7 @@ from pathlib import Path
 import aiohttp
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from medgraphia.domain import Language, RawDocument, SourceMeta
+from medgraphia.domain import Language, ParsedSection, RawDocument, SourceMeta
 from medgraphia.logger import get_logger
 
 logger = get_logger(__name__)
@@ -117,32 +117,48 @@ _SPL_NS = {
 
 
 def _parse_spl_xml(xml_bytes: bytes, set_id: str, drug_name: str) -> RawDocument:
-    """Extract title and main sections from an FDA SPL XML document."""
+    """Extract title and structured sections from an FDA SPL XML document."""
     root = ET.fromstring(xml_bytes)
     ns = "urn:hl7-org:v3"
 
     title_el = root.find(f".//{{{ns}}}title")
-    title = (title_el.text or drug_name) if title_el is not None else drug_name
+    main_title = (title_el.text or drug_name).strip() if title_el is not None else drug_name
 
-    sections: list[str] = []
-    for section in root.findall(f".//{{{ns}}}section"):
-        text_el = section.find(f".//{{{ns}}}text")
-        if text_el is not None:
-            raw_text = ET.tostring(text_el, encoding="unicode", method="text")
-            sections.append(raw_text.strip())
+    parsed_sections: list[ParsedSection] = []
+    
+    # Iterate through all sections that contain a text block
+    for section_el in root.findall(f".//{{{ns}}}section"):
+        # 1. Extract section title (e.g., "CONTRAINDICATIONS")
+        title_node = section_el.find(f"./{{{ns}}}title")
+        section_title = (title_node.text.strip() if title_node is not None and title_node.text else "Untitled Section")
+        
+        # 2. Extract plain text content from the section
+        text_node = section_el.find(f"./{{{ns}}}text")
+        if text_node is not None:
+            # Use itertext() to get all nested text content accurately
+            content = "".join(text_node.itertext()).strip()
+            if content:
+                parsed_sections.append(
+                    ParsedSection(
+                        section_path=section_title,
+                        title=section_title,
+                        content=content
+                    )
+                )
 
-    full_text = "\n\n".join(sections)
+    full_text = "\n\n".join(s.content for s in parsed_sections)
 
     source = SourceMeta(
         source_id=f"dailymed:{set_id}",
-        source_title=title,
+        source_title=main_title,
         source_url=f"https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid={set_id}",
         language=Language.EN,
     )
     return RawDocument(
         source=source,
         language=Language.EN,
-        title=title,
+        title=main_title,
         full_text=full_text,
+        sections=parsed_sections,
         format="xml",
     )

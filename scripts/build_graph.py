@@ -114,10 +114,20 @@ async def _run(
         click.echo("[2/8] Parse skipped.")
 
     # ------------------------------------------------------------------
-    # Stages 3–8: Not yet implemented (Phase 2–5)
+    # Stage 3: Chunk + Normalise + Write Chunks to Neo4j  (Phase 2)
+    # ------------------------------------------------------------------
+    chunks = []
+    if not skip_chunk:
+        click.echo("[3/8] Chunking and normalising documents…")
+        chunks = await _stage_chunk(parsed_docs)
+        click.echo(f"      → {len(chunks)} chunks produced and written to Neo4j.")
+    else:
+        click.echo("[3/8] Chunk skipped.")
+
+    # ------------------------------------------------------------------
+    # Stages 4–8: Not yet implemented (Phase 3–5)
     # ------------------------------------------------------------------
     for stage_num, stage_name, skip_flag in [
-        (3, "Chunking",             skip_chunk),
         (4, "NER",                  skip_ner),
         (5, "Entity linking",       skip_link),
         (6, "Relation extraction",  skip_extract),
@@ -127,7 +137,7 @@ async def _run(
         if skip_flag:
             click.echo(f"[{stage_num}/8] {stage_name} skipped.")
         else:
-            click.echo(f"[{stage_num}/8] {stage_name} — not yet implemented (Phase 2+).")
+            click.echo(f"[{stage_num}/8] {stage_name} — not yet implemented (Phase 3+).")
             logger.info("stage_not_implemented", stage=stage_name)
 
     click.echo("\n✓ Pipeline complete.\n")
@@ -252,6 +262,46 @@ def _stage_parse(raw_docs: list) -> list:
                 
     click.echo(f"      → {len(parsed)} documents parsed.")
     return parsed
+
+
+async def _stage_chunk(docs: list) -> list:
+    """
+    Phase 2: Section-aware chunking + medical normalisation + Neo4j write.
+
+    For each document:
+      1. Ensure the Document node exists in Neo4j (upsert).
+      2. Chunk with MedicalChunker (section_path provenance preserved).
+      3. Normalise each chunk's text (frequency / dosage unit normalisation).
+      4. Write each Chunk node to Neo4j and link it to its parent Document.
+
+    Neo4j connection is attempted but failures are logged and skipped so the
+    script can still run when Neo4j is not available (e.g., in unit tests).
+    """
+    from medgraphia.ingestion.chunker import MedicalChunker
+    from medgraphia.ingestion.normalizer import MedicalNormalizer
+
+    chunker    = MedicalChunker()
+    normalizer = MedicalNormalizer()
+    all_chunks = []
+
+    for doc in docs:
+        chunks = chunker.chunk(doc)
+        chunks = [normalizer.normalize_chunk(c) for c in chunks]
+        all_chunks.extend(chunks)
+
+        # Write to Neo4j — gracefully skip if Neo4j is unavailable
+        try:
+            from medgraphia.graph.queries import create_chunk, upsert_document
+            await upsert_document(doc)
+            for chunk in chunks:
+                await create_chunk(chunk)
+        except Exception as exc:
+            click.echo(
+                f"      ⚠ Neo4j write failed for {doc.doc_id[:8]}… "
+                f"({type(exc).__name__}: {exc})"
+            )
+
+    return all_chunks
 
 
 if __name__ == "__main__":

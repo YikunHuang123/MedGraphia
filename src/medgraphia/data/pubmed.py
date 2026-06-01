@@ -19,7 +19,7 @@ import aiohttp
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from medgraphia.config import get_settings
-from medgraphia.domain import Language, RawDocument, SourceMeta
+from medgraphia.domain import Language, ParsedSection, RawDocument, SourceMeta
 from medgraphia.logger import get_logger
 
 logger = get_logger(__name__)
@@ -169,12 +169,36 @@ def _parse_article(article: ET.Element) -> RawDocument:
     title_el = article.find(".//ArticleTitle")
     title = title_el.text or "" if title_el is not None else ""
 
-    # Concatenate AbstractText sections (structured abstracts have multiple)
-    abstract_parts = [
-        (el.text or "")
-        for el in article.findall(".//AbstractText")
-    ]
-    abstract = " ".join(p.strip() for p in abstract_parts if p.strip())
+    # Extract structured abstract sections
+    parsed_sections: list[ParsedSection] = []
+    abstract_texts = article.findall(".//AbstractText")
+    
+    for el in abstract_texts:
+        label = el.get("Label")
+        # NLM sometimes uses NlmCategory instead of Label
+        if not label:
+            label = el.get("NlmCategory")
+            
+        content = (el.text or "").strip()
+        if not content:
+            continue
+            
+        section_title = label.title() if label else "Abstract"
+        
+        # If last section has the same title, append to it (sometimes PubMed splits long paragraphs)
+        if parsed_sections and parsed_sections[-1].title == section_title:
+            parsed_sections[-1].content += "\n" + content
+        else:
+            parsed_sections.append(
+                ParsedSection(
+                    section_path=section_title,
+                    title=section_title,
+                    content=content
+                )
+            )
+
+    # Full abstract text for backward compatibility
+    abstract = "\n\n".join(s.content for s in parsed_sections)
 
     # Journal + year
     journal_el = article.find(".//Journal/Title")
@@ -202,5 +226,6 @@ def _parse_article(article: ET.Element) -> RawDocument:
         language=language,
         title=title,
         abstract=abstract,
+        sections=parsed_sections,
         format="text",
     )
