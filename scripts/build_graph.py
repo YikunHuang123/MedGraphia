@@ -125,11 +125,38 @@ async def _run(
         click.echo("[3/8] Chunk skipped.")
 
     # ------------------------------------------------------------------
-    # Stages 4–8: Not yet implemented (Phase 3–5)
+    # Stage 4: NER  (Phase 3)
+    # ------------------------------------------------------------------
+    if not skip_ner:
+        click.echo("[4/8] Running multi-language NER…")
+        chunks = await _stage_ner(chunks)
+        n_entities = sum(len(c.entities) for c in chunks)
+        click.echo(f"      → {n_entities} entity mentions extracted across {len(chunks)} chunks.")
+    else:
+        click.echo("[4/8] NER skipped.")
+
+    # ------------------------------------------------------------------
+    # Stage 5: Entity linking  (Phase 3)
+    # ------------------------------------------------------------------
+    if not skip_link:
+        click.echo("[5/8] Linking entities to UMLS CUIs…")
+        chunks = await _stage_link(chunks)
+        linked = sum(
+            1 for c in chunks for e in c.entities
+            if not e.cui.startswith("MENTION:")
+        )
+        unlinked = sum(
+            1 for c in chunks for e in c.entities
+            if e.cui.startswith("MENTION:")
+        )
+        click.echo(f"      → {linked} linked to UMLS CUI, {unlinked} kept as provisional mentions.")
+    else:
+        click.echo("[5/8] Entity linking skipped.")
+
+    # ------------------------------------------------------------------
+    # Stages 6–8: Not yet implemented (Phase 4–5)
     # ------------------------------------------------------------------
     for stage_num, stage_name, skip_flag in [
-        (4, "NER",                  skip_ner),
-        (5, "Entity linking",       skip_link),
         (6, "Relation extraction",  skip_extract),
         (7, "Embedding",            skip_embed),
         (8, "Community detection",  skip_community),
@@ -137,7 +164,7 @@ async def _run(
         if skip_flag:
             click.echo(f"[{stage_num}/8] {stage_name} skipped.")
         else:
-            click.echo(f"[{stage_num}/8] {stage_name} — not yet implemented (Phase 3+).")
+            click.echo(f"[{stage_num}/8] {stage_name} — not yet implemented (Phase 4+).")
             logger.info("stage_not_implemented", stage=stage_name)
 
     click.echo("\n✓ Pipeline complete.\n")
@@ -302,6 +329,67 @@ async def _stage_chunk(docs: list) -> list:
             )
 
     return all_chunks
+
+
+async def _stage_ner(chunks: list) -> list:
+    """
+    Phase 3 — Stage 4: Multi-language NER.
+
+    Runs the two-stage NER pipeline (GLiNER + optional BERT) on every chunk and
+    populates chunk.entities with provisional MENTION: CUIs.
+    Falls back gracefully if neither model is available.
+    """
+    from medgraphia.ingestion.ner import build_pipeline_from_settings
+    pipeline = build_pipeline_from_settings()
+
+    result = []
+    for chunk in chunks:
+        try:
+            result.append(pipeline.extract(chunk))
+        except Exception as exc:
+            click.echo(
+                f"      ⚠ NER failed for chunk {chunk.chunk_id[:8]}… "
+                f"({type(exc).__name__}: {exc})"
+            )
+            result.append(chunk)
+
+    return result
+
+
+async def _stage_link(chunks: list) -> list:
+    """
+    Phase 3 — Stage 5: Entity linking.
+
+    Resolves MENTION: CUI placeholders to real MeSH IDs using BM25 + SapBERT.
+    Writes linked entities and MENTIONED_IN edges to Neo4j (skips on unavailability).
+    """
+    from medgraphia.ingestion.entity_linker import EntityLinker
+    cfg = get_settings()
+
+    # Build linker — tries to load MeSH; downloads if missing.
+    linker = EntityLinker.from_mesh(
+        mesh_dir=cfg.mesh_dir,
+        bm25_top_k=cfg.el_bm25_top_k,
+        link_threshold=cfg.el_link_threshold,
+        sapbert_model=cfg.el_sapbert_model,
+        sapbert_threshold=cfg.el_sapbert_threshold,
+    )
+    linker.build_index()
+
+    result = []
+    for chunk in chunks:
+        try:
+            linked_chunk = linker.link_chunk(chunk)
+            await linker.write_entities_to_neo4j(linked_chunk)
+            result.append(linked_chunk)
+        except Exception as exc:
+            click.echo(
+                f"      ⚠ EL failed for chunk {chunk.chunk_id[:8]}… "
+                f"({type(exc).__name__}: {exc})"
+            )
+            result.append(chunk)
+
+    return result
 
 
 if __name__ == "__main__":

@@ -117,6 +117,25 @@ class Settings(BaseSettings):
     drug_label_limit: int = 30
 
     # ------------------------------------------------------------------
+    # NER (Named Entity Recognition)
+    # ------------------------------------------------------------------
+    ner_gliner_model: str = "urchade/gliner_mediumv2.1"
+    ner_gliner_threshold: float = 0.45
+    ner_bert_en_model: str = "d4data/biomedical-ner-all"
+    ner_bert_zh_model: str = "uer/roberta-base-finetuned-cluener2020-chinese"
+    ner_bert_de_model: str = ""          # empty = skip BERT precision pass for DE
+    ner_confidence_threshold: float = 0.40  # minimum confidence to keep a span
+
+    # ------------------------------------------------------------------
+    # Entity Linking (EL)
+    # ------------------------------------------------------------------
+    el_sapbert_model: str = "cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR"
+    el_bm25_top_k: int = 50             # BM25 candidate pool size
+    el_link_threshold: float = 0.70     # minimum score to accept a CUI match
+    el_sapbert_threshold: float = 0.75  # minimum SapBERT cosine to consider confident
+    mesh_dir: str = "data/mesh"         # path to MeSH d2024.bin
+
+    # ------------------------------------------------------------------
     # Privacy / compliance
     # ------------------------------------------------------------------
     pii_deidentify: bool = False

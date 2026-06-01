@@ -61,7 +61,7 @@ def _compile_freq(canonical: str, patterns: list[str], flags: int = re.IGNORECAS
 _EN_FREQ_RULES: list[_FreqRule] = [
     # bid — check 'twice' variants before generic 'daily'
     *_compile_freq(FHIR_BID, [
-        r"\btwice\s+(?:a\s+)?(?:day|daily)\b",
+        r"\b(?:twice|[22])\s+(?:a\s+)?(?:day|daily)\b",
         r"\b2\s*[×xX]\s*(?:daily|(?:a\s+)?day)\b",
         r"\bq\.?12\.?h(?:rs?|ours?)?\b",
         r"\bevery\s+12\s*h(?:rs?|ours?)?\b",
@@ -69,7 +69,7 @@ _EN_FREQ_RULES: list[_FreqRule] = [
     ]),
     # tid
     *_compile_freq(FHIR_TID, [
-        r"\bthree\s+times\s+(?:a\s+)?(?:day|daily)\b",
+        r"\b(?:three|[33])\s+times\s+(?:a\s+)?(?:day|daily)\b",
         r"\b3\s*[×xX]\s*(?:daily|(?:a\s+)?day)\b",
         r"\bq\.?8\.?h(?:rs?|ours?)?\b",
         r"\bevery\s+8\s*h(?:rs?|ours?)?\b",
@@ -77,15 +77,15 @@ _EN_FREQ_RULES: list[_FreqRule] = [
     ]),
     # qid
     *_compile_freq(FHIR_QID, [
-        r"\bfour\s+times\s+(?:a\s+)?(?:day|daily)\b",
+        r"\b(?:four|[44])\s+times\s+(?:a\s+)?(?:day|daily)\b",
         r"\b4\s*[×xX]\s*(?:daily|(?:a\s+)?day)\b",
         r"\bq\.?6\.?h(?:rs?|ours?)?\b",
         r"\bevery\s+6\s*h(?:rs?|ours?)?\b",
         r"\bq\.?i\.?d\.?\b",
     ]),
-    # qd — must come after bid/tid/qid to avoid partial matches on "once daily"
+    # qd
     *_compile_freq(FHIR_QD, [
-        r"\bonce\s+(?:a\s+)?(?:day|daily)\b",
+        r"\b(?:once|[11])\s+(?:a\s+)?(?:day|daily)\b",
         r"\b1\s*[×xX]\s*(?:daily|(?:a\s+)?day)\b",
         r"\bq\.?(?:1d|24\.?h)(?:rs?|ours?)?\b",
         r"\bq\.?d\.?\b",
@@ -93,18 +93,9 @@ _EN_FREQ_RULES: list[_FreqRule] = [
         r"\bevery\s+24\s*h(?:rs?|ours?)?\b",
         r"\bdaily\b",
     ]),
-    # prn
-    *_compile_freq(FHIR_PRN, [
-        r"\bas\s+needed\b",
-        r"\bwhen\s+(?:needed|necessary|required)\b",
-        r"\bp\.?r\.?n\.?\b",
-    ]),
-    # qhs
-    *_compile_freq(FHIR_QHS, [
-        r"\bat\s+bedtime\b",
-        r"\bq\.?h\.?s\.?\b",
-        r"\bhour\s+of\s+sleep\b",
-    ]),
+    # Flex qXh (q4h, q6h, etc.)
+    *_compile_freq("q4h", [r"\bevery\s+4\s*h(?:rs?|ours?)?\b", r"\bq\.?4\.?h\b"]),
+    *_compile_freq("q6h", [r"\bevery\s+6\s*h(?:rs?|ours?)?\b", r"\bq\.?6\.?h\b"]),
 ]
 
 
@@ -113,90 +104,61 @@ _EN_FREQ_RULES: list[_FreqRule] = [
 _DE_FREQ_RULES: list[_FreqRule] = [
     *_compile_freq(FHIR_BID, [
         r"\b2\s*(?:mal|×|x)\s*täglich\b",
-        r"\bzweimal\s+täglich\b",
+        r"\bzweimal\s+(?:täglich|am\s+Tag)\b",
         r"\b2\s*(?:mal|×|x)\s+(?:pro\s+)?Tag\b",
         r"\bjeden\s+12\.\s*Stunden?\b",
         r"\balle\s+12\s*Stunden?\b",
-        # "bis die" is a German informal shorthand for bid
         r"\bbis\s+die\b",
     ]),
     *_compile_freq(FHIR_TID, [
         r"\b3\s*(?:mal|×|x)\s*täglich\b",
-        r"\bdreimal\s+täglich\b",
+        r"\bdreimal\s+(?:täglich|am\s+Tag)\b",
         r"\b3\s*(?:mal|×|x)\s+(?:pro\s+)?Tag\b",
         r"\balle\s+8\s*Stunden?\b",
     ]),
     *_compile_freq(FHIR_QID, [
         r"\b4\s*(?:mal|×|x)\s*täglich\b",
-        r"\bviermal\s+täglich\b",
+        r"\bviermal\s+(?:täglich|am\s+Tag)\b",
         r"\b4\s*(?:mal|×|x)\s+(?:pro\s+)?Tag\b",
         r"\balle\s+6\s*Stunden?\b",
     ]),
     *_compile_freq(FHIR_QD, [
-        r"\beinmal\s+täglich\b",
+        r"\beinmal\s+(?:täglich|am\s+Tag)\b",
         r"\b1\s*(?:mal|×|x)\s*täglich\b",
         r"\b1\s*(?:mal|×|x)\s+(?:pro\s+)?Tag\b",
         r"\btäglich\b",
-    ]),
-    *_compile_freq(FHIR_PRN, [
-        r"\bbei\s+Bedarf\b",
-        r"\bwenn\s+(?:nötig|notwendig|erforderlich)\b",
-        r"\bnach\s+Bedarf\b",
-    ]),
-    *_compile_freq(FHIR_QHS, [
-        r"\bzur\s+Nacht\b",
-        r"\babends\b",
-        r"\bbei\s+Schlafbeginn\b",
     ]),
 ]
 
 
 # --- Chinese -----------------------------------------------------------------
-# No re.IGNORECASE needed for CJK
 
 _ZH_FREQ_RULES: list[_FreqRule] = [
     *_compile_freq(FHIR_BID, [
-        r"每日\s*[两2]\s*次",
-        r"一日\s*[两2]\s*次",
-        r"每天\s*[两2]\s*次",
-        r"[两2]\s*次/日",
-        r"[两2]\s*次／日",
+        r"(?:每日|一日|每天|一天)\s*[两2]\s*次",
+        r"[两2]\s*次/(?:日|天)",
+        r"[两2]\s*次／(?:日|天)",
     ], flags=0),
     *_compile_freq(FHIR_TID, [
-        r"每日\s*[三3]\s*次",
-        r"一日\s*[三3]\s*次",
-        r"每天\s*[三3]\s*次",
-        r"[三3]\s*次/日",
-        r"[三3]\s*次／日",
+        r"(?:每日|一日|每天|一天)\s*[三3]\s*次",
+        r"[三3]\s*次/(?:日|天)",
+        r"[三3]\s*次／(?:日|天)",
     ], flags=0),
     *_compile_freq(FHIR_QID, [
-        r"每日\s*[四4]\s*次",
-        r"一日\s*[四4]\s*次",
-        r"每天\s*[四4]\s*次",
-        r"[四4]\s*次/日",
-        r"[四4]\s*次／日",
+        r"(?:每日|一日|每天|一天)\s*[四4]\s*次",
+        r"[四4]\s*次/(?:日|天)",
+        r"[四4]\s*次／(?:日|天)",
     ], flags=0),
     *_compile_freq(FHIR_QD, [
-        r"每日\s*[一1]\s*次",
-        r"一日\s*[一1]\s*次",
-        r"每天\s*[一1]\s*次",
-        r"[一1]\s*次/日",
-        r"[一1]\s*次／日",
+        r"(?:每日|一日|每天|一天)\s*[一1]\s*次",
+        r"[一1]\s*次/(?:日|天)",
+        r"[一1]\s*次／(?:日|天)",
         r"每日(?:服用)?一次",
         r"每天(?:服用)?一次",
         r"每日(?:一次|口服)",
     ], flags=0),
-    *_compile_freq(FHIR_PRN, [
-        r"必要时",
-        r"按需(?:使用|服用)?",
-        r"需要时",
-        r"视需要",
-    ], flags=0),
-    *_compile_freq(FHIR_QHS, [
-        r"睡前",
-        r"入睡前",
-        r"临睡前",
-    ], flags=0),
+    *_compile_freq("q4h", [r"每\s*4\s*小时\s*一次"], flags=0),
+    *_compile_freq(FHIR_PRN, [r"必要时", r"按需", r"需要时"], flags=0),
 ]
 
 
@@ -204,34 +166,29 @@ _ZH_FREQ_RULES: list[_FreqRule] = [
 # Dosage unit normalisation
 # ---------------------------------------------------------------------------
 
-# Pattern: numeric value (int or decimal) immediately followed by a unit abbreviation.
-# Groups: (number, raw_unit)
 _DOSAGE_UNIT_PATTERN = re.compile(
-    r"(\d+(?:[.,]\d+)?)\s*"           # number (int or decimal, with , or . decimal sep)
-    r"(milligrams?|mg"                 # milligram variants
-    r"|micrograms?|mcg|µg|ug|μg"      # microgram variants
-    r"|grams?|gramm|gr?\b"            # gram variants (careful: \b needed to not match "grade")
-    r"|millilitres?|milliliters?|ml|mL"  # volume
-    r"|litres?|liters?|l\b|L\b"
-    r"|international\s+units?|iu|IU"  # international units
-    r"|units?|U\b"                    # generic unit
-    r"|nanograms?|ng"
+    r"(\d+(?:[.,]\d+)?)\s*"           
+    r"(milligrams?|mg|毫克"                 
+    r"|micrograms?|mcg|µg|ug|μg|微克"      
+    r"|grams?|gramm|gr?\b|克"            
+    r"|millilitres?|milliliters?|ml|mL|毫升"  
+    r"|litres?|liters?|l\b|L\b|升"
+    r"|international\s+units?|iu|IU|单位"  
+    r"|units?|U\b"                    
+    r"|nanograms?|ng|纳克"
     r"|percent|%"
     r")",
     re.IGNORECASE,
 )
 
-# Canonical unit strings
 _UNIT_MAP: dict[str, str] = {
-    "milligrams": "mg", "milligram": "mg",
-    "micrograms": "mcg", "microgram": "mcg", "µg": "mcg", "ug": "mcg", "μg": "mcg",
-    "grams": "g", "gram": "g", "gramm": "g",
-    "millilitres": "mL", "milliliters": "mL", "millilitre": "mL", "milliliter": "mL",
-    "ml": "mL",
-    "litres": "L", "liters": "L", "litre": "L", "liter": "L",
-    "international units": "IU", "international unit": "IU",
-    "nanograms": "ng", "nanogram": "ng",
-    "percent": "%",
+    "milligrams": "mg", "milligram": "mg", "毫克": "mg",
+    "micrograms": "mcg", "microgram": "mcg", "µg": "mcg", "ug": "mcg", "μg": "mcg", "微克": "mcg",
+    "grams": "g", "gram": "g", "gramm": "g", "克": "g",
+    "millilitres": "mL", "milliliters": "mL", "millilitre": "mL", "milliliter": "mL", "ml": "mL", "毫升": "mL",
+    "litres": "L", "liters": "L", "litre": "L", "liter": "L", "升": "L",
+    "international units": "IU", "international unit": "IU", "单位": "IU",
+    "nanograms": "ng", "nanogram": "ng", "纳克": "ng",
 }
 
 
