@@ -178,7 +178,7 @@ class CommunityBuilder:
     def from_settings(cls) -> "CommunityBuilder":
         """Construct from the global Settings singleton."""
         from medgraphia.config import get_settings
-        from medgraphia.generation.providers.llm_client import get_model
+        from medgraphia.llm.client import get_model
 
         cfg = get_settings()
         # Use a specific model for summaries if configured, otherwise default

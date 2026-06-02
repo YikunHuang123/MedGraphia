@@ -100,6 +100,10 @@ enterprise = [
     "minio>=7.2.0",
     "pyarrow>=16.0.0",
 ]
+generation = [
+    # DSPy TypedPredictor support (optional — prompts.py falls back without it)
+    "dspy-ai>=2.5.0",
+]
 
 [project.scripts]
 medgraphia-api = "medgraphia.api:run"

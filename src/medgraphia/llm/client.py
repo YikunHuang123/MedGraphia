@@ -20,6 +20,8 @@ logger = get_logger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
+from medgraphia.llm.gateway import LLMProvider
+
 # ---------------------------------------------------------------------------
 # pydantic-ai Model Factory
 # ---------------------------------------------------------------------------
@@ -27,35 +29,49 @@ T = TypeVar("T", bound=BaseModel)
 def get_model(model_override: str | None = None) -> Model:
     """
     Create a pydantic-ai Model instance based on project settings.
-    Supports OpenAI, DeepSeek, and Ollama (via OpenAI-compatible API).
+    Supports OpenAI, DeepSeek, Anthropic, and Ollama (via OpenAI-compatible API).
     """
     from medgraphia.config import get_settings
     cfg = get_settings()
     
-    provider = cfg.llm_provider
+    # Parse provider into our standard enum
+    try:
+        provider = LLMProvider(cfg.llm_provider)
+    except ValueError:
+        provider = LLMProvider.OLLAMA
+
     model_name = model_override or cfg.llm_model
     base_url = cfg.llm_base_url
-    api_key = ""
 
-    if provider == "openai":
-        api_key = cfg.openai_api_key.get_secret_value()
-        base_url = cfg.openai_base_url or "https://api.openai.com/v1"
-    elif provider == "deepseek":
-        api_key = cfg.deepseek_api_key.get_secret_value()
-        base_url = "https://api.deepseek.com"
-    elif provider == "ollama":
-        # Ollama's OpenAI-compatible endpoint
-        base_url = base_url or "http://localhost:11434/v1"
-        api_key = "ollama"
-    elif provider == "anthropic":
-        # Note: If using Anthropic, you'd use AnthropicModel from pydantic_ai.models.anthropic
+    def get_val(attr_name: str) -> str | None:
+        obj = getattr(cfg, attr_name, None)
+        if obj and hasattr(obj, "get_secret_value"):
+            return obj.get_secret_value()
+        return None
+
+    # Handle Anthropic separately as pydantic-ai uses a specific class
+    if provider == LLMProvider.ANTHROPIC:
         from pydantic_ai.models.anthropic import AnthropicModel
-        return AnthropicModel(model_name, api_key=cfg.anthropic_api_key.get_secret_value())
+        key = get_val("anthropic_api_key")
+        return AnthropicModel(model_name, api_key=key or "dummy")
 
     # For OpenAI-compatible endpoints (DeepSeek, Ollama, OpenAI)
-    # pydantic-ai v1.104+ reads these from environment variables automatically
+    api_key = "dummy"
+    match provider:
+        case LLMProvider.OPENAI:
+            api_key = get_val("openai_api_key") or "dummy"
+            base_url = cfg.openai_base_url or "https://api.openai.com/v1"
+        case LLMProvider.DEEPSEEK:
+            api_key = get_val("deepseek_api_key") or "dummy"
+            base_url = "https://api.deepseek.com"
+        case LLMProvider.OLLAMA:
+            base_url = base_url or "http://localhost:11434/v1"
+            api_key = "ollama"
+
+    # pydantic-ai v1.104+ reads these from environment variables or explicit config
     import os
-    os.environ["OPENAI_API_KEY"] = api_key or "dummy_key_for_local"
+    if api_key:
+        os.environ["OPENAI_API_KEY"] = api_key
     if base_url:
         os.environ["OPENAI_BASE_URL"] = base_url
 

@@ -21,6 +21,8 @@ logger = get_logger(__name__)
 _DEFAULT_MODEL = "BAAI/bge-reranker-v2-m3"
 
 
+from medgraphia.domain.base import QueryType
+
 # ---------------------------------------------------------------------------
 # Output type
 # ---------------------------------------------------------------------------
@@ -34,10 +36,12 @@ class RerankedResult:
         items         — Re-ranked FusedItem list (best first).
         query         — Original query text.
         reranked      — True if reranking actually ran; False if it was skipped.
+        query_type    — The intent classified by the router (useful for generation).
     """
     items: list[FusedItem] = field(default_factory=list)
     query: str = ""
     reranked: bool = False
+    query_type: QueryType = QueryType.PATIENT_FAQ
 
     def texts(self) -> list[str]:
         return [it.text for it in self.items]

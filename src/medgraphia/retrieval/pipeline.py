@@ -177,6 +177,9 @@ class RetrievalPipeline:
             fusion_result=fusion_result,
             top_k=top_k,
         )
+        
+        # Inject the query type into the result for downstream use
+        final_result.query_type = plan.query_type
 
         logger.info(
             "retrieval_pipeline_completed", 

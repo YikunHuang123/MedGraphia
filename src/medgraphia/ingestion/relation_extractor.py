@@ -137,7 +137,7 @@ class RelationExtractor:
     def from_settings(cls) -> "RelationExtractor":
         """Factory method to create the extractor from app settings."""
         from medgraphia.config import get_settings
-        from medgraphia.generation.providers.llm_client import get_model
+        from medgraphia.llm.client import get_model
 
         cfg = get_settings()
         model = get_model()
