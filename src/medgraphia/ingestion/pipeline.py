@@ -95,29 +95,11 @@ class BuildConfig:
 async def fetch_task(cfg: BuildConfig) -> list[Any]:
     """Download data from PubMed / FDA DailyMed / EMA SmPC / DrugBank."""
     from medgraphia.data.pubmed import PubMedConnector, PubMedFetchConfig
-
-    _DOMAIN_QUERIES: dict[str, str] = {
-        "t2dm": (
-            "type 2 diabetes mellitus[MeSH] AND "
-            "(drug therapy[MeSH] OR treatment[MeSH]) AND English[Language]"
-        ),
-        "cardiovascular": (
-            "cardiovascular diseases[MeSH] AND drug therapy[MeSH] AND English[Language]"
-        ),
-        "oncology": "neoplasms[MeSH] AND drug therapy[MeSH] AND English[Language]",
-        "hypertension": (
-            "hypertension[MeSH] AND antihypertensive agents[MeSH] AND English[Language]"
-        ),
-    }
-    _DOMAIN_DRUGS: dict[str, list[str]] = {
-        "t2dm": ["metformin", "insulin", "sitagliptin", "empagliflozin", "liraglutide"],
-        "cardiovascular": ["warfarin", "aspirin", "atorvastatin", "lisinopril", "metoprolol"],
-        "hypertension": ["amlodipine", "lisinopril", "losartan", "hydrochlorothiazide"],
-    }
+    from medgraphia.knowledge_base import DOMAIN_QUERIES, DOMAIN_DRUGS
 
     docs: list[Any] = []
 
-    query = cfg.pubmed_query or _DOMAIN_QUERIES.get(cfg.domain, cfg.domain)
+    query = cfg.pubmed_query or DOMAIN_QUERIES.get(cfg.domain, cfg.domain)
     async with PubMedConnector() as pubmed:
         pubmed_docs = await pubmed.fetch(
             PubMedFetchConfig(query=query, max_results=cfg.pubmed_limit)
@@ -128,7 +110,7 @@ async def fetch_task(cfg: BuildConfig) -> list[Any]:
     if cfg.drug_limit > 0:
         from medgraphia.data.fda_dailymed import FDADailyMedConnector
 
-        drug_names = _DOMAIN_DRUGS.get(cfg.domain, [])[:cfg.drug_limit]
+        drug_names = DOMAIN_DRUGS.get(cfg.domain, [])[:cfg.drug_limit]
         async with FDADailyMedConnector() as fda:
             for drug_name in drug_names:
                 fda_docs = await fda.fetch_by_drug_name(drug_name, limit=2)
@@ -259,9 +241,29 @@ async def extract_task(chunks: list[Any]) -> list[Any]:
 
 
 @task(name="embed")
-async def embed_task(chunks: list[Any]) -> None:
-    """BGE-M3 embedding → Qdrant vector store (Phase 5 stub)."""
-    logger.info("embed_task_stub", msg="Phase 5 not yet implemented — skipping embed stage")
+async def embed_task(chunks: list[Any]) -> list[Any]:
+    """BGE-M3 chunk embedding (dense + sparse) → Qdrant collection."""
+    from medgraphia.config import get_settings
+    from medgraphia.ingestion.embedder import MedicalEmbedder
+    from medgraphia.vector.qdrant_store import QdrantStore
+
+    cfg = get_settings()
+    embedder = MedicalEmbedder.from_settings()
+    store = QdrantStore()
+
+    try:
+        await store.init_collection(
+            collection_name=cfg.qdrant_collection_chunks,
+            vector_size=embedder.dense_dim,
+            sparse=True,
+        )
+        embedded = embedder.embed_chunks(chunks)
+        written = await store.upsert_chunks(cfg.qdrant_collection_chunks, embedded)
+        logger.info("embed_done", chunks=written, collection=cfg.qdrant_collection_chunks)
+        return embedded
+    except Exception as exc:
+        logger.error("embed_task_failed", error=str(exc))
+        return chunks
 
 
 @task(name="community")
@@ -336,9 +338,9 @@ async def build_graph_flow(cfg: BuildConfig) -> dict[str, Any]:
         relations = await extract_task(chunks)
     summary["relations"] = len(relations)
 
-    # Stage 7: Embedding (Phase 5 stub)
+    # Stage 7: Embedding — BGE-M3 dense + sparse → Qdrant
     if not cfg.skip_embed:
-        await embed_task(chunks)
+        chunks = await embed_task(chunks)
 
     # Stage 8: Community detection
     communities: list[Any] = []

@@ -367,7 +367,7 @@ class EntityLinker:
         try:
             cand_labels = [e.label for e in candidates]
             all_texts = [mention] + cand_labels
-            embeddings = self._sapbert.encode(all_texts, normalize_embeddings=True)
+            embeddings = self._sapbert.encode(all_texts, normalize_embeddings=True, show_progress_bar=False)
             mention_emb = embeddings[0]
             cand_embs = embeddings[1:]
             scores = (cand_embs @ mention_emb).tolist()

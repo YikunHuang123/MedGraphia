@@ -21,9 +21,11 @@ Stages executed (each can be skipped with --skip-<stage>):
   7. embed      — BGE-M3 embedding → Qdrant (Phase 5)
   8. community  — Leiden community detection + LLM summaries (Phase 4)
 
-Phases 4–8 are stubs in this release (Phase 0/1). They log a "not yet implemented"
-message and skip gracefully.  Fill them in during Phases 2–5 of development.
+All phases are now implemented.
 """
+
+# python scripts/pipeline/build_graph.py --skip-fetch --skip-parse --skip-chunk --skip-ner --skip-link --skip-extract --skip-community
+
 from __future__ import annotations
 
 import asyncio
@@ -32,7 +34,7 @@ from pathlib import Path
 
 import click
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from medgraphia.config import get_settings
 from medgraphia.logger import configure_logging, get_logger
@@ -165,13 +167,13 @@ async def _run(
         click.echo("[6/8] Relation extraction skipped.")
 
     # ------------------------------------------------------------------
-    # Stage 7: Embedding  (Phase 5 — stub)
+    # Stage 7: Embedding  (Phase 5)
     # ------------------------------------------------------------------
-    if skip_embed:
-        click.echo("[7/8] Embedding skipped.")
+    if not skip_embed and chunks:
+        click.echo("[7/8] Embedding chunks (BGE-M3 hybrid)…")
+        chunks = await _stage_embed(chunks)
     else:
-        click.echo("[7/8] Embedding — not yet implemented (Phase 5).")
-        logger.info("stage_not_implemented", stage="Embedding")
+        click.echo("[7/8] Embedding skipped.")
 
     # ------------------------------------------------------------------
     # Stage 8: Community detection  (Phase 4)
@@ -429,6 +431,34 @@ async def _stage_extract(chunks: list) -> list:
         )
 
     return relations
+
+
+async def _stage_embed(chunks: list) -> list:
+    """
+    Phase 5: BGE-M3 text chunk embedding (dense + sparse) -> Qdrant.
+    """
+    from medgraphia.config import get_settings
+    from medgraphia.ingestion.embedder import MedicalEmbedder
+    from medgraphia.vector.qdrant_store import QdrantStore
+
+    cfg = get_settings()
+    embedder = MedicalEmbedder.from_settings()
+    store = QdrantStore()
+
+    try:
+        await store.init_collection(
+            collection_name=cfg.qdrant_collection_chunks,
+            vector_size=embedder.dense_dim,
+            sparse=True,
+        )
+        # Note: MedicalEmbedder.embed_chunks uses tqdm internally now
+        embedded = embedder.embed_chunks(chunks)
+        written = await store.upsert_chunks(cfg.qdrant_collection_chunks, embedded)
+        click.echo(f"      → {written} chunks embedded and written to Qdrant.")
+        return embedded
+    except Exception as exc:
+        click.echo(f"      ⚠ Embedding failed: {exc}")
+        return chunks
 
 
 async def _stage_community(chunks: list, relations: list) -> list:

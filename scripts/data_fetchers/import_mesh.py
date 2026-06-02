@@ -14,7 +14,7 @@ from pathlib import Path
 
 import click
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from medgraphia.config import get_settings
 from medgraphia.data.mesh import MeSHLoader

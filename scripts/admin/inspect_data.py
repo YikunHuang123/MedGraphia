@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 # Add src to sys.path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 # Mock structlog and other potential missing deps before importing medgraphia
 mock_structlog = types.ModuleType("structlog")
