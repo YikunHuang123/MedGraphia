@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # LLM
     # ------------------------------------------------------------------
-    llm_provider: Literal["deepseek", "openai", "anthropic", "ollama", "local"] = "deepseek"
+    llm_provider: Literal["deepseek", "openai", "anthropic", "gemini", "groq", "ollama", "local"] = "deepseek"
     # llm_model: str = "qwen2.5:3b"
     llm_model: str = "deepseek-chat"
     llm_base_url: str = ""
@@ -67,6 +67,20 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr = SecretStr("")
     openai_base_url: str = "https://api.openai.com/v1"
     anthropic_api_key: SecretStr = SecretStr("")
+    gemini_api_key: SecretStr = SecretStr("")
+    groq_api_key: SecretStr = SecretStr("")
+
+    # ------------------------------------------------------------------
+    # LLM Router — per-tier model configuration (Phase 7)
+    # ------------------------------------------------------------------
+    # Each tier maps to a (provider, model) pair.  Falls back to llm_provider /
+    # llm_model when not explicitly set.
+    llm_small_provider: str = ""        # e.g. "ollama"
+    llm_small_model: str = ""           # e.g. "qwen2.5:7b"
+    llm_medium_provider: str = ""       # e.g. "deepseek"
+    llm_medium_model: str = ""          # e.g. "deepseek-chat"
+    llm_large_provider: str = ""        # e.g. "openai"
+    llm_large_model: str = ""           # e.g. "gpt-4o"
 
     # Model used for community summary generation; defaults to llm_model if empty
     community_summary_llm: str = ""
