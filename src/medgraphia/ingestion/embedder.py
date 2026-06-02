@@ -140,7 +140,6 @@ class MedicalEmbedder:
                     return_dense=True,
                     return_sparse=True,
                     return_colbert_vecs=self._use_colbert,
-                    show_progress_bar=False
                 )
                 for dense, sparse in zip(output["dense_vecs"], output["lexical_weights"]):
                     dense_vecs.append(dense.tolist())
@@ -152,16 +151,15 @@ class MedicalEmbedder:
     def embed_chunks(self, chunks: list[Chunk]) -> list[Chunk]:
         """
         Embed all chunks in batch.
-        Returns new Chunk objects with .embedding and .sparse_embedding set;
+        Returns new Chunk objects with .embedding and .sparse_embedding set.
+        Raises RuntimeError or Exception on failure.
         """
         if not chunks:
             return chunks
 
-        try:
-            dense_vecs, sparse_vecs = self.embed_texts([c.text for c in chunks])
-        except Exception as exc:
-            logger.error("embed_chunks_failed", error=str(exc), count=len(chunks))
-            return chunks
+        # Do not catch exceptions here; let them bubble up to the pipeline
+        # so the user knows WHY it failed (e.g., OOM or missing dependency).
+        dense_vecs, sparse_vecs = self.embed_texts([c.text for c in chunks])
 
         result = [
             chunk.model_copy(update={"embedding": d, "sparse_embedding": s})

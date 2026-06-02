@@ -125,6 +125,25 @@ async def fetch_task(cfg: BuildConfig) -> list[Any]:
         docs.extend(db_docs)
         logger.info("fetch_drugbank_done", count=len(db_docs))
 
+    # 3. EMA SmPC (Local PDFs)
+    if cfg.include_ema_smpc:
+        from pathlib import Path
+        from datetime import datetime
+        from medgraphia.domain import SourceMeta, Language, RawDocument
+        
+        ema_dir = Path("data/raw/ema_smpc")
+        if ema_dir.exists():
+            ema_pdfs = list(ema_dir.glob("*.pdf"))
+            for pdf_path in ema_pdfs:
+                source = SourceMeta(
+                    source_id=f"ema_local:{pdf_path.stem}",
+                    source_title=pdf_path.stem.replace("_", " "),
+                    retrieved_at=datetime.fromtimestamp(pdf_path.stat().st_mtime),
+                    language=Language.EN
+                )
+                docs.append(RawDocument(source=source, file_path=str(pdf_path), format="pdf"))
+            logger.info("fetch_ema_local_done", count=len(ema_pdfs))
+
     return docs
 
 
@@ -319,6 +338,12 @@ async def build_graph_flow(cfg: BuildConfig) -> dict[str, Any]:
     if not cfg.skip_chunk and parsed_docs:
         chunks = await chunk_task(parsed_docs)
     summary["chunks"] = len(chunks)
+
+    # RECOVERY: If chunks is empty but needed for downstream, load from DB
+    if not chunks and not (cfg.skip_ner and cfg.skip_link and cfg.skip_extract and cfg.skip_embed and cfg.skip_community):
+        from medgraphia.graph.queries import get_chunks_from_db
+        chunks = await get_chunks_from_db(limit=5000)
+        logger.info("pipeline_recovered_from_db", count=len(chunks))
 
     # Stage 4: NER
     if not cfg.skip_ner and chunks:
