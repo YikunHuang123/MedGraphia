@@ -481,34 +481,16 @@ async def _json_prompt_predict(
     )
 
     resp = await gateway.acomplete(req)
-    parsed = _parse_json_safe(resp.text)
-
-    # 1. Answer text extraction
-    answer_text = str(parsed.get("answer", resp.text or ""))
-
-    # 2. Robust citation extraction (handles [1, 2], ["1", "2"], or even "1, 2")
-    citations_raw = parsed.get("citations", [])
-    citations: list[int] = []
     
-    if isinstance(citations_raw, list):
-        for c in citations_raw:
-            try:
-                citations.append(int(c))
-            except (ValueError, TypeError):
-                continue
-    elif isinstance(citations_raw, (str, int)):
-        # Handle cases where LLM returns a single int or a comma-separated string
-        nums = re.findall(r"\d+", str(citations_raw))
-        citations = [int(n) for n in nums]
+    if not resp.ok:
+        error_msg = resp.metadata.get("error", "Unknown LLM API error")
+        raise RuntimeError(f"LLM API failed: {error_msg}")
 
-    # 3. Disclaimer management
-    disclaimer_text = str(parsed.get("disclaimer", disc))
-
-    return MedicalAnswer(
-        answer=answer_text,
-        citations=citations,
-        disclaimer=disclaimer_text,
-    )
+    parsed = _parse_json_safe(resp.text)
+    
+    # Use _coerce_to_answer to ensure disclaimer enforcement and consistent structure.
+    # We pass the parsed dict; _coerce_to_answer will handle validation and defaulting.
+    return _coerce_to_answer(parsed, query_type, language)
 
 
 def _coerce_to_answer(

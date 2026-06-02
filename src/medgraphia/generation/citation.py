@@ -196,23 +196,59 @@ def _item_to_citation(number: int, item: FusedItem) -> Citation:
     meta = item.metadata
 
     chunk_id = _str_or_empty(meta.get("chunk_id"))
-    source_title = (
+    raw_title = (
         _str_or_empty(meta.get("source_title"))
         or _str_or_empty(meta.get("community_id"))
         or item.item_id
     )
+    
+    # Clean up repetitive FDA/EMA boilerplate from titles
+    clean_title = _clean_title(raw_title)
+    
+    # Add source type prefix for better intuition (e.g. "[Vector] Metformin...")
+    source_type_label = f"[{item.source.value.capitalize()}]"
+    final_title = f"{source_type_label} {clean_title}"
+
     source_version = _str_or_empty(meta.get("source_version"))
     section_path = _str_or_empty(meta.get("section_path"))
     content_snippet = item.text[:_SNIPPET_MAX].strip()
 
     return Citation(
         citation_number=number,
-        source_title=source_title,
+        source_title=final_title,
         source_version=source_version,
         section_path=section_path,
         content_snippet=content_snippet,
         chunk_id=chunk_id,
     )
+
+
+def _clean_title(title: str) -> str:
+    """Remove boilerplate 'highlights' text and truncate overly long titles."""
+    if not title:
+        return "Unknown Source"
+        
+    # Remove common FDA boilerplate strings
+    noise = [
+        "These highlights do not include all the information needed to use",
+        "safely and effectively. See full prescribing information for",
+        "HIGHLIGHTS OF PRESCRIBING INFORMATION",
+    ]
+    for n in noise:
+        title = title.replace(n, "")
+    
+    # Remove double spaces, trailing dots or dashes
+    title = " ".join(title.split())
+    title = title.strip(". -")
+    
+    # If it's still empty, provide a fallback
+    if not title:
+        return "Medical Reference"
+        
+    # Hard truncation for UI sanity
+    if len(title) > 100:
+        title = title[:97] + "..."
+    return title
 
 
 def _source_hint(item: FusedItem) -> str:
