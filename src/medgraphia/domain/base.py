@@ -27,6 +27,27 @@ class Language(str, Enum):
     DE = "de"
     UNKNOWN = "unknown"
 
+    @classmethod
+    def detect(cls, text: str) -> "Language":
+        """
+        Detect language based on character set heuristics.
+        Returns cls.ZH if CJK characters are found, cls.DE for German umlauts,
+        otherwise defaults to cls.EN.
+        """
+        if not text:
+            return cls.EN
+        
+        # Check for Chinese characters (CJK Unified Ideographs)
+        if any('\u4e00' <= char <= '\u9fff' for char in text):
+            return cls.ZH
+            
+        # Check for German-specific characters
+        lower_text = text.lower()
+        if any(c in lower_text for c in ['ä', 'ö', 'ü', 'ß']):
+            return cls.DE
+            
+        return cls.EN
+
 class QueryType(str, Enum):
     CLINICAL_DECISION = "clinical_decision"
     DRUG_INTERACTION = "drug_interaction"
