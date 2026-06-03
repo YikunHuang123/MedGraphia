@@ -69,6 +69,7 @@ def _init_state() -> None:
 
 _init_state()
 
+from components.sidebar import render_common_sidebar  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Cached resources / data
@@ -90,14 +91,6 @@ def current_client() -> MedGraphiaClient:
     )
 
 
-@st.cache_data(ttl=30, show_spinner=False)
-def _check_health_cached(
-    base_url: str, api_key: str, admin_key: str
-) -> dict[str, Any]:
-    with MedGraphiaClient(base_url=base_url, api_key=api_key, admin_key=admin_key) as client:
-        return client.health_ready()
-
-
 @st.cache_data(ttl=60, show_spinner=False)
 def _graph_stats_cached(
     base_url: str, api_key: str, admin_key: str
@@ -110,61 +103,8 @@ def _graph_stats_cached(
 # Sidebar
 # ---------------------------------------------------------------------------
 
-def render_sidebar() -> None:
-    with st.sidebar:
-        # Brand
-        render_brand()
-
-        # Connection pill
-        try:
-            ready = _check_health_cached(
-                st.session_state["api_base_url"],
-                st.session_state["api_key"],
-                st.session_state["admin_key"],
-            )
-            online = ready.get("overall") == "ok"
-        except Exception:
-            ready = {}
-            online = False
-
-        st.markdown(connection_pill(online), unsafe_allow_html=True)
-
-        if ready:
-            neo_ok = ready.get("neo4j") == "ok"
-            vec_ok = ready.get("qdrant") == "ok"
-            st.markdown(
-                status_badge("Neo4j",  "ok" if neo_ok else "err")
-                + status_badge("Vector", "ok" if vec_ok else "err"),
-                unsafe_allow_html=True,
-            )
-
-        # Credentials
-        st.markdown('<div class="mg-section">Credentials</div>',
-                    unsafe_allow_html=True)
-        st.session_state["api_key"] = st.text_input(
-            "User API key",
-            value=st.session_state["api_key"],
-            type="password",
-            label_visibility="collapsed",
-            placeholder="X-API-Key for chat / graph",
-        )
-        st.session_state["admin_key"] = st.text_input(
-            "Admin API key",
-            value=st.session_state["admin_key"],
-            type="password",
-            label_visibility="collapsed",
-            placeholder="Admin key (optional)",
-        )
-
-        if st.session_state["admin_key"]:
-            st.caption("Admin mode enabled")
-        elif st.session_state["api_key"]:
-            st.caption("Verified user")
-        else:
-            st.caption("Provide a key above to start querying.")
-
-
-render_sidebar()
+with st.sidebar:
+    render_common_sidebar()
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +132,7 @@ except Exception as exc:
         f"Details: {exc}"
     )
 
-m1, m2, m3, m4 = st.columns(4)
+m1, m2, m3 = st.columns(3)
 m1.metric("Graph nodes",   f"{stats.get('nodes', 0):,}")
 m2.metric("Relationships", f"{stats.get('relations', 0):,}")
 m3.metric(
@@ -200,7 +140,6 @@ m3.metric(
     f"{len(st.session_state.get('conversations', {})):,}",
     help="Local browser session only.",
 )
-m4.metric("Endpoint", st.session_state["api_base_url"].split("//")[-1])
 
 
 # ── Capability tiles ───────────────────────────────────────────────────────
@@ -241,6 +180,10 @@ for col, (title, desc, _page) in zip(cols, _TILES):
             """,
             unsafe_allow_html=True,
         )
+
+# ── Sync history from backend ──────────────────────────────────────────────
+if (st.session_state.get("api_key") or st.session_state.get("admin_key")):
+    chat_history.sync_from_backend(current_client())
 
 # ── Recent conversations ───────────────────────────────────────────────────
 convs = chat_history.list_conversations()

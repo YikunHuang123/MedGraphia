@@ -31,10 +31,12 @@ from components.styles import (  # noqa: E402
 )
 
 
+from components.sidebar import render_common_sidebar  # noqa: E402
+
 st.set_page_config(page_title="Admin — MedGraphia", layout="wide")
 inject_theme()
 with st.sidebar:
-    render_brand()
+    render_common_sidebar()
 banner("Admin", "Ingestion pipelines and API-key lifecycle.")
 
 

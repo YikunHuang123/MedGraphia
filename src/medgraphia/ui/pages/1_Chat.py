@@ -57,14 +57,17 @@ def _client() -> MedGraphiaClient:
 # Sidebar — brand, navigation, conversation list
 # ---------------------------------------------------------------------------
 
+from components.sidebar import render_common_sidebar  # noqa: E402
+
 def render_chat_sidebar() -> None:
     with st.sidebar:
-        render_brand()
+        # 1. Standard Sidebar Sections
+        render_common_sidebar()
 
-        st.markdown('<div class="mg-section">Conversations</div>',
-                    unsafe_allow_html=True)
+        # 2. Conversations Section
+        st.markdown('<div class="mg-section">Conversations</div>', unsafe_allow_html=True)
 
-        if st.button("+ New conversation", use_container_width=True, type="primary"):
+        if st.button("+ New Chat", use_container_width=True, type="primary"):
             chat_history.new_conversation(language="unknown")
             st.rerun()
 
@@ -73,12 +76,23 @@ def render_chat_sidebar() -> None:
             st.caption("No conversations yet.")
         else:
             active_id = st.session_state.get("active_conv_id")
-            for c in convs:
+            
+            # Pagination Logic
+            page_size = 8
+            total_convs = len(convs)
+            total_pages = (total_convs + page_size - 1) // page_size
+            curr_page = st.session_state.setdefault("conv_page", 1)
+            
+            start_idx = (curr_page - 1) * page_size
+            end_idx = start_idx + page_size
+            page_convs = convs[start_idx:end_idx]
+
+            for c in page_convs:
                 is_active = (c["id"] == active_id)
                 is_editing = (st.session_state.get("_editing_conv") == c["id"])
 
                 if is_editing:
-                    ec, bc = st.columns([5, 1])
+                    ec, bc = st.columns([4, 1])
                     with ec:
                         new_title = st.text_input(
                             "Rename",
@@ -87,18 +101,17 @@ def render_chat_sidebar() -> None:
                             label_visibility="collapsed",
                         )
                     with bc:
-                        if st.button("OK", key=f"save_{c['id']}",
-                                     use_container_width=True):
+                        if st.button("OK", key=f"save_{c['id']}", use_container_width=True):
                             chat_history.rename_conversation(c["id"], new_title)
                             st.session_state["_editing_conv"] = None
                             st.rerun()
                 else:
                     sc, rc, dc = st.columns([6, 1, 1])
                     label = c["title"]
-                    short = label if len(label) <= 22 else label[:21] + "…"
+                    short = label if len(label) <= 18 else label[:17] + "…"
                     with sc:
                         if st.button(
-                            ("→ " + short) if is_active else short,
+                            short,
                             key=f"pick_{c['id']}",
                             use_container_width=True,
                             disabled=is_active,
@@ -106,22 +119,37 @@ def render_chat_sidebar() -> None:
                             chat_history.set_active(c["id"])
                             st.rerun()
                     with rc:
-                        if st.button("Rn", key=f"ren_{c['id']}",
-                                     help="Rename"):
+                        if st.button("✏️", key=f"ren_{c['id']}", help="Rename"):
                             st.session_state["_editing_conv"] = c["id"]
                             st.rerun()
                     with dc:
-                        if st.button("×", key=f"del_{c['id']}",
-                                     help="Delete"):
+                        if st.button("✕", key=f"del_{c['id']}", help="Delete"):
                             chat_history.delete_conversation(c["id"])
                             st.rerun()
 
-
-render_chat_sidebar()
-
+            # Pagination Controls
+            if total_pages > 1:
+                st.markdown('<div style="margin-top: 0.5rem;"></div>', unsafe_allow_html=True)
+                pcol1, pcol2, pcol3 = st.columns([1, 2, 1])
+                with pcol1:
+                    if st.button("◀", key="prev_c_page", disabled=curr_page <= 1, use_container_width=True):
+                        st.session_state.conv_page -= 1
+                        st.rerun()
+                with pcol2:
+                    st.markdown(
+                        f"<div style='text-align:center; font-size:0.75rem; color:#64748B; line-height:30px;'>"
+                        f"{curr_page} / {total_pages}</div>",
+                        unsafe_allow_html=True
+                    )
+                with pcol3:
+                    if st.button("▶", key="next_c_page", disabled=curr_page >= total_pages, use_container_width=True):
+                        st.session_state.conv_page += 1
+                        st.rerun()
 # ── Sync history from backend on first load ────────────────────────────────
 if (st.session_state.get("api_key") or st.session_state.get("admin_key")):
     chat_history.sync_from_backend(_client())
+
+render_chat_sidebar()
 
 banner("Chat", "Ask a clinical question — answers cite their source chunks.")
 

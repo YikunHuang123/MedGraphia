@@ -6,24 +6,27 @@ Exports:
     render_brand()       — sidebar logo + wordmark + status pill
     banner()             — gradient page header
     status_badge()       — coloured pill HTML
+    connection_pill()    — animated connection status
     LOGO_SVG_INLINE      — raw SVG used as the favicon
 """
 from __future__ import annotations
 
 import streamlit as st
 
-# Palette — deep clinical navy with teal accent
+# Palette — deep clinical navy with vibrant accents
 PRIMARY = "#0B3D91"
 PRIMARY_LIGHT = "#1E5BBF"
 ACCENT = "#0FB3A1"      # healing teal
-SURFACE = "#F7F9FC"
+ACCENT_VIBRANT = "#10B981" # emerald
+SURFACE = "#F8FAFC"
 CARD = "#FFFFFF"
 BORDER = "#E2E8F0"
-TEXT = "#1A202C"
-MUTED = "#5A6478"
-DANGER = "#C53030"
-SUCCESS = "#2F855A"
-WARN = "#B7791F"
+TEXT_DARK = "#0F172A"
+TEXT_MAIN = "#1E293B"
+TEXT_MUTED = "#64748B"
+DANGER = "#EF4444"
+SUCCESS = "#22C55E"
+WARN = "#F59E0B"
 
 
 # --------------------------------------------------------------------------
@@ -57,6 +60,7 @@ LOGO_SVG_INLINE = """
 
 _CSS = f"""
 <style>
+/* ── Global ── */
 :root {{
     --mg-primary: {PRIMARY};
     --mg-primary-light: {PRIMARY_LIGHT};
@@ -64,253 +68,290 @@ _CSS = f"""
     --mg-surface: {SURFACE};
     --mg-card: {CARD};
     --mg-border: {BORDER};
-    --mg-text: {TEXT};
-    --mg-muted: {MUTED};
+    --mg-text-dark: {TEXT_DARK};
+    --mg-text-main: {TEXT_MAIN};
+    --mg-text-muted: {TEXT_MUTED};
 }}
 
-/* ── Page chrome ───────────────────────────────────────────────────────── */
 #MainMenu, footer, .stDeployButton {{ visibility: hidden; }}
 header {{ background: transparent !important; }}
 .block-container {{
     padding-top: 1.2rem;
     padding-bottom: 2rem;
-    max-width: 1280px;
+    max-width: 1200px;
 }}
 
-/* ── Banner ────────────────────────────────────────────────────────────── */
-.mg-banner {{
-    background: linear-gradient(135deg, {PRIMARY} 0%, {PRIMARY_LIGHT} 60%, {ACCENT} 130%);
-    color: white;
-    padding: 1.3rem 1.6rem;
-    border-radius: 14px;
-    margin-bottom: 1.2rem;
-    box-shadow: 0 10px 28px rgba(11, 61, 145, 0.18);
-    position: relative;
-    overflow: hidden;
-}}
-.mg-banner::after {{
-    content: ""; position: absolute; top: -40px; right: -40px;
-    width: 180px; height: 180px; border-radius: 50%;
-    background: rgba(255,255,255,0.08);
-}}
-.mg-banner h1 {{
-    color: white !important; font-size: 1.6rem; margin: 0;
-    font-weight: 700; letter-spacing: 0.2px;
-}}
-.mg-banner p {{
-    color: rgba(255,255,255,0.88); margin: 0.3rem 0 0;
-    font-size: 0.92rem; max-width: 720px;
-}}
-
-/* ── Brand block in the sidebar ───────────────────────────────────────── */
-.mg-brand {{
-    display: flex; align-items: center; gap: 12px;
-    padding: 1.2rem 1.5rem;
-    border-bottom: 1px solid {BORDER};
-    background: {SURFACE};
-}}
+/* ── Sidebar Reordering & Nav Hide ── */
 [data-testid="stSidebar"] > div:first-child {{
     display: flex !important;
     flex-direction: column !important;
 }}
+/* Hide the default auto-generated navigation */
 [data-testid="stSidebarNav"] {{
-    order: 2 !important;
+    display: none !important;
 }}
 [data-testid="stSidebarContent"] {{
     order: 1 !important;
 }}
+
+/* ── Custom Page Links ── */
+[data-testid="stPageLink"] a {{
+    padding: 0.65rem 1rem !important;
+    border-radius: 10px !important;
+    font-weight: 600 !important;
+    font-size: 0.95rem !important;
+    color: {TEXT_MAIN} !important;
+    transition: all 0.2s ease !important;
+    margin: 0.1rem 0 !important;
+    border: 1px solid transparent !important;
+}}
+[data-testid="stPageLink"] a:hover {{
+    background-color: rgba(11, 61, 145, 0.05) !important;
+    border-color: rgba(11, 61, 145, 0.1) !important;
+    color: {PRIMARY} !important;
+}}
+/* Active link styling — Streamlit sets a specific background */
+[data-testid="stPageLink"] a[aria-current="page"] {{
+    background-color: rgba(15, 179, 161, 0.1) !important;
+    color: {ACCENT} !important;
+    border-color: rgba(15, 179, 161, 0.2) !important;
+}}
+
+
+/* ── Banner ── */
+.mg-banner {{
+    background: linear-gradient(135deg, {PRIMARY} 0%, {PRIMARY_LIGHT} 60%, {ACCENT} 130%);
+    color: white;
+    padding: 1.5rem 1.8rem;
+    border-radius: 16px;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 10px 25px rgba(11, 61, 145, 0.15);
+    position: relative;
+    overflow: hidden;
+}}
+.mg-banner::after {{
+    content: ""; position: absolute; top: -30px; right: -30px;
+    width: 150px; height: 150px; border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+}}
+.mg-banner h1 {{
+    color: white !important; font-size: 1.7rem; margin: 0;
+    font-weight: 800; letter-spacing: -0.02em;
+}}
+.mg-banner p {{
+    color: rgba(255,255,255,0.85); margin: 0.4rem 0 0;
+    font-size: 0.95rem; max-width: 800px;
+    line-height: 1.5;
+}}
+
+/* ── Brand ── */
+.mg-brand {{
+    display: flex; align-items: center; gap: 12px;
+    padding: 0.5rem 1.4rem 1rem;
+    border-bottom: 1px solid {BORDER};
+    margin-bottom: 1rem;
+    position: relative;
+}}
 .mg-brand-logo {{
-    width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0;
-    box-shadow: 0 4px 12px rgba(11, 61, 145, 0.28);
+    width: 42px; height: 42px; border-radius: 11px; flex-shrink: 0;
+    box-shadow: 0 4px 12px rgba(11, 61, 145, 0.2);
     overflow: hidden;
 }}
 .mg-brand-logo svg {{ width: 100%; height: 100%; display: block; }}
-.mg-wordmark {{ line-height: 1.15; }}
+.mg-wordmark {{ line-height: 1.2; }}
 .mg-name {{
-    font-size: 1.25rem; font-weight: 800;
+    font-size: 1.2rem; font-weight: 800;
     background: linear-gradient(135deg, {PRIMARY}, {ACCENT});
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     background-clip: text;
 }}
 .mg-tag {{
-    font-size: 0.62rem; letter-spacing: 1.6px; text-transform: uppercase;
-    color: {MUTED};
+    font-size: 0.6rem; letter-spacing: 1.8px; text-transform: uppercase;
+    color: {TEXT_MUTED};
 }}
 
-/* ── Connection pill ──────────────────────────────────────────────────── */
+/* ── Connection Pill ── */
 .mg-pill {{
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 3px 11px; border-radius: 20px;
-    font-size: 0.72rem; font-weight: 700;
+    position: absolute;
+    top: 10px; right: 14px;
+    display: flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 10px;
+    font-size: 0.58rem; font-weight: 800;
+    text-transform: uppercase;
+    z-index: 10;
 }}
-.mg-pill-dot {{ width: 7px; height: 7px; border-radius: 50%; }}
-.mg-online  {{ background: #E6F6EC; color: {SUCCESS};
-               border: 1px solid rgba(47,133,90,.25); }}
-.mg-online  .mg-pill-dot {{ background: {SUCCESS}; box-shadow: 0 0 6px {SUCCESS}; }}
-.mg-offline {{ background: #FBE7E7; color: {DANGER};
-               border: 1px solid rgba(197,48,48,.25); }}
+.mg-pill-dot {{ width: 6px; height: 6px; border-radius: 50%; }}
+.mg-online  {{ background: rgba(34,197,94,0.1); color: {SUCCESS};
+               border: 1px solid rgba(34,197,94,0.2); }}
+.mg-online  .mg-pill-dot {{ background: {SUCCESS}; box-shadow: 0 0 8px {SUCCESS}; }}
+.mg-offline {{ background: rgba(239,68,68,0.1); color: {DANGER};
+               border: 1px solid rgba(239,68,68,0.2); }}
 .mg-offline .mg-pill-dot {{ background: {DANGER}; }}
 
-/* ── Sidebar section heading ──────────────────────────────────────────── */
+/* ── Sidebar Sections ── */
 .mg-section {{
-    font-size: 0.64rem; font-weight: 800; letter-spacing: 1.8px;
-    text-transform: uppercase; color: {MUTED};
-    margin: 1.2rem 0 0.5rem;
+    font-size: 0.65rem; font-weight: 700; letter-spacing: 1.8px;
+    text-transform: uppercase; color: {TEXT_MUTED};
+    margin: 1.5rem 1.4rem 0.6rem;
 }}
 
-/* ── Generic badge ─────────────────────────────────────────────────────── */
-.mg-badge {{
-    display: inline-block; padding: 2px 10px; border-radius: 999px;
-    font-size: 0.74rem; font-weight: 700; margin-right: 4px;
-}}
-.mg-badge-ok    {{ background: #E6F6EC; color: {SUCCESS}; }}
-.mg-badge-warn  {{ background: #FEF6E4; color: {WARN}; }}
-.mg-badge-err   {{ background: #FBE7E7; color: {DANGER}; }}
-.mg-badge-info  {{ background: #E5EEFB; color: {PRIMARY}; }}
-
-/* ── Cards & section titles ───────────────────────────────────────────── */
+/* ── Custom Cards ── */
 .mg-card {{
     background: {CARD}; border: 1px solid {BORDER};
-    border-radius: 10px; padding: 1rem 1.2rem; margin-bottom: 1rem;
-    transition: border-color .18s, box-shadow .18s;
+    border-radius: 12px; padding: 1.2rem; margin-bottom: 1rem;
+    transition: all .2s ease;
 }}
 .mg-card:hover {{
     border-color: {PRIMARY_LIGHT};
-    box-shadow: 0 6px 18px rgba(11, 61, 145, 0.08);
+    box-shadow: 0 8px 20px rgba(11, 61, 145, 0.06);
 }}
 .mg-section-title {{
-    font-size: 1.05rem; font-weight: 700; color: {PRIMARY};
-    margin: 1.2rem 0 0.5rem;
-    padding-bottom: 0.3rem; border-bottom: 2px solid {BORDER};
+    font-size: 1.1rem; font-weight: 700; color: {PRIMARY};
+    margin: 1.8rem 0 0.8rem;
+    padding-bottom: 0.4rem; border-bottom: 2px solid {BORDER};
 }}
 
-/* ── Feature tile (Home) ──────────────────────────────────────────────── */
+/* ── Feature Tiles ── */
 .mg-tile {{
-    background: {CARD}; border: 1px solid {BORDER}; border-radius: 12px;
-    padding: 1.1rem 1.2rem; height: 100%;
-    transition: transform .15s, box-shadow .18s, border-color .18s;
+    background: {CARD}; border: 1px solid {BORDER}; border-radius: 14px;
+    padding: 1.3rem; height: 100%;
+    transition: all .2s ease;
+    display: flex; flex-direction: column;
 }}
 .mg-tile:hover {{
-    transform: translateY(-2px);
-    box-shadow: 0 10px 22px rgba(11, 61, 145, 0.1);
+    transform: translateY(-3px);
+    box-shadow: 0 12px 24px rgba(11, 61, 145, 0.08);
     border-color: {ACCENT};
 }}
 .mg-tile-icon {{
-    font-size: 0; line-height: 0;
-    width: 38px; height: 38px; border-radius: 9px;
+    width: 42px; height: 42px; border-radius: 10px;
     background: linear-gradient(135deg, {PRIMARY}, {ACCENT});
-    display: inline-block; margin-bottom: 0.6rem;
-    box-shadow: 0 4px 10px rgba(11,61,145,0.2);
+    margin-bottom: 0.8rem;
+    box-shadow: 0 4px 12px rgba(11,61,145,0.15);
 }}
-.mg-tile-title {{ font-size: 1rem; font-weight: 700; color: {TEXT}; margin: 0; }}
-.mg-tile-desc  {{ font-size: 0.84rem; color: {MUTED}; margin: 0.3rem 0 0; }}
+.mg-tile-title {{ font-size: 1.05rem; font-weight: 700; color: {TEXT_DARK}; margin: 0; }}
+.mg-tile-desc  {{ font-size: 0.85rem; color: {TEXT_MUTED}; margin: 0.4rem 0 0; line-height: 1.5; }}
 
-/* ── Citation card (expander body) ────────────────────────────────────── */
+/* ── Citations ── */
 .mg-cite {{
-    display: flex; gap: 10px; align-items: flex-start;
-    padding: 0.65rem 1rem; margin: 0.35rem 0; border-radius: 8px;
-    background: rgba(15, 179, 161, 0.06);
-    border: 1px solid rgba(15, 179, 161, 0.18);
-    border-left: 3px solid {ACCENT};
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 0.8rem 1.1rem; margin: 0.4rem 0; border-radius: 10px;
+    background: rgba(15, 179, 161, 0.04);
+    border: 1px solid rgba(15, 179, 161, 0.12);
+    border-left: 4px solid {ACCENT};
 }}
 .mg-cite-num {{
-    font-weight: 800; font-size: 0.78rem; color: {ACCENT};
-    background: rgba(15, 179, 161, 0.14); border-radius: 4px;
-    padding: 1px 7px; flex-shrink: 0; margin-top: 1px;
+    font-weight: 800; font-size: 0.75rem; color: #fff;
+    background: {ACCENT}; border-radius: 5px;
+    padding: 2px 8px; flex-shrink: 0; margin-top: 1px;
 }}
-.mg-cite-title {{ font-size: 0.82rem; font-weight: 700; color: {PRIMARY}; margin-bottom: 2px; }}
-.mg-cite-meta  {{ font-size: 0.70rem; color: {MUTED}; margin-bottom: 4px; }}
-.mg-cite-snippet {{ font-size: 0.78rem; color: {TEXT}; line-height: 1.55; }}
+.mg-cite-title {{ font-size: 0.85rem; font-weight: 700; color: {PRIMARY}; margin-bottom: 3px; }}
+.mg-cite-meta  {{ font-size: 0.72rem; color: {TEXT_MUTED}; margin-bottom: 6px; }}
+.mg-cite-snippet {{ font-size: 0.82rem; color: {TEXT_MAIN}; line-height: 1.6; }}
 
-/* ── Inline citation ref (clickable [N]) ──────────────────────────────── */
+/* ── Inline citation ref ── */
 .mg-cref {{
     display: inline-block; text-decoration: none;
-    color: {ACCENT}; font-size: 0.72em; font-weight: 800;
+    color: {ACCENT}; font-size: 0.75em; font-weight: 800;
     vertical-align: super; cursor: pointer;
-    border: 1px solid rgba(15, 179, 161, .45);
-    border-radius: 4px; padding: 0 4px; margin: 0 2px;
-    line-height: 1.2; transition: background .15s;
+    border: 1px solid rgba(15, 179, 161, .3);
+    border-radius: 4px; padding: 0 5px; margin: 0 2px;
+    transition: all .15s;
 }}
-.mg-cref:hover {{ background: rgba(15, 179, 161, 0.18); color: {PRIMARY}; }}
+.mg-cref:hover {{ background: {ACCENT}; color: #fff; }}
 
-/* ── Citation modal (CSS :target trick — no JS) ───────────────────────── */
+/* ── Modals ── */
 .mg-covl {{
     display: none; position: fixed; inset: 0;
-    background: rgba(11, 22, 50, 0.55);
+    background: rgba(15, 23, 42, 0.6);
     z-index: 99999; justify-content: center; align-items: center;
+    backdrop-filter: blur(4px);
 }}
 .mg-covl:target {{ display: flex; }}
 .mg-covl-bg {{ position: absolute; inset: 0; }}
 .mg-cbox {{
     position: relative; z-index: 1;
-    background: {CARD}; border-radius: 14px;
-    padding: 1.3rem 1.5rem; max-width: 640px; width: 90%;
+    background: {CARD}; border-radius: 18px;
+    padding: 1.5rem 1.8rem; max-width: 680px; width: 92%;
     border: 1px solid {BORDER};
-    box-shadow: 0 28px 70px rgba(0, 0, 0, 0.28);
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.25);
 }}
 .mg-cbox-hdr {{
     display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 0.8rem;
+    margin-bottom: 1rem;
 }}
-.mg-cbox-num {{ color: {ACCENT}; font-weight: 800; font-size: 0.95rem; }}
+.mg-cbox-num {{ color: {ACCENT}; font-weight: 800; font-size: 1rem; }}
 .mg-cbox-x {{
-    color: {MUTED}; text-decoration: none; font-size: 1rem;
-    padding: 3px 9px; border-radius: 5px;
+    color: {TEXT_MUTED}; text-decoration: none; font-size: 1.2rem;
+    padding: 4px 10px; border-radius: 8px; transition: background .15s;
 }}
-.mg-cbox-x:hover {{ color: {TEXT}; background: {SURFACE}; }}
-.mg-cbox-title {{ color: {PRIMARY}; font-weight: 800; font-size: 0.95rem; margin-bottom: 0.2rem; }}
-.mg-cbox-src   {{ color: {MUTED}; font-size: 0.72rem; margin-bottom: 0.9rem; }}
+.mg-cbox-x:hover {{ color: {TEXT_DARK}; background: {SURFACE}; }}
+.mg-cbox-title {{ color: {PRIMARY}; font-weight: 800; font-size: 1.05rem; margin-bottom: 0.3rem; }}
+.mg-cbox-src   {{ color: {TEXT_MUTED}; font-size: 0.75rem; margin-bottom: 1rem; }}
 .mg-cbox-body  {{
-    color: {TEXT}; font-size: 0.85rem; line-height: 1.65;
-    background: {SURFACE}; padding: 0.85rem 1rem; border-radius: 8px;
-    border-left: 3px solid {ACCENT};
+    color: {TEXT_MAIN}; font-size: 0.9rem; line-height: 1.7;
+    background: {SURFACE}; padding: 1.1rem; border-radius: 10px;
+    border-left: 4px solid {ACCENT};
     white-space: pre-wrap; word-break: break-word;
-    max-height: 480px; overflow-y: auto;
+    max-height: 500px; overflow-y: auto;
 }}
 
-/* ── Sidebar tweaks ───────────────────────────────────────────────────── */
+/* ── Sidebar Styling ── */
 [data-testid="stSidebar"] {{
     background: {SURFACE}; border-right: 1px solid {BORDER};
 }}
+/* Fix for centering icons (Emoji) in small buttons in sidebar */
 [data-testid="stSidebar"] .stButton button {{
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
+    height: 30px !important;
+    min-width: 30px !important;
+    width: 100% !important;
+    font-size: 0.85rem !important;
     border-radius: 8px !important;
     font-weight: 600 !important;
-    font-size: 0.85rem !important;
+    transition: all .18s !important;
+}}
+[data-testid="stSidebar"] .stButton button p {{
+    margin: 0 !important;
+    line-height: 1 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
 }}
 [data-testid="stSidebar"] .stButton > button:disabled {{
-    background-color: rgba(15, 179, 161, 0.14) !important;
+    background-color: rgba(11, 61, 145, 0.08) !important;
     color: {PRIMARY} !important;
-    border: 1px solid rgba(15, 179, 161, 0.35) !important;
+    border: 1px solid rgba(11, 61, 145, 0.2) !important;
     opacity: 1 !important; cursor: default !important;
 }}
 
-/* ── Chat message hover + feedback fade ───────────────────────────────── */
-[data-testid="stChatMessage"] {{
-    border-radius: 10px !important; transition: background .18s;
-}}
-[data-testid="stChatMessage"]:hover {{
-    background: rgba(11, 61, 145, 0.035) !important;
+/* ── Input Styling ── */
+.stTextInput input, .stSelectbox div[data-baseweb="select"] {{
+    border-radius: 8px !important;
+    border: 1px solid {BORDER} !important;
 }}
 
-/* ── Progress bar gradient ────────────────────────────────────────────── */
-.stProgress > div > div > div {{
-    background: linear-gradient(90deg, {PRIMARY}, {ACCENT}) !important;
-}}
-
-/* ── Tab highlight ────────────────────────────────────────────────────── */
+/* ── Tabs & Progress ── */
 .stTabs [aria-selected="true"] {{
     color: {PRIMARY} !important;
     border-bottom: 2px solid {ACCENT} !important;
 }}
-
-/* ── Disclaimer ───────────────────────────────────────────────────────── */
-.mg-disclaimer {{
-    background: #FFF8E7; border-left: 4px solid {WARN};
-    padding: 0.65rem 0.95rem; font-size: 0.82rem;
-    color: #6B5B23; border-radius: 6px; margin-top: 0.6rem;
+.stProgress > div > div > div {{
+    background: linear-gradient(90deg, {PRIMARY}, {ACCENT}) !important;
 }}
 
-/* ── Entity result chips (Graph Explorer) ─────────────────────────────── */
+/* ── Disclaimer ── */
+.mg-disclaimer {{
+    background: #FFFBEB; border-left: 4px solid {WARN};
+    padding: 0.8rem 1rem; font-size: 0.85rem;
+    color: #92400E; border-radius: 8px; margin-top: 0.8rem;
+    line-height: 1.5;
+}}
+
+/* ── Entity result chips (Graph Explorer) ── */
 .mg-entity-chip {{
     background: {CARD}; border: 1px solid {BORDER}; border-radius: 10px;
     padding: 0.55rem 0.85rem; text-align: left;
@@ -325,8 +366,8 @@ def inject_theme() -> None:
     st.markdown(_CSS, unsafe_allow_html=True)
 
 
-def render_brand() -> None:
-    """Render the sidebar brand block: logo + wordmark."""
+def render_brand(status_html: str = "") -> None:
+    """Render the sidebar brand block: logo + wordmark + optional status."""
     st.markdown(
         f"""
         <div class="mg-brand">
@@ -335,6 +376,7 @@ def render_brand() -> None:
             <div class="mg-name">MedGraphia</div>
             <div class="mg-tag">Medical GraphRAG</div>
           </div>
+          {status_html}
         </div>
         """,
         unsafe_allow_html=True,

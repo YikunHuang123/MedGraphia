@@ -21,10 +21,12 @@ from components.graph_viz import render_subgraph  # noqa: E402
 from components.styles import banner, inject_theme, render_brand  # noqa: E402
 
 
+from components.sidebar import render_common_sidebar  # noqa: E402
+
 st.set_page_config(page_title="Graph Explorer — MedGraphia", layout="wide")
 inject_theme()
 with st.sidebar:
-    render_brand()
+    render_common_sidebar()
 banner(
     "Graph Explorer",
     "Search a disease, drug or gene, then walk its 1–3 hop neighbourhood.",
