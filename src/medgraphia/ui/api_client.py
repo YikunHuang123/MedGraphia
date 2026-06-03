@@ -143,6 +143,16 @@ class MedGraphiaClient:
         return self._request("GET", "/graph/stats")
 
     # ------------------------------------------------------------------
+    # Chat History
+    # ------------------------------------------------------------------
+
+    def list_sessions(self) -> list[dict[str, Any]]:
+        return self._request("GET", "/chat/sessions") or []
+
+    def get_session(self, session_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/chat/sessions/{session_id}")
+
+    # ------------------------------------------------------------------
     # Chat (synchronous)
     # ------------------------------------------------------------------
 

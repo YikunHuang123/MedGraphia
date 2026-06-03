@@ -69,7 +69,7 @@ _CSS = f"""
 }}
 
 /* ── Page chrome ───────────────────────────────────────────────────────── */
-#MainMenu, footer {{ visibility: hidden; }}
+#MainMenu, footer, .stDeployButton {{ visibility: hidden; }}
 header {{ background: transparent !important; }}
 .block-container {{
     padding-top: 1.2rem;
@@ -105,9 +105,19 @@ header {{ background: transparent !important; }}
 /* ── Brand block in the sidebar ───────────────────────────────────────── */
 .mg-brand {{
     display: flex; align-items: center; gap: 12px;
-    padding: 0.4rem 0 1.1rem;
+    padding: 1.2rem 1.5rem;
     border-bottom: 1px solid {BORDER};
-    margin-bottom: 1rem;
+    background: {SURFACE};
+}}
+[data-testid="stSidebar"] > div:first-child {{
+    display: flex !important;
+    flex-direction: column !important;
+}}
+[data-testid="stSidebarNav"] {{
+    order: 2 !important;
+}}
+[data-testid="stSidebarContent"] {{
+    order: 1 !important;
 }}
 .mg-brand-logo {{
     width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0;

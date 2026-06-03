@@ -163,24 +163,6 @@ def render_sidebar() -> None:
         else:
             st.caption("Provide a key above to start querying.")
 
-        # Connection (collapsible)
-        with st.expander("Connection", expanded=False):
-            new_url = st.text_input(
-                "API base URL",
-                value=st.session_state["api_base_url"],
-                placeholder="http://localhost:8058",
-            )
-            if new_url.strip() and new_url.strip() != st.session_state["api_base_url"]:
-                st.session_state["api_base_url"] = new_url.strip()
-                # Bust the cached client so it picks up the new URL
-                get_client.clear()
-                st.rerun()
-
-            if st.button("Refresh status", use_container_width=True):
-                _check_health_cached.clear()
-                _graph_stats_cached.clear()
-                st.rerun()
-
 
 render_sidebar()
 
