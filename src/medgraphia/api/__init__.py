@@ -61,6 +61,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         tracing=cfg.tracing_enabled,
     )
 
+    # 5. Background Warm-up: eagerly load ML models and prime GPU kernels
+    from medgraphia.api.health import _warm_up_models
+    import asyncio
+    asyncio.create_task(_warm_up_models())
+
     logger.info("medgraphia_ready", port=cfg.api_port)
     yield  # ─── application running ─────────────────────────────────────────
 

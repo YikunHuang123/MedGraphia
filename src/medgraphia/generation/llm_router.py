@@ -175,16 +175,30 @@ class LLMRouter:
     ) -> tuple[LiteLLMGateway, RoutingDecision]:
         """
         Return (gateway, decision) for the given query type and language.
-
-        The gateway is pre-configured with the correct API key and model ID
-        so callers only need to supply the prompt content.
         """
+        from medgraphia.config import get_settings
+        cfg = get_settings()
+        
         tier = _QUERY_TYPE_TIER.get(query_type, ModelTier.MEDIUM)
         provider, model_name = self._tier_models[tier]
         reason = f"query_type={query_type.value} → tier={tier.value}"
 
-        # For LARGE tier apply language preference when key is available
-        if tier == ModelTier.LARGE and self._respect_lang:
+        # ── Language Preference Override ─────────────────────────────────────
+        # Only apply if:
+        # 1. It's a LARGE tier query
+        # 2. We are in 'respect_language' mode
+        # 3. The user HAS NOT explicitly set a tier-specific provider
+        #    (i.e., the current provider is still the global default)
+        
+        is_explicit_config = False
+        if tier == ModelTier.LARGE and cfg.llm_large_provider:
+            is_explicit_config = True
+        elif tier == ModelTier.MEDIUM and cfg.llm_medium_provider:
+            is_explicit_config = True
+        elif tier == ModelTier.SMALL and cfg.llm_small_provider:
+            is_explicit_config = True
+
+        if tier == ModelTier.LARGE and self._respect_lang and not is_explicit_config:
             lang_pref = _LANG_LARGE_PREF.get(language)
             if lang_pref is not None:
                 pref_provider, pref_model = lang_pref
@@ -193,6 +207,8 @@ class LLMRouter:
                     reason += f"; lang_override={language.value}→{provider.value}/{model_name}"
                 else:
                     reason += f"; lang_override={language.value} skipped (no key)"
+        elif is_explicit_config:
+            reason += "; using explicit tier config"
 
         decision = RoutingDecision(
             provider=provider,
