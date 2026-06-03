@@ -1,5 +1,19 @@
 """
 FastAPI application factory with lifespan management.
+
+Startup sequence
+────────────────
+1. Configure structured logging
+2. Load the bootstrap admin API key from config
+3. Connect to Neo4j and apply the graph schema (idempotent DDL)
+4. Verify Qdrant connectivity
+5. Initialise the Langfuse tracing client (no-op when disabled)
+6. Register all routers
+
+Shutdown sequence
+─────────────────
+1. Flush any pending Langfuse events
+2. Close the Neo4j driver connection pool
 """
 from __future__ import annotations
 
@@ -27,51 +41,90 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     configure_logging(cfg.log_level)
     logger.info("medgraphia_starting", storage=cfg.storage_backend, auth=cfg.auth_strategy)
 
-    # Load the admin API key from config into the in-memory key store
-    _load_bootstrap_key()
+    # 1. Bootstrap API key
+    await _load_bootstrap_key()
 
-    # Establish Neo4j connection and apply schema (idempotent)
+    # 2. Neo4j: establish connection pool and apply schema DDL
     await get_driver()
     await apply_schema()
+    logger.info("neo4j_ready")
+
+    # 3. Qdrant: verify connectivity at startup so we fail fast if it's down
+    await _check_qdrant(cfg.qdrant_url)
+
+    # 4. Langfuse: initialise singleton (no-op when tracing is disabled)
+    from medgraphia.observability import get_langfuse_client
+    lf = get_langfuse_client()
+    logger.info(
+        "observability_ready",
+        langfuse=lf.enabled,
+        tracing=cfg.tracing_enabled,
+    )
 
     logger.info("medgraphia_ready", port=cfg.api_port)
-    yield
+    yield  # ─── application running ─────────────────────────────────────────
 
-    # Graceful shutdown
+    # Shutdown: flush Langfuse buffer then close Neo4j driver
+    lf.flush()
+
     await close_driver()
     logger.info("medgraphia_stopped")
 
 
 def create_app() -> FastAPI:
-    """Application factory — called by uvicorn and tests."""
+    """
+    Application factory — called by uvicorn (factory mode) and test fixtures.
+
+    All routers are registered here so they appear in the OpenAPI schema.
+    """
     cfg = get_settings()
 
     app = FastAPI(
         title="MedGraphia API",
-        description="GraphRAG-powered multilingual medical knowledge Q&A",
+        description=(
+            "GraphRAG-powered multilingual medical knowledge Q&A.\n\n"
+            "Supports English, Chinese (Simplified), and German."
+        ),
         version="0.1.0",
         docs_url="/docs",
         redoc_url="/redoc",
         lifespan=lifespan,
     )
 
-    # CORS (restrict in production)
+    # ── CORS ─────────────────────────────────────────────────────────────────
+    # In production, replace allow_origins=["*"] with an explicit domain list.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"], # In production, configure this via settings
+        allow_origins=["*"],
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # ── Request audit / tracing middleware ───────────────────────────────────
     app.add_middleware(AuditMiddleware)
 
-    # Routers — more will be added in Phase 8
+    # ── Routers ──────────────────────────────────────────────────────────────
+    # Health (public — no auth)
     app.include_router(health_router)
+
+    # Chat — synchronous and streaming Q&A
+    from medgraphia.api.chat import router as chat_router
+    app.include_router(chat_router)
+
+    # Knowledge-graph exploration
+    from medgraphia.api.knowledge import router as knowledge_router
+    app.include_router(knowledge_router)
+
+    # Admin (requires admin role)
+    from medgraphia.api.admin import router as admin_router
+    app.include_router(admin_router)
 
     return app
 
 
 def run() -> None:
-    """Entry point used by the medgraphia-api CLI script."""
+    """Entry point used by the `medgraphia-api` CLI script."""
     import uvicorn
     cfg = get_settings()
     uvicorn.run(
@@ -79,6 +132,30 @@ def run() -> None:
         factory=True,
         host=cfg.api_host,
         port=cfg.api_port,
-        reload=False,  # Set to True for development if needed
+        reload=False,
         log_level=cfg.log_level.lower(),
     )
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+async def _check_qdrant(qdrant_url: str) -> None:
+    """
+    Verify that Qdrant is reachable at startup.
+
+    Uses the vector-store singleton's health() method so the same client
+    that handles queries is used for the connectivity check.
+    """
+    try:
+        from medgraphia.api.deps import get_vector_store
+        store = get_vector_store()
+        ok = await store.health()
+        if ok:
+            logger.info("qdrant_ready", url=qdrant_url)
+        else:
+            # Not fatal — the app starts but queries will degrade gracefully
+            logger.warning("qdrant_unreachable", url=qdrant_url)
+    except Exception as exc:
+        logger.warning("qdrant_check_failed", url=qdrant_url, error=str(exc))

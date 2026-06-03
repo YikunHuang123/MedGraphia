@@ -117,6 +117,107 @@ async def link_entity_to_chunk(cui: str, entity_type: str, chunk_id: str) -> Non
         await session.run(cypher, cui=cui, chunk_id=chunk_id)
 
 
+async def get_all_entities() -> list[dict[str, Any]]:
+    """
+    Query Neo4j for all entity nodes and return them as plain dicts.
+    Used by the embedding layer to sync graph entities to the vector store.
+    """
+    cypher = """
+    MATCH (e)
+    WHERE (e:Disease OR e:Drug OR e:Symptom OR e:Gene OR e:Procedure)
+      AND e.cui IS NOT NULL AND e.label IS NOT NULL
+    RETURN e.cui        AS cui,
+           e.label      AS label,
+           labels(e)[0] AS entity_type,
+           coalesce(e.lang_zh, '') AS lang_zh,
+           coalesce(e.lang_de, '') AS lang_de
+    ORDER BY e.cui
+    """
+    entities: list[dict[str, Any]] = []
+    try:
+        async with get_session() as session:
+            result = await session.run(cypher)
+            async for record in result:
+                if record["cui"] and record["label"]:
+                    entities.append({
+                        "cui": record["cui"],
+                        "label": record["label"],
+                        "entity_type": record["entity_type"] or "Unknown",
+                        "lang_zh": record["lang_zh"] or "",
+                        "lang_de": record["lang_de"] or "",
+                    })
+        logger.info("entity_fetch_done", count=len(entities))
+    except Exception as exc:
+        logger.warning("entity_fetch_failed", error=str(exc))
+    return entities
+
+async def get_chunks_from_db(limit: int = 5000) -> list[Chunk]:
+    """
+    Fetch stored chunks and their associated entities from Neo4j.
+    Enables resuming the pipeline at the Relation Extraction stage.
+    """
+    from medgraphia.domain import SourceMeta, Language, Entity, EntityType
+
+    cypher = """
+    MATCH (c:Chunk)
+    OPTIONAL MATCH (c)-[:FROM_DOC]->(d:Document)
+    OPTIONAL MATCH (e)-[:MENTIONED_IN]->(c)
+    RETURN c, d, collect(e) AS entities
+    LIMIT $limit
+    """
+    chunks: list[Chunk] = []
+    async with get_session() as session:
+        result = await session.run(cypher, limit=limit)
+        async for record in result:
+            c_node = record["c"]
+            d_node = record["d"]
+            e_nodes = record["entities"]
+            
+            # Reconstruct SourceMeta
+            source = SourceMeta(
+                source_id=c_node.get("source_id", "unknown"),
+                source_title=d_node.get("source_title", "Unknown Document") if d_node else "Unknown",
+                source_version=c_node.get("source_version", "1.0")
+            )
+            
+            # Reconstruct Entity objects
+            chunk_entities = []
+            for e in e_nodes:
+                if e.get("cui") and e.get("label"):
+                    # Determine entity type from labels (Disease, Drug, etc.)
+                    e_type_str = list(set(e.labels) - {"Entity"})[0] if e.labels else "Disease"
+                    chunk_entities.append(
+                        Entity(
+                            cui=e["cui"],
+                            label=e["label"],
+                            entity_type=EntityType(e_type_str),
+                            confidence=e.get("confidence", 1.0),
+                            lang_labels={
+                                "zh": e.get("lang_zh", ""),
+                                "de": e.get("lang_de", ""),
+                            }
+                        )
+                    )
+
+            # Reconstruct Chunk
+            chunk = Chunk(
+                chunk_id=c_node["chunk_id"],
+                doc_id=c_node["doc_id"],
+                text=c_node["text"],
+                section_path=c_node.get("section_path", ""),
+                language=Language(c_node.get("language", "en")),
+                token_count=c_node.get("token_count", 0),
+                page=c_node.get("page"),
+                char_offset=c_node.get("char_offset", 0),
+                source=source,
+                entities=chunk_entities
+            )
+            chunks.append(chunk)
+            
+    logger.info("chunks_fetched_from_db", count=len(chunks), with_entities=True)
+    return chunks
+
+
 # ---------------------------------------------------------------------------
 # Relations
 # ---------------------------------------------------------------------------
@@ -186,12 +287,17 @@ async def upsert_community(community_id: str, summary: str, member_cuis: list[st
 async def get_subgraph(cui: str, hops: int = 2) -> dict[str, Any]:
     """
     Expand a 1- or 2-hop subgraph starting from a given CUI.
-    Returns nodes and edges as serialisable dicts.
+
+    Optimisations:
+      - Excludes 'Chunk' nodes to avoid supernode path explosions.
+      - Returns only essential serialisable properties to reduce payload size.
     """
+    # ── Cypher: exclude Chunk nodes and filter paths ─────────────────────────
     cypher = """
     MATCH path = (start {cui: $cui})-[*1..{hops}]-(neighbor)
+    WHERE ALL(n IN nodes(path) WHERE NOT n:Chunk)
     RETURN path
-    LIMIT 500
+    LIMIT 300
     """.replace("{hops}", str(hops))
 
     nodes: dict[str, dict] = {}
@@ -204,14 +310,22 @@ async def get_subgraph(cui: str, hops: int = 2) -> dict[str, Any]:
             for node in path.nodes:
                 nid = str(node.element_id)
                 if nid not in nodes:
-                    nodes[nid] = {"id": nid, "labels": list(node.labels), **dict(node)}
+                    # Only return UI-essential fields (no raw text)
+                    nodes[nid] = {
+                        "id": nid,
+                        "cui": node.get("cui"),
+                        "label": node.get("label"),
+                        "labels": list(node.labels),
+                        "lang_zh": node.get("lang_zh", ""),
+                        "lang_de": node.get("lang_de", ""),
+                    }
             for rel in path.relationships:
                 edges.append(
                     {
                         "type": rel.type,
                         "source": str(rel.start_node.element_id),
                         "target": str(rel.end_node.element_id),
-                        **dict(rel),
+                        "confidence": rel.get("confidence", 1.0),
                     }
                 )
 
@@ -219,26 +333,133 @@ async def get_subgraph(cui: str, hops: int = 2) -> dict[str, Any]:
 
 
 async def get_graph_stats() -> dict[str, int]:
-    """Return counts of nodes and relationships for the admin panel."""
-    cypher = """
-    CALL apoc.meta.stats()
-    YIELD nodeCount, relCount
-    RETURN nodeCount, relCount
+    """
+    Return counts of nodes and relationships.
+    Uses fast APOC metadata or database statistics where possible.
     """
     async with get_session() as session:
+        # ── Path A: APOC Metadata (Fastest) ──────────────────────────────────
         try:
-            result = await session.run(cypher)
+            result = await session.run("CALL apoc.meta.stats() YIELD nodeCount, relCount")
             record = await result.single()
             if record:
-                return {"nodes": record["nodeCount"], "relations": record["relCount"]}
+                return {"nodes": int(record["nodeCount"]), "relations": int(record["relCount"])}
         except Exception:
             pass
-        # Fallback without APOC
-        n_result = await session.run("MATCH (n) RETURN count(n) AS cnt")
-        n_record = await n_result.single()
-        r_result = await session.run("MATCH ()-[r]->() RETURN count(r) AS cnt")
-        r_record = await r_result.single()
-        return {
-            "nodes": n_record["cnt"] if n_record else 0,
-            "relations": r_record["cnt"] if r_record else 0,
-        }
+
+        # ── Path B: Fast Count (O(1) on most modern Neo4j versions) ──────────
+        try:
+            # COUNT(*) on a label is usually optimized to use internal counters
+            n_res = await session.run("MATCH (n) RETURN count(n) AS cnt")
+            n_rec = await n_res.single()
+            r_res = await session.run("MATCH ()-[r]->() RETURN count(r) AS cnt")
+            r_rec = await r_res.single()
+            return {
+                "nodes": n_rec["cnt"] if n_rec else 0,
+                "relations": r_rec["cnt"] if r_rec else 0,
+            }
+        except Exception as exc:
+            logger.warning("graph_stats_fallback_failed", error=str(exc))
+            return {"nodes": 0, "relations": 0}
+
+
+# ---------------------------------------------------------------------------
+# Admin & Auth Persistence
+# ---------------------------------------------------------------------------
+
+async def create_api_key_node(key_hash: str, prefix: str, role: str) -> None:
+    """Persist a hashed API key and its metadata."""
+    cypher = """
+    MERGE (k:ApiKey {key_hash: $key_hash})
+    SET k.prefix = $prefix,
+        k.role   = $role,
+        k.active = True,
+        k.created_at = datetime()
+    """
+    async with get_session() as session:
+        await session.run(cypher, key_hash=key_hash, prefix=prefix, role=role)
+
+
+async def get_api_key_node(key_hash: str) -> dict[str, Any] | None:
+    """Retrieve key metadata by its hash."""
+    cypher = """
+    MATCH (k:ApiKey {key_hash: $key_hash, active: True})
+    RETURN k.role AS role, k.prefix AS prefix
+    """
+    async with get_session() as session:
+        result = await session.run(cypher, key_hash=key_hash)
+        record = await result.single()
+        return dict(record) if record else None
+
+
+async def list_api_keys() -> list[dict[str, Any]]:
+    """List all active API key metadata (redacted)."""
+    cypher = """
+    MATCH (k:ApiKey {active: True})
+    RETURN k.prefix AS prefix, k.role AS role
+    ORDER BY k.created_at DESC
+    """
+    keys = []
+    async with get_session() as session:
+        result = await session.run(cypher)
+        async for record in result:
+            keys.append(dict(record))
+    return keys
+
+
+async def delete_api_keys_by_prefix(prefix: str) -> int:
+    """Revoke (soft-delete) API keys matching a prefix."""
+    cypher = """
+    MATCH (k:ApiKey)
+    WHERE k.prefix STARTS WITH $prefix
+    SET k.active = False
+    RETURN count(k) AS cnt
+    """
+    async with get_session() as session:
+        result = await session.run(cypher, prefix=prefix)
+        record = await result.single()
+        return record["cnt"] if record else 0
+
+
+async def upsert_pipeline_status(domain: str, status_data: dict[str, Any]) -> None:
+    """Persist the current state of a pipeline run."""
+    cypher = """
+    MERGE (ps:PipelineStatus {domain: $domain})
+    SET ps += $status_data,
+        ps.updated_at = datetime()
+    """
+    async with get_session() as session:
+        await session.run(cypher, domain=domain, status_data=status_data)
+
+
+async def get_pipeline_status(domain: str) -> dict[str, Any] | None:
+    """Retrieve the latest pipeline status for a domain."""
+    cypher = """
+    MATCH (ps:PipelineStatus {domain: $domain})
+    RETURN ps
+    """
+    async with get_session() as session:
+        result = await session.run(cypher, domain=domain)
+        record = await result.single()
+        if record:
+            return _convert_neo4j_types(dict(record["ps"]))
+        return None
+
+
+def _convert_neo4j_types(data: Any) -> Any:
+    """Recursively convert Neo4j-specific types (like DateTime) to standard Python types."""
+    from neo4j.time import DateTime
+    from datetime import datetime
+
+    if isinstance(data, dict):
+        return {k: _convert_neo4j_types(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [_convert_neo4j_types(i) for i in data]
+    elif isinstance(data, DateTime):
+        # Neo4j DateTime -> Standard Python datetime
+        return datetime(
+            data.year, data.month, data.day,
+            data.hour, data.minute, int(data.second),
+            tzinfo=data.tzinfo
+        )
+    return data

@@ -4,6 +4,7 @@ Supports dense-only and dense+sparse hybrid search (native Qdrant feature).
 """
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from qdrant_client import AsyncQdrantClient
@@ -86,47 +87,51 @@ class QdrantStore(VectorStoreBase):
         self,
         collection_name: str,
         chunks: list[Chunk],
+        batch_size: int = 100,
     ) -> int:
-        """Upsert chunks.  Each Chunk must have .embedding set."""
-        points: list[qmodels.PointStruct] = []
+        """Upsert chunks in batches.  Each Chunk must have .embedding set."""
+        total_written = 0
+        
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i : i + batch_size]
+            points: list[qmodels.PointStruct] = []
 
-        for chunk in chunks:
-            if chunk.embedding is None:
-                logger.warning("chunk_missing_embedding", chunk_id=chunk.chunk_id)
-                continue
+            for chunk in batch:
+                if chunk.embedding is None:
+                    logger.warning("chunk_missing_embedding", chunk_id=chunk.chunk_id)
+                    continue
 
-            vectors: dict[str, Any] = {"dense": chunk.embedding}
-            if chunk.sparse_embedding:
-                # Convert {token_id: weight} → SparseVector
-                indices = list(chunk.sparse_embedding.keys())
-                values = [chunk.sparse_embedding[i] for i in indices]
-                vectors["sparse"] = qmodels.SparseVector(indices=indices, values=values)
+                vectors: dict[str, Any] = {"dense": chunk.embedding}
+                if chunk.sparse_embedding:
+                    indices = list(chunk.sparse_embedding.keys())
+                    values = [chunk.sparse_embedding[i] for i in indices]
+                    vectors["sparse"] = qmodels.SparseVector(indices=indices, values=values)
 
-            payload = {
-                "chunk_id": chunk.chunk_id,
-                "doc_id": chunk.doc_id,
-                "section_path": chunk.section_path,
-                "language": chunk.language.value,
-                "source_id": chunk.source.source_id,
-                "source_title": chunk.source.source_title,
-                "source_version": chunk.source.source_version,
-                "text": chunk.text[:1000],  # truncate for storage
-                "page": chunk.page,
-            }
-            points.append(
-                qmodels.PointStruct(
-                    id=chunk.chunk_id,
-                    vector=vectors,
-                    payload=payload,
+                payload = {
+                    "chunk_id": chunk.chunk_id,
+                    "doc_id": chunk.doc_id,
+                    "section_path": chunk.section_path,
+                    "language": chunk.language.value,
+                    "source_id": chunk.source.source_id,
+                    "source_title": chunk.source.source_title,
+                    "source_version": chunk.source.source_version,
+                    "text": chunk.text[:1000],
+                    "page": chunk.page,
+                }
+                points.append(
+                    qmodels.PointStruct(
+                        id=chunk.chunk_id,
+                        vector=vectors,
+                        payload=payload,
+                    )
                 )
-            )
 
-        if not points:
-            return 0
+            if points:
+                await self._client.upsert(collection_name=collection_name, points=points, wait=True)
+                total_written += len(points)
+                logger.debug("qdrant_batch_upserted", collection=collection_name, count=len(points))
 
-        await self._client.upsert(collection_name=collection_name, points=points, wait=True)
-        logger.debug("qdrant_upserted", collection=collection_name, count=len(points))
-        return len(points)
+        return total_written
 
     # ------------------------------------------------------------------
     # Read
@@ -209,10 +214,59 @@ class QdrantStore(VectorStoreBase):
         )
         logger.debug("qdrant_deleted_by_doc_id", collection=collection_name, doc_id=doc_id)
 
+    # ------------------------------------------------------------------
+    # Entity vectors (second collection, dense-only)
+    # ------------------------------------------------------------------
+
+    async def upsert_entities(
+        self,
+        collection_name: str,
+        entity_points: list[dict[str, Any]],
+        batch_size: int = 100,
+    ) -> int:
+        """
+        Upsert entity dense embeddings into the entity collection in batches.
+        """
+        total_written = 0
+        
+        for i in range(0, len(entity_points), batch_size):
+            batch = entity_points[i : i + batch_size]
+            points: list[qmodels.PointStruct] = []
+            
+            for ep in batch:
+                if not ep.get("embedding"):
+                    logger.warning("entity_missing_embedding", cui=ep.get("cui", "?"))
+                    continue
+                points.append(
+                    qmodels.PointStruct(
+                        id=_entity_uuid(ep["cui"]),
+                        vector={"dense": ep["embedding"]},
+                        payload={
+                            "cui": ep["cui"],
+                            "label": ep["label"],
+                            "entity_type": ep.get("entity_type", "Unknown"),
+                            "lang_zh": ep.get("lang_zh", ""),
+                            "lang_de": ep.get("lang_de", ""),
+                        },
+                    )
+                )
+
+            if points:
+                await self._client.upsert(collection_name=collection_name, points=points, wait=True)
+                total_written += len(points)
+                logger.debug("qdrant_entities_batch_upserted", collection=collection_name, count=len(points))
+
+        return total_written
+
 
 # ---------------------------------------------------------------------------
-# Helper
+# Helpers
 # ---------------------------------------------------------------------------
+
+
+def _entity_uuid(cui: str) -> str:
+    """Deterministic UUID for an entity CUI used as the Qdrant point ID."""
+    return str(uuid.uuid5(uuid.NAMESPACE_OID, cui))
 
 def _build_filter(filter_payload: dict[str, Any] | None) -> qmodels.Filter | None:
     if not filter_payload:

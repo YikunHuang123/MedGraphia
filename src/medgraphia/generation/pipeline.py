@@ -144,3 +144,22 @@ class GenerationPipeline:
     def from_settings(cls) -> "GenerationPipeline":
         """Factory method to build a pipeline with default settings."""
         return cls()
+
+    def get_streaming_components(
+        self, query_type: QueryType, language: Language
+    ) -> dict[str, str | bool]:
+        """
+        Return the system prompt and disclaimer for streaming.
+        Provides a public interface for the API layer.
+        """
+        from medgraphia.generation.prompts import (
+            get_disclaimer,
+            get_system_prompt,
+            requires_disclaimer,
+        )
+
+        return {
+            "system_prompt": get_system_prompt(query_type, language),
+            "disclaimer": get_disclaimer(language) if requires_disclaimer(query_type) else "",
+            "requires_disclaimer": requires_disclaimer(query_type),
+        }

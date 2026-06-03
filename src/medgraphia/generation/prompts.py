@@ -83,8 +83,14 @@ _REQUIRES_DISCLAIMER: frozenset[QueryType] = frozenset({
 })
 
 
-def _disclaimer(language: Language) -> str:
+def get_disclaimer(language: Language) -> str:
+    """Return the safety disclaimer for the given language."""
     return _DISCLAIMERS.get(language, _DISCLAIMERS[Language.EN])
+
+
+def requires_disclaimer(query_type: QueryType) -> bool:
+    """True if the query type requires a safety disclaimer."""
+    return query_type in _REQUIRES_DISCLAIMER
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +179,7 @@ _SYSTEM_PROMPTS: dict[tuple[QueryType, Language], str] = {
     (QueryType.LITERATURE_MULTIHOP, Language.DE): (
         "Sie sind ein medizinischer Forschungssynthesator. "
         "Führen Sie mehrstufiges Reasoning über die nummerierten Evidenzpassagen durch "
-        "und zitieren Sie jeden Schlussfolgerungsschritt mit [N]. "
+        "und zitieren Sie jeden Schlussfolgerungsschritt with [N]. "
         "Unterscheiden Sie gesicherte von aufkommender Evidenz. "
         "Fügen Sie einen Haftungsausschluss hinzu. Antworten auf Deutsch."
     ),
@@ -197,7 +203,7 @@ _SYSTEM_PROMPTS: dict[tuple[QueryType, Language], str] = {
 }
 
 
-def _get_system_prompt(query_type: QueryType, language: Language) -> str:
+def get_system_prompt(query_type: QueryType, language: Language) -> str:
     """Return the system prompt for (query_type, language), falling back to English."""
     key = (query_type, language)
     if key not in _SYSTEM_PROMPTS:
@@ -266,8 +272,6 @@ def _build_dspy_predictor(query_type: QueryType) -> Any | None:
         doc = _SCENARIO_DOCS.get(query_type, "Answer the medical question using the context.")
 
         # Build a dspy.Signature class for this scenario.
-        # We use Python's type() with proper __annotations__ so DSPy's metaclass
-        # can inspect the field types correctly.
         class _MedicalAnswerOut(BaseModel):
             answer: str
             citations: list[int]
@@ -311,10 +315,7 @@ _DSPY_LM_CONFIGURED: bool = False
 
 
 def _configure_dspy_lm(gateway: Any) -> None:
-    """
-    Wire a LiteLLMGateway into DSPy's global LM (idempotent per process).
-    DSPy 2.x uses dspy.LM(model_string) where model_string follows litellm notation.
-    """
+    """Wire a LiteLLMGateway into DSPy's global LM."""
     global _DSPY_LM_CONFIGURED
     if _DSPY_LM_CONFIGURED or not _dspy_imported():
         return
@@ -325,7 +326,6 @@ def _configure_dspy_lm(gateway: Any) -> None:
         provider: LLMProvider = gateway._provider
         model_name: str = gateway._model_name
 
-        # Build DSPy-compatible model string (same as litellm convention)
         match provider:
             case LLMProvider.OPENAI:
                 dspy_model = model_name
@@ -354,29 +354,11 @@ def _configure_dspy_lm(gateway: Any) -> None:
 # ---------------------------------------------------------------------------
 
 class MedicalPredictor:
-    """
-    Language-aware predictor for a single query scenario.
-
-    Primary path  : dspy.TypedPredictor  (when dspy-ai is installed)
-    Fallback path : Direct LiteLLMGateway JSON-prompt call
-
-    Usage::
-
-        predictor = MedicalPredictor(QueryType.CLINICAL_DECISION)
-        answer = await predictor.predict(
-            context="[1] Metformin is first-line…\\n[2] HbA1c target is <7%…",
-            question="What is first-line treatment for T2DM?",
-            language=Language.EN,
-            gateway=my_gateway,
-        )
-        print(answer.answer)
-        print(answer.citations)   # [1, 2]
-        print(answer.disclaimer)  # "⚠ This information is for educational…"
-    """
+    """Language-aware predictor for a single query scenario."""
 
     def __init__(self, query_type: QueryType) -> None:
         self._query_type = query_type
-        self._dspy_predictor: Any | None = None  # lazy-init on first call
+        self._dspy_predictor: Any | None = None
 
     async def predict(
         self,
@@ -385,28 +367,16 @@ class MedicalPredictor:
         language: Language,
         gateway: Any | None = None,
     ) -> MedicalAnswer:
-        """
-        Run the predictor and return a MedicalAnswer.
-
-        Args:
-            context:  Numbered context passages as produced by build_numbered_context().
-            question: User's raw question text.
-            language: Target language for the response.
-            gateway:  LiteLLMGateway instance; required for both DSPy and fallback paths.
-        """
         if gateway is None:
-            logger.error("predict_called_without_gateway")
             return MedicalAnswer(
                 answer="Configuration error: no LLM gateway provided.",
                 citations=[],
-                disclaimer=_disclaimer(language),
+                disclaimer=get_disclaimer(language),
             )
 
-        # Lazy-init DSPy predictor
         if self._dspy_predictor is None and _dspy_imported():
             self._dspy_predictor = _build_dspy_predictor(self._query_type)
 
-        # ── DSPy path ─────────────────────────────────────────────────────
         if self._dspy_predictor is not None:
             try:
                 _configure_dspy_lm(gateway)
@@ -419,14 +389,8 @@ class MedicalPredictor:
                 if raw_output is not None:
                     return _coerce_to_answer(raw_output, self._query_type, language)
             except Exception as exc:
-                logger.warning(
-                    "dspy_predict_failed",
-                    query_type=self._query_type.value,
-                    error=str(exc),
-                    fallback="json_prompt",
-                )
+                logger.warning("dspy_predict_failed", error=str(exc))
 
-        # ── JSON-prompt fallback ───────────────────────────────────────────
         return await _json_prompt_predict(
             context=context,
             question=question,
@@ -450,11 +414,9 @@ async def _json_prompt_predict(
     """Send a JSON-instructed prompt and parse the response into MedicalAnswer."""
     from medgraphia.llm.gateway import CompletionRequest, _parse_json_safe
 
-    system_prompt = _get_system_prompt(query_type, language)
-    disc = _disclaimer(language) if query_type in _REQUIRES_DISCLAIMER else ""
+    system_prompt = get_system_prompt(query_type, language)
+    disc = get_disclaimer(language) if requires_disclaimer(query_type) else ""
 
-    # Use a dict and json.dumps to avoid escaping issues in the prompt.
-    # We use a more descriptive placeholder for citations to avoid biasing the model.
     json_template = {
         "answer": f"<your answer in {language.value.upper()} with [N] citations>",
         "citations": [1, 2],
@@ -481,15 +443,10 @@ async def _json_prompt_predict(
     )
 
     resp = await gateway.acomplete(req)
-    
     if not resp.ok:
-        error_msg = resp.metadata.get("error", "Unknown LLM API error")
-        raise RuntimeError(f"LLM API failed: {error_msg}")
+        raise RuntimeError(f"LLM API failed: {resp.metadata.get('error')}")
 
     parsed = _parse_json_safe(resp.text)
-    
-    # Use _coerce_to_answer to ensure disclaimer enforcement and consistent structure.
-    # We pass the parsed dict; _coerce_to_answer will handle validation and defaulting.
     return _coerce_to_answer(parsed, query_type, language)
 
 
@@ -498,62 +455,38 @@ def _coerce_to_answer(
     query_type: QueryType,
     language: Language,
 ) -> MedicalAnswer:
-    """Normalise DSPy output (various types) into a MedicalAnswer."""
     if isinstance(raw, MedicalAnswer):
         answer = raw
     elif isinstance(raw, dict):
         answer = MedicalAnswer(**{k: v for k, v in raw.items() if k in MedicalAnswer.model_fields})
-    elif hasattr(raw, "answer"):
-        answer = MedicalAnswer(
-            answer=str(getattr(raw, "answer", "")),
-            citations=list(getattr(raw, "citations", [])),
-            disclaimer=str(getattr(raw, "disclaimer", "")),
-        )
     else:
         answer = MedicalAnswer(answer=str(raw), citations=[])
 
-    # Inject disclaimer if missing
-    if query_type in _REQUIRES_DISCLAIMER and not answer.disclaimer:
-        answer = answer.model_copy(update={"disclaimer": _disclaimer(language)})
+    if requires_disclaimer(query_type) and not answer.disclaimer:
+        answer = answer.model_copy(update={"disclaimer": get_disclaimer(language)})
 
     return answer
 
 
 def _parse_json_response(text: str) -> dict[str, Any]:
-    """Lenient JSON extractor for LLM responses."""
     text = text.strip()
     fence = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
     content = fence.group(1) if fence else text
-
     start = content.find("{")
     end = content.rfind("}")
     if start == -1 or end == -1:
         return {}
     try:
         return json.loads(content[start : end + 1])
-    except json.JSONDecodeError:
-        cleaned = re.sub(r",\s*([\]}])", r"\1", content[start : end + 1])
-        try:
-            return json.loads(cleaned)
-        except Exception:
-            return {}
+    except Exception:
+        return {}
 
 
 # ---------------------------------------------------------------------------
-# Prompt Registry — one predictor per QueryType, lazily instantiated
+# Prompt Registry
 # ---------------------------------------------------------------------------
 
 class PromptRegistry:
-    """
-    Lazy-loaded, singleton-per-QueryType registry of MedicalPredictor instances.
-
-    Usage::
-
-        registry = PromptRegistry()
-        predictor = registry.get(QueryType.DRUG_INTERACTION)
-        answer = await predictor.predict(context, question, Language.ZH, gateway)
-    """
-
     def __init__(self) -> None:
         self._predictors: dict[QueryType, MedicalPredictor] = {}
 
@@ -563,7 +496,5 @@ class PromptRegistry:
         return self._predictors[query_type]
 
     def preload_all(self) -> None:
-        """Eagerly initialise predictors for all QueryTypes (useful at startup)."""
         for qt in QueryType:
             self.get(qt)
-        logger.info("prompt_registry_preloaded", count=len(self._predictors))
