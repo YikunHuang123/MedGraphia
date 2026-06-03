@@ -126,14 +126,26 @@ class BertNER:
         en_model: str = "d4data/biomedical-ner-all",
         zh_model: str = "uer/roberta-base-finetuned-cluener2020-chinese",
         de_model: str = "",
-        device: int = -1,   # -1 = CPU; set to 0 for first GPU
+        device: str | int | None = None,  # Auto-detect if None
     ) -> None:
         self._model_names: dict[Language, str] = {
             Language.EN: en_model,
             Language.ZH: zh_model,
             Language.DE: de_model,
         }
-        self._device = device
+        
+        # ── Device Auto-detection ────────────────────────────────────────────
+        if device is None:
+            import torch
+            if torch.backends.mps.is_available():
+                self._device = "mps"
+            elif torch.cuda.is_available():
+                self._device = 0 # CUDA index
+            else:
+                self._device = -1 # CPU
+        else:
+            self._device = device
+
         self._pipelines: dict[Language, object] = {}
 
     @property

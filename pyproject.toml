@@ -104,6 +104,14 @@ generation = [
     # DSPy TypedPredictor support (optional — prompts.py falls back without it)
     "dspy-ai>=2.5.0",
 ]
+ui = [
+    # Streamlit frontend (Phase 9). Installs the UI process dependencies
+    # without pulling the heavy ML stack.
+    "streamlit>=1.35.0",
+    "pyvis>=0.3.2",
+    "pandas>=2.2.0",
+    "plotly>=5.22.0",
+]
 
 [project.scripts]
 medgraphia-api = "medgraphia.api:run"

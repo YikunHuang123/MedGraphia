@@ -196,11 +196,20 @@ def _item_to_citation(number: int, item: FusedItem) -> Citation:
     meta = item.metadata
 
     chunk_id = _str_or_empty(meta.get("chunk_id"))
-    raw_title = (
-        _str_or_empty(meta.get("source_title"))
-        or _str_or_empty(meta.get("community_id"))
-        or item.item_id
-    )
+    source_title = _str_or_empty(meta.get("source_title"))
+    section_path = _str_or_empty(meta.get("section_path"))
+    community_id = _str_or_empty(meta.get("community_id"))
+
+    # Logic: Prioritize Title + Section for context clarity
+    if source_title and section_path:
+        raw_title = f"{source_title} › {section_path}"
+    elif source_title:
+        raw_title = source_title
+    elif community_id:
+        raw_title = f"Medical Community {community_id}"
+    else:
+        # Avoid showing raw UUIDs to the user
+        raw_title = "Unstructured Medical Context"
     
     # Clean up repetitive FDA/EMA boilerplate from titles
     clean_title = _clean_title(raw_title)
@@ -210,7 +219,6 @@ def _item_to_citation(number: int, item: FusedItem) -> Citation:
     final_title = f"{source_type_label} {clean_title}"
 
     source_version = _str_or_empty(meta.get("source_version"))
-    section_path = _str_or_empty(meta.get("section_path"))
     content_snippet = item.text[:_SNIPPET_MAX].strip()
 
     return Citation(

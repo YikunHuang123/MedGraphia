@@ -424,15 +424,17 @@ async def _json_prompt_predict(
     }
 
     user_prompt = (
-        f"CONTEXT PASSAGES:\n{context}\n\n"
+        f"<context>\n{context}\n</context>\n\n"
         f"QUESTION: {question}\n"
         f"RESPONSE LANGUAGE: {language.value.upper()}\n\n"
         "Respond ONLY with a valid JSON object following this structure:\n"
         f"{json.dumps(json_template, indent=2)}\n\n"
-        "Rules:\n"
-        "1. Answer strictly based on the context.\n"
-        "2. Use [N] for inline citations.\n"
-        "3. Output ONLY the JSON."
+        "### RULES:\n"
+        "1. CHITCHAT: If the question is a casual greeting (e.g., 'hi', 'hello'), answer it politely in the 'answer' field and leave 'citations' empty.\n"
+        "2. STRICT GROUNDING: For all other questions, answer strictly based on the <context>.\n"
+        "3. IRRELEVANCE: If the context does not contain the answer, state that you lack information in the 'answer' field and leave 'citations' empty. Do not guess.\n"
+        "4. CITATIONS: When using the context, use [N] for inline citations.\n"
+        "5. Output ONLY the JSON."
     )
 
     req = CompletionRequest(

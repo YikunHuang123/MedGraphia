@@ -212,13 +212,15 @@ async def chat_stream(
             disclaimer = components["disclaimer"]
 
             user_prompt = (
-                f"CONTEXT PASSAGES:\n{context_str}\n\n"
+                f"<context>\n{context_str}\n</context>\n\n"
                 f"QUESTION: {body.message}\n"
                 f"RESPONSE LANGUAGE: {body.language.value.upper()}\n\n"
-                "INSTRUCTIONS:\n"
-                "1. Answer based ONLY on the provided context.\n"
-                "2. Use [N] for inline citations.\n"
-                "3. Provide a direct and clear medical explanation."
+                "### INSTRUCTIONS:\n"
+                "1. CHITCHAT: If the question is a casual greeting or small talk (e.g., 'hi', 'hello'), respond naturally and politely in the requested language, and IGNORE the context entirely.\n"
+                "2. STRICT GROUNDING: For all other questions, you MUST answer based ONLY on the information provided between the <context> tags.\n"
+                "3. IRRELEVANCE: If the provided context is irrelevant to the question or does not contain the answer, state explicitly that you do not have enough medical information in the requested context to answer this. DO NOT guess or use external knowledge.\n"
+                "4. CITATIONS: When using the context, you must cite the source inline using [N].\n"
+                "5. Provide a direct and clear medical explanation."
             )
 
             llm_router = LLMRouter.from_settings()
