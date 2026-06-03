@@ -498,6 +498,56 @@ async def list_chat_sessions(user_id: str = "anonymous") -> list[dict[str, Any]]
 
 
 # ---------------------------------------------------------------------------
+# Semantic Memory (User Interests)
+# ---------------------------------------------------------------------------
+
+async def update_user_interests(user_id: str, cuis: list[str], decay_factor: float = 0.9) -> None:
+    """
+    Update the user's interest in a list of entities.
+    ONLY updates existing Entity nodes. Does NOT create new medical nodes.
+    """
+    if not cuis:
+        return
+
+    # Filter for real CUIs only (in case any mentions leaked through)
+    valid_cuis = [c for c in cuis if not c.startswith("MENTION:")]
+    if not valid_cuis:
+        return
+
+    cypher = """
+    MERGE (u:User {id: $user_id})
+    WITH u
+    UNWIND $cuis AS cui
+    MATCH (e:Entity {cui: cui})
+    MERGE (u)-[r:INTERESTED_IN]->(e)
+    ON CREATE SET r.weight = 1.0, r.last_accessed = $now
+    ON MATCH SET r.weight = (r.weight * $decay) + 1.0, r.last_accessed = $now
+    """
+    async with get_session() as g_session:
+        await g_session.run(
+            cypher,
+            user_id=user_id,
+            cuis=valid_cuis,
+            decay=decay_factor,
+            now=datetime.now().isoformat(),
+        )
+    logger.info("user_interests_updated", user_id=user_id, count=len(valid_cuis))
+
+
+async def get_user_top_interests(user_id: str, limit: int = 10) -> list[str]:
+    """Return the CUIs of the entities a user is most interested in."""
+    cypher = """
+    MATCH (u:User {id: $user_id})-[r:INTERESTED_IN]->(e:Entity)
+    RETURN e.cui AS cui
+    ORDER BY r.weight DESC
+    LIMIT $limit
+    """
+    async with get_session() as g_session:
+        result = await g_session.run(cypher, user_id=user_id, limit=limit)
+        return [record["cui"] async for record in result]
+
+
+# ---------------------------------------------------------------------------
 # Admin & Auth Persistence
 # ---------------------------------------------------------------------------
 

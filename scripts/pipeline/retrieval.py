@@ -28,6 +28,7 @@ async def main():
     
     # 2. Define test queries
     test_queries = [
+        "什么是肾衰竭?",
         "What is the interaction between metformin and sitagliptin?",
         "How to treat type 2 diabetes?",
         "Give me an overview of cardiovascular disease prevalence.",

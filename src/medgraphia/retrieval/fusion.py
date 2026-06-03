@@ -75,21 +75,33 @@ class FusionResult:
 # ---------------------------------------------------------------------------
 
 def _graph_to_items(result: Any) -> list[FusedItem]:
-    """Convert GraphRetrievalResult → FusedItem list (one item per unique triple text)."""
+    """Convert GraphRetrievalResult → FusedItem list."""
     from medgraphia.retrieval.graph_retriever import GraphRetrievalResult
     if not isinstance(result, GraphRetrievalResult):
         return []
 
     items: list[FusedItem] = []
-    seen: set[str] = set()
+    seen_texts: set[str] = set()
 
-    for triple in result.triples:
+    # Sort triples: IDENTITY summaries first, then others by confidence
+    sorted_triples = sorted(
+        result.triples, 
+        key=lambda x: (x.relation_type == "IDENTITY", x.confidence), 
+        reverse=True
+    )
+
+    for triple in sorted_triples:
         text = triple.as_text()
-        if text in seen:
+        if text in seen_texts:
             continue
-        seen.add(text)
+        seen_texts.add(text)
 
-        item_id = f"{triple.entity_cui}|{triple.relation_type}|{triple.neighbor_cui}"
+        # ── CORE FUSION LOGIC ──
+        # If the triple has a chunk_id, use it as the item_id.
+        # This allows it to overlap with the Vector search's chunk_id,
+        # resulting in a much higher RRF score for "Knowledge Graph confirmed" chunks.
+        item_id = triple.chunk_id if triple.chunk_id else f"{triple.entity_cui}|{triple.relation_type}|{triple.neighbor_cui}"
+        
         items.append(
             FusedItem(
                 item_id=item_id,

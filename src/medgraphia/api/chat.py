@@ -18,6 +18,9 @@ import json
 import time
 from typing import AsyncIterator
 
+# import Any
+from typing import Any
+
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -143,6 +146,8 @@ async def chat(
                 query=body.message,
                 language=language,
                 trace=trace,
+                history=session.messages,
+                user_id=principal.get("id", "anonymous"),
             )
         except Exception as exc:
             logger.error("chat_pipeline_error", error=str(exc), request_id=request_id)
@@ -166,6 +171,19 @@ async def chat(
             )
         )
         await save_session(session)
+
+        # ── Step 5: Update Long-term Graph Memory ─────────────────────
+        # Record interest in both explicit query entities and the top retrieved graph node
+        all_cuis = set(result.get("linked_cuis", []))
+        if result.get("top_graph_cui"):
+            all_cuis.add(result["top_graph_cui"])
+
+        if all_cuis:
+            from medgraphia.graph.queries import update_user_interests
+            u_id = principal.get("id", "anonymous")
+            cuis_list = list(all_cuis)
+            logger.info("scheduling_interest_update", user_id=u_id, entities=cuis_list)
+            asyncio.create_task(update_user_interests(user_id=u_id, cuis=cuis_list))
 
         latency_ms = int((time.monotonic() - t0) * 1000)
         logger.info("chat_ok", session_id=session.session_id, latency_ms=latency_ms)
@@ -232,7 +250,9 @@ async def chat_stream(
                 try:
                     reranked = await retrieval.execute(
                         query=body.message,
+                        history=session.messages,
                         language=language,
+                        user_id=principal.get("id", "anonymous"),
                     )
                 except Exception as exc:
                     logger.error("stream_retrieval_failed", error=str(exc))
@@ -260,14 +280,22 @@ async def chat_stream(
             system_prompt = components["system_prompt"]
             disclaimer = components["disclaimer"]
 
+            # Format history for prompt (Layer 4)
+            history_str = ""
+            for m in session.messages[-5:]:
+                role = "User" if m.role == "user" else "Assistant"
+                history_str += f"{role}: {m.content}\n"
+
             user_prompt = (
                 f"<context>\n{context_str}\n</context>\n\n"
-                f"QUESTION: {body.message}\n\n"
-                f"### MANDATORY INSTRUCTIONS:\n"
-                f"1. LANGUAGE: You MUST answer ONLY in {target_lang}.\n"
-                f"2. CITATIONS: Use [N] for inline citations (e.g., [1], [2]) for every factual claim.\n"
-                f"3. GROUNDING: If the context is irrelevant to the question, respond ONLY with: {no_info_msg}\n"
-                f"4. Output ONLY the response text."
+                f"CONVERSATION HISTORY:\n{history_str}\n"
+                f"CURRENT QUESTION: {body.message}\n\n"
+                f"### INSTRUCTIONS:\n"
+                f"- ANSWERING: Use the provided context to answer the question accurately.\n"
+                f"- LANGUAGE: You MUST answer ONLY in {target_lang}.\n"
+                f"- CITATIONS: Use [N] for inline citations (e.g., [1], [2]) for every factual claim.\n"
+                f"- GROUNDING: If the context truly contains no information to answer the question, state that you don't have enough specific details, but try to use any relevant fragments provided.\n"
+                f"- FORMAT: Output ONLY the response text."
             )
 
             llm_router = LLMRouter.from_settings()
@@ -315,7 +343,31 @@ async def chat_stream(
             )
             await save_session(session)
 
-            # ── Step 5: Send Metadata Events ────────────────────────────────
+            # ── Step 5: Update Long-term Graph Memory ─────────────────────
+            # 1. CUIs explicitly linked from the query (high signal)
+            all_cuis = set(getattr(reranked, "linked_cuis", []))
+            
+            # 2. Implicit interest: Top-ranked graph node if it appears in top-10
+            from medgraphia.retrieval.fusion import RetrievalSource
+            top_items = getattr(reranked, "items", [])[:10]
+            for item in top_items:
+                if item.source == RetrievalSource.GRAPH:
+                    cui = item.metadata.get("entity_cui")
+                    if cui:
+                        all_cuis.add(cui)
+                        # We only link the SINGLE most relevant graph node from the top 10
+                        break
+
+            if all_cuis:
+                from medgraphia.graph.queries import update_user_interests
+                u_id = principal.get("id", "anonymous")
+                cuis_list = list(all_cuis)
+                logger.info("scheduling_interest_update", user_id=u_id, entities=cuis_list)
+                asyncio.create_task(update_user_interests(user_id=u_id, cuis=cuis_list))
+            else:
+                logger.info("no_linked_entities_for_memory")
+
+            # ── Step 6: Send Metadata Events ────────────────────────────────
             yield _sse({
                 "type": "citations",
                 "citations": [c.model_dump() for c in citation_result.citations],
@@ -345,6 +397,8 @@ async def _run_full_pipeline(
     query: str,
     language: Language,
     trace: TraceContext,
+    history: list[Message] | None = None,
+    user_id: str = "anonymous",
 ) -> dict:
     """Execute retrieve → generate and return a unified result dict."""
     retrieval = await _get_retrieval()
@@ -352,7 +406,12 @@ async def _run_full_pipeline(
 
     # ── Retrieval ─────────────────────────────────────────────────────────────
     with trace.span("retrieval", input=query) as span:
-        reranked = await retrieval.execute(query=query, language=language)
+        reranked = await retrieval.execute(
+            query=query, 
+            history=history,
+            language=language,
+            user_id=user_id,
+        )
         items = getattr(reranked, "items", [])
         query_type: QueryType = getattr(reranked, "query_type", QueryType.PATIENT_FAQ)
         retrieval_paths = list({item.source.value for item in items})
@@ -364,10 +423,20 @@ async def _run_full_pipeline(
             question=query,
             query_type=query_type,
             retrieved_items=items,
+            history=history,
             language=language,
         )
         model_used = gen_result.routing.model_name if gen_result.routing else ""
         span.end(output=gen_result.answer[:200])
+
+    # ── Step 3: Extract implicit interest (Top graph node in top 10) ──────────
+    from medgraphia.retrieval.fusion import RetrievalSource
+    top_graph_cui = None
+    for item in items[:10]:
+        if item.source == RetrievalSource.GRAPH:
+            top_graph_cui = item.metadata.get("entity_cui")
+            if top_graph_cui:
+                break
 
     return {
         "answer": gen_result.answer,
@@ -376,6 +445,9 @@ async def _run_full_pipeline(
         "model_used": model_used,
         "query_type": query_type,
         "disclaimer": gen_result.disclaimer,
+        "linked_cuis": getattr(reranked, "linked_cuis", []),
+        "unlinked_mentions": getattr(reranked, "unlinked_mentions", []),
+        "top_graph_cui": top_graph_cui,
     }
 
 

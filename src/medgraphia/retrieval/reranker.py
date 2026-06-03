@@ -42,6 +42,8 @@ class RerankedResult:
     query: str = ""
     reranked: bool = False
     query_type: QueryType = QueryType.PATIENT_FAQ
+    linked_cuis: list[str] = field(default_factory=list)
+    unlinked_mentions: list[str] = field(default_factory=list)
 
     def texts(self) -> list[str]:
         return [it.text for it in self.items]

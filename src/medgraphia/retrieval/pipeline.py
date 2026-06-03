@@ -67,6 +67,7 @@ class RetrievalPipeline:
         query: str,
         history: list[Message] | None = None,
         language: Language | None = None,
+        user_id: str | None = None,
         top_k: int = 5,
     ) -> RerankedResult:
         """
@@ -76,12 +77,13 @@ class RetrievalPipeline:
             query:    The user's raw question.
             history:  Optional conversation history for context-aware retrieval.
             language: Optional language override.
+            user_id:  Optional user ID for personalized graph retrieval.
             top_k:    Number of final context passages to return.
 
         Returns:
             RerankedResult containing the optimal context items.
         """
-        logger.info("retrieval_pipeline_started", query_len=len(query), has_history=bool(history))
+        logger.info("retrieval_pipeline_started", query_len=len(query), has_history=bool(history), user_id=user_id)
 
         # ---------------------------------------------------------
         # Step 0: Contextual Query Rewriting
@@ -110,6 +112,7 @@ class RetrievalPipeline:
                     self.graph_retriever.retrieve(
                         cuis=plan.linked_cuis,
                         hops=plan.graph_hops,
+                        user_id=user_id,
                     )
                 )
             )
@@ -192,13 +195,15 @@ class RetrievalPipeline:
         rerank_candidates = fusion_result.top(20)
 
         final_result = self.reranker.rerank(
-            query=query,
+            query=search_query,
             fusion_result=rerank_candidates,
             top_k=top_k,
         )
 
-        # Inject the query type into the result for downstream use
+        # Inject additional metadata into the result for downstream use
         final_result.query_type = plan.query_type
+        final_result.linked_cuis = plan.linked_cuis
+        final_result.unlinked_mentions = plan.query_entities.unlinked_mentions
 
         logger.info(
             "retrieval_pipeline_completed",

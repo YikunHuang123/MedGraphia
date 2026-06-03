@@ -87,12 +87,13 @@ class GraphRetrievalResult:
 # Cypher queries
 # ---------------------------------------------------------------------------
 
-# 1-hop query: only direct neighbours of the seed entity
+# 1-hop query: direct neighbours with optional user interest boost
 _CYPHER_1_HOP = """
 MATCH (start {cui: $cui})-[r]-(neighbor)
 WHERE neighbor.cui IS NOT NULL
   AND NOT r:MENTIONED_IN
   AND NOT r:FROM_DOC
+OPTIONAL MATCH (u:User {id: $user_id})-[interest:INTERESTED_IN]->(neighbor)
 RETURN
   start.cui           AS entity_cui,
   start.label         AS entity_label,
@@ -103,11 +104,28 @@ RETURN
   labels(neighbor)[0] AS neighbor_type,
   coalesce(r.evidence_text, '')  AS evidence_text,
   coalesce(r.confidence, 1.0)    AS confidence,
-  coalesce(r.chunk_id, '')       AS chunk_id
+  coalesce(r.chunk_id, '')       AS chunk_id,
+  coalesce(interest.weight, 0.0) AS interest_weight
+ORDER BY interest_weight DESC, confidence DESC
 LIMIT $limit
 """
 
-# 2-hop query: follows each intermediary one more step (excludes structural edges)
+# Node Summary query: Get the core information about a node and its most important neighbors
+_CYPHER_NODE_SUMMARY = """
+MATCH (n {cui: $cui})
+OPTIONAL MATCH (n)-[r]-(m)
+WHERE NOT type(r) IN ['MENTIONED_IN', 'FROM_DOC']
+WITH n, m, r, labels(n)[0] AS n_type, labels(m)[0] AS m_type
+ORDER BY r.confidence DESC
+WITH n, n_type, collect({rel: type(r), target: m.label, target_type: m_type})[0..10] AS rels
+RETURN 
+  n.cui AS cui,
+  n.label AS label,
+  n_type AS type,
+  rels AS top_relations
+"""
+
+# 2-hop query: follows intermediaries with optional user interest boost
 _CYPHER_2_HOP = """
 MATCH (start {cui: $cui})-[r1]-(mid)-[r2]-(leaf)
 WHERE mid.cui IS NOT NULL
@@ -115,6 +133,7 @@ WHERE mid.cui IS NOT NULL
   AND leaf.cui <> $cui
   AND NOT type(r1) IN ['MENTIONED_IN', 'FROM_DOC']
   AND NOT type(r2) IN ['MENTIONED_IN', 'FROM_DOC']
+OPTIONAL MATCH (u:User {id: $user_id})-[interest:INTERESTED_IN]->(leaf)
 RETURN
   start.cui           AS entity_cui,
   start.label         AS entity_label,
@@ -125,7 +144,9 @@ RETURN
   labels(leaf)[0]     AS neighbor_type,
   ''                  AS evidence_text,
   1.0                 AS confidence,
-  ''                  AS chunk_id
+  ''                  AS chunk_id,
+  coalesce(interest.weight, 0.0) AS interest_weight
+ORDER BY interest_weight DESC, confidence DESC
 LIMIT $limit
 """
 
@@ -166,13 +187,15 @@ class GraphRetriever:
         self,
         cuis: list[str],
         hops: int = 2,
+        user_id: str | None = None,
     ) -> GraphRetrievalResult:
         """
         Expand subgraph for all seed CUIs.
 
         Args:
-            cuis:  Linked CUIs from query-side NER+EL.
-            hops:  1 or 2.  Values > 2 default back to 2.
+            cuis:     Linked CUIs from query-side NER+EL.
+            hops:     1 or 2.  Values > 2 default back to 2.
+            user_id:  Optional user ID to boost historically relevant entities.
 
         Returns:
             GraphRetrievalResult with deduplicated triples.
@@ -184,7 +207,7 @@ class GraphRetriever:
             return result
 
         # Expand all seeds concurrently
-        tasks = [self._expand_one(cui, hops) for cui in cuis]
+        tasks = [self._expand_one(cui, hops, user_id) for cui in cuis]
         per_seed_results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Merge results from all seeds and deduplicate by relationship (A, REL, B).
@@ -224,18 +247,36 @@ class GraphRetriever:
     # Internal
     # ------------------------------------------------------------------
 
-    async def _expand_one(self, cui: str, hops: int) -> list[GraphTriple]:
-        """Run 1-hop and optionally 2-hop Cypher for a single seed CUI."""
+    async def _expand_one(self, cui: str, hops: int, user_id: str | None = None) -> list[GraphTriple]:
+        """Run node summary, 1-hop and optionally 2-hop Cypher for a single seed CUI."""
         triples: list[GraphTriple] = []
 
         try:
             from medgraphia.graph.client import get_session
 
             async with get_session() as session:
-                # Always run 1-hop
+                # 1. Get Node Summary (Identity)
+                summary_res = await session.run(_CYPHER_NODE_SUMMARY, cui=cui)
+                async for record in summary_res:
+                    label = record["label"]
+                    e_type = record["type"]
+                    rels = record["top_relations"]
+                    if rels:
+                        summary_text = f"{label} ({e_type}) is a key entity in the knowledge graph. Known relations include: "
+                        summary_text += "; ".join([f"{r['rel']} {r['target']} ({r['target_type']})" for r in rels])
+                        triples.append(GraphTriple(
+                            entity_cui=cui, entity_label=label, entity_type=e_type,
+                            relation_type="IDENTITY",
+                            neighbor_cui=cui, neighbor_label=label, neighbor_type=e_type,
+                            evidence_text=summary_text,
+                            confidence=1.1 # Identity has highest priority
+                        ))
+
+                # 2. Get 1-hop Neighbors
                 result = await session.run(
                     _CYPHER_1_HOP,
                     cui=cui,
+                    user_id=user_id or "anonymous",
                     limit=self._per_seed_limit,
                 )
                 async for record in result:
@@ -248,6 +289,7 @@ class GraphRetriever:
                     result2 = await session.run(
                         _CYPHER_2_HOP,
                         cui=cui,
+                        user_id=user_id or "anonymous",
                         limit=self._per_seed_limit,
                     )
                     async for record in result2:

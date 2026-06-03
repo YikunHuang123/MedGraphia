@@ -231,7 +231,7 @@ def _plan_from_type(
       PATIENT_FAQ          → vector only (no graph needed for lay answers)
     """
     if qtype == QueryType.DRUG_INTERACTION:
-        return RetrievalPlan(
+        plan = RetrievalPlan(
             query_type=qtype,
             query=query,
             language=language,
@@ -243,7 +243,7 @@ def _plan_from_type(
             vector_limit=15,
         )
     elif qtype == QueryType.CLINICAL_DECISION:
-        return RetrievalPlan(
+        plan = RetrievalPlan(
             query_type=qtype,
             query=query,
             language=language,
@@ -255,7 +255,7 @@ def _plan_from_type(
             vector_limit=20,
         )
     elif qtype == QueryType.LITERATURE_MULTIHOP:
-        return RetrievalPlan(
+        plan = RetrievalPlan(
             query_type=qtype,
             query=query,
             language=language,
@@ -267,7 +267,7 @@ def _plan_from_type(
             vector_limit=25,
         )
     elif qtype == QueryType.CROSS_CORPUS:
-        return RetrievalPlan(
+        plan = RetrievalPlan(
             query_type=qtype,
             query=query,
             language=language,
@@ -280,7 +280,7 @@ def _plan_from_type(
             community_limit=8,
         )
     else:  # PATIENT_FAQ
-        return RetrievalPlan(
+        plan = RetrievalPlan(
             query_type=qtype,
             query=query,
             language=language,
@@ -291,6 +291,15 @@ def _plan_from_type(
             graph_hops=0,
             vector_limit=10,
         )
+
+    # --- CORE OVERRIDE: If medical entities are detected, ALWAYS use the graph ---
+    if entities.has_linked_entities:
+        plan.use_graph = True
+        # Ensure at least 1-hop retrieval if it was set to 0
+        if plan.graph_hops == 0:
+            plan.graph_hops = 1
+
+    return plan
 
 
 # ---------------------------------------------------------------------------
