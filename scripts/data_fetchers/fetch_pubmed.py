@@ -4,7 +4,7 @@ CLI tool: fetch PubMed abstracts and save them as JSON to data/raw/pubmed/.
 
 Usage:
   python scripts/fetch_pubmed.py --domain t2dm --limit 200
-  python scripts/fetch_pubmed.py --query "metformin drug interaction" --limit 50 --out data/raw/pubmed/custom
+  python3 scripts/data_fetchers/fetch_pubmed.py --query "Humans[MeSH] AND Drug Therapy[MeSH] AND 2024:2026[DP]" --limit 20000 --out data/raw/pubmed/clinical_general
 
 Arguments:
   --domain   Predefined domain keyword set (t2dm, cardiovascular, oncology, …)

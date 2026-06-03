@@ -129,7 +129,7 @@ class Settings(BaseSettings):
     # Pipeline / data ingestion
     # ------------------------------------------------------------------
     default_domain: str = "t2dm"
-    pubmed_max_results: int = 200
+    pubmed_max_results: int = 20000
     pubmed_email: str = "user@example.com"
     pubmed_api_key: str = ""
     drug_label_limit: int = 30
