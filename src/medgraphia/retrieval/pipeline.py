@@ -172,9 +172,13 @@ class RetrievalPipeline:
         # ---------------------------------------------------------
         # Step 4: Cross-Encoder Reranking
         # ---------------------------------------------------------
+        # Optimization: Only rerank the top-N candidates from the fusion result.
+        # Reranking 60+ items is slow; top 20 is typically enough for high recall.
+        rerank_candidates = fusion_result.top(20)
+        
         final_result = self.reranker.rerank(
             query=query,
-            fusion_result=fusion_result,
+            fusion_result=rerank_candidates,
             top_k=top_k,
         )
         
