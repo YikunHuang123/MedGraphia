@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from medgraphia.domain.base import Language, QueryType
-from medgraphia.domain.chat import Citation
+from medgraphia.domain.chat import Citation, Message
 from medgraphia.generation.citation import build_numbered_context, inject_citations
 from medgraphia.generation.llm_router import LLMRouter, RoutingDecision
 from medgraphia.generation.prompts import PromptRegistry, MedicalAnswer
@@ -65,6 +65,7 @@ class GenerationPipeline:
         question: str,
         query_type: QueryType,
         retrieved_items: list[FusedItem],
+        history: list[Message] | None = None,
         language: Language = Language.EN,
     ) -> GenerationResult:
         """
@@ -74,41 +75,43 @@ class GenerationPipeline:
             question:         The user's original query.
             query_type:       Identified intent (from retrieval router).
             retrieved_items:  Ranked and fused items (from retrieval pipeline).
+            history:          Optional conversation history.
             language:         Desired response language.
 
         Returns:
             GenerationResult containing the cited answer and metadata.
         """
         t0 = time.monotonic()
-        
-        # 1. Prepare numbered context [1] text... [2] text...
-        context_str = build_numbered_context(retrieved_items)
-        
-        # 2. Select the optimal model/gateway for this specific task
-        gateway, routing = self._router.route(query_type, language)
-        
-        # 3. Predict the answer using the appropriate prompt template
-        predictor = self._prompts.get(query_type)
-        
-        logger.info(
-            "generation_started",
-            query_type=query_type.value,
-            language=language.value,
-            context_items=len(retrieved_items),
-            model=routing.model_name
-        )
-        
+
         try:
-            # Call the LLM
-            # MedicalPredictor handles the JSON parsing and fallback logic
+            # 1. Prepare numbered context [1] text... [2] text...
+            context_str = build_numbered_context(retrieved_items)
+
+            # 2. Select the optimal model/gateway for this specific task
+            gateway, routing = self._router.route(query_type, language)
+
+            # 3. Predict the answer using the appropriate prompt template
+            predictor = self._prompts.get(query_type)
+
+            logger.info(
+                "generation_started",
+                query_type=query_type.value,
+                language=language.value,
+                context_items=len(retrieved_items),
+                history_len=len(history or []),
+                model=routing.model_name
+            )
+
+            # 4. Invoke predictor with history injection
             prediction: MedicalAnswer = await predictor.predict(
                 context=context_str,
                 question=question,
+                history=history,
                 language=language,
                 gateway=gateway,
             )
             
-            # 4. Resolve the [N] citations into full objects with metadata
+            # 5. Resolve the [N] citations into full objects with metadata
             citation_result = inject_citations(
                 answer_text=prediction.answer,
                 context_items=retrieved_items,

@@ -89,16 +89,31 @@ def get_system_prompt(query_type: QueryType, language: Language) -> str:
     return _SYSTEM_PROMPTS.get(key, "You are a medical assistant.")
 
 
-async def _json_prompt_predict(context: str, question: str, language: Language, query_type: QueryType, gateway: Any) -> MedicalAnswer:
+async def _json_prompt_predict(
+    context: str, 
+    question: str, 
+    history: list[Message] | None,
+    language: Language, 
+    query_type: QueryType, 
+    gateway: Any
+) -> MedicalAnswer:
     from medgraphia.llm.gateway import CompletionRequest, _parse_json_safe
     
     lang_names = {Language.EN: "English", Language.ZH: "Chinese", Language.DE: "German"}
     target_lang = lang_names.get(language, "English")
     no_info_msg = get_no_info_message(language)
+
+    # Format history for prompt (Layer 4 in the 4-layer architecture)
+    history_str = ""
+    if history:
+        for m in history[-5:]: # Last 5 messages
+            role = "User" if m.role == "user" else "Assistant"
+            history_str += f"{role}: {m.content}\n"
     
     user_prompt = (
         f"<context>\n{context}\n</context>\n\n"
-        f"QUESTION: {question}\n\n"
+        f"CONVERSATION HISTORY:\n{history_str}\n"
+        f"CURRENT QUESTION: {question}\n\n"
         f"RULES:\n"
         f"1. Respond ONLY in {target_lang}.\n"
         f"2. Cite context using [N].\n"
@@ -106,7 +121,12 @@ async def _json_prompt_predict(context: str, question: str, language: Language, 
         f"Output JSON: {{\"answer\": \"...\", \"citations\": [1], \"disclaimer\": \"...\"}}"
     )
 
-    req = CompletionRequest(system_prompt=get_system_prompt(query_type, language), user_prompt=user_prompt, json_mode=True, temperature=0.1)
+    req = CompletionRequest(
+        system_prompt=get_system_prompt(query_type, language),
+        user_prompt=user_prompt,
+        json_mode=True,
+        temperature=0.1
+    )
     resp = await gateway.acomplete(req)
     parsed = _parse_json_safe(resp.text)
     
@@ -119,9 +139,23 @@ class MedicalPredictor:
     def __init__(self, query_type: QueryType) -> None:
         self._query_type = query_type
 
-    async def predict(self, context: str, question: str, language: Language, gateway: Any | None = None) -> MedicalAnswer:
+    async def predict(
+        self, 
+        context: str, 
+        question: str, 
+        history: list[Message] | None = None,
+        language: Language = Language.EN, 
+        gateway: Any | None = None
+    ) -> MedicalAnswer:
         if gateway is None: return MedicalAnswer(answer="No gateway.", citations=[])
-        return await _json_prompt_predict(context, question, language, self._query_type, gateway)
+        return await _json_prompt_predict(
+            context, 
+            question, 
+            history,
+            language, 
+            self._query_type, 
+            gateway
+        )
 
 
 class PromptRegistry:

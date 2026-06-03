@@ -7,18 +7,20 @@ This module connects all retrieval components into a single, cohesive workflow:
   3. Reciprocal Rank Fusion (RRF)
   4. Cross-encoder Reranking
 """
+
 from __future__ import annotations
 
 import asyncio
 from typing import Any
 
 from medgraphia.domain import Language
+from medgraphia.domain.chat import Message
 from medgraphia.logger import get_logger
-
 from medgraphia.retrieval.community_retriever import CommunityRetriever
 from medgraphia.retrieval.fusion import RRFFusion
 from medgraphia.retrieval.graph_retriever import GraphRetriever
-from medgraphia.retrieval.reranker import Reranker, RerankedResult
+from medgraphia.retrieval.reranker import RerankedResult, Reranker
+from medgraphia.retrieval.rewriter import QueryRewriter
 from medgraphia.retrieval.router import QueryRouter, RetrievalPlan
 from medgraphia.retrieval.vector_retriever import VectorRetriever
 
@@ -40,6 +42,7 @@ class RetrievalPipeline:
     def __init__(
         self,
         router: QueryRouter | None = None,
+        rewriter: QueryRewriter | None = None,
         graph_retriever: GraphRetriever | None = None,
         vector_retriever: VectorRetriever | None = None,
         community_retriever: CommunityRetriever | None = None,
@@ -47,6 +50,7 @@ class RetrievalPipeline:
         reranker: Reranker | None = None,
     ) -> None:
         self.router = router or QueryRouter.from_settings()
+        self.rewriter = rewriter or QueryRewriter.from_settings()
         self.graph_retriever = graph_retriever or GraphRetriever.from_settings()
         self.vector_retriever = vector_retriever or VectorRetriever.from_settings()
         self.community_retriever = community_retriever or CommunityRetriever.from_settings()
@@ -54,13 +58,14 @@ class RetrievalPipeline:
         self.reranker = reranker or Reranker.from_settings()
 
     @classmethod
-    def from_settings(cls) -> "RetrievalPipeline":
+    def from_settings(cls) -> RetrievalPipeline:
         """Instantiate the full pipeline using global configuration."""
         return cls()
 
     async def execute(
         self,
         query: str,
+        history: list[Message] | None = None,
         language: Language | None = None,
         top_k: int = 5,
     ) -> RerankedResult:
@@ -69,19 +74,29 @@ class RetrievalPipeline:
 
         Args:
             query:    The user's raw question.
+            history:  Optional conversation history for context-aware retrieval.
             language: Optional language override.
             top_k:    Number of final context passages to return.
 
         Returns:
             RerankedResult containing the optimal context items.
         """
-        logger.info("retrieval_pipeline_started", query_len=len(query))
+        logger.info("retrieval_pipeline_started", query_len=len(query), has_history=bool(history))
 
         # ---------------------------------------------------------
-        # Step 1: Route & Plan
+        # Step 0: Contextual Query Rewriting
         # ---------------------------------------------------------
-        plan: RetrievalPlan = self.router.route(query, language=language)
-        
+        search_query = query
+        if history:
+            search_query = await self.rewriter.rewrite(
+                query=query, history=history, language=language or Language.EN
+            )
+
+        # ---------------------------------------------------------
+        # Step 1: Route & Plan (using the rewritten query)
+        # ---------------------------------------------------------
+        plan: RetrievalPlan = self.router.route(search_query, language=language)
+
         # ---------------------------------------------------------
         # Step 2: Concurrent Retrieval
         # ---------------------------------------------------------
@@ -107,7 +122,7 @@ class RetrievalPipeline:
             tasks.append(
                 asyncio.create_task(
                     self.vector_retriever.retrieve(
-                        query=query,
+                        query=search_query,
                         limit=plan.vector_limit,
                     )
                 )
@@ -144,10 +159,10 @@ class RetrievalPipeline:
         for name in task_names:
             if name.startswith("skip_"):
                 continue
-            
+
             res = results[result_idx]
             result_idx += 1
-            
+
             if isinstance(res, Exception):
                 logger.error("retriever_task_failed", source=name, error=str(res))
                 continue
@@ -175,19 +190,19 @@ class RetrievalPipeline:
         # Optimization: Only rerank the top-N candidates from the fusion result.
         # Reranking 60+ items is slow; top 20 is typically enough for high recall.
         rerank_candidates = fusion_result.top(20)
-        
+
         final_result = self.reranker.rerank(
             query=query,
             fusion_result=rerank_candidates,
             top_k=top_k,
         )
-        
+
         # Inject the query type into the result for downstream use
         final_result.query_type = plan.query_type
 
         logger.info(
-            "retrieval_pipeline_completed", 
+            "retrieval_pipeline_completed",
             query_type=plan.query_type.value,
-            final_items=len(final_result.items)
+            final_items=len(final_result.items),
         )
         return final_result

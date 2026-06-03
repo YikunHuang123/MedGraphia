@@ -26,17 +26,18 @@ from medgraphia.llm.gateway import LLMProvider
 # pydantic-ai Model Factory
 # ---------------------------------------------------------------------------
 
-def get_model(model_override: str | None = None) -> Model:
+def get_model(model_override: str | None = None, provider_override: str | None = None) -> Model:
     """
     Create a pydantic-ai Model instance based on project settings.
-    Supports OpenAI, DeepSeek, Anthropic, and Ollama (via OpenAI-compatible API).
+    Supports OpenAI, DeepSeek, Anthropic, Gemini, Groq, and Ollama.
     """
     from medgraphia.config import get_settings
     cfg = get_settings()
     
-    # Parse provider into our standard enum
+    # Parse provider: override -> global default
+    p_str = provider_override or cfg.llm_provider
     try:
-        provider = LLMProvider(cfg.llm_provider)
+        provider = LLMProvider(p_str)
     except ValueError:
         provider = LLMProvider.OLLAMA
 
@@ -55,7 +56,7 @@ def get_model(model_override: str | None = None) -> Model:
         key = get_val("anthropic_api_key")
         return AnthropicModel(model_name, api_key=key or "dummy")
 
-    # For OpenAI-compatible endpoints (DeepSeek, Ollama, OpenAI)
+    # For OpenAI-compatible endpoints (DeepSeek, Ollama, OpenAI, Groq)
     api_key = "dummy"
     match provider:
         case LLMProvider.OPENAI:
@@ -64,6 +65,12 @@ def get_model(model_override: str | None = None) -> Model:
         case LLMProvider.DEEPSEEK:
             api_key = get_val("deepseek_api_key") or "dummy"
             base_url = "https://api.deepseek.com"
+        case LLMProvider.GROQ:
+            api_key = get_val("groq_api_key") or "dummy"
+            base_url = "https://api.groq.com/openai/v1"
+        case LLMProvider.GEMINI:
+            from pydantic_ai.models.gemini import GeminiModel
+            return GeminiModel(model_name, api_key=get_val("gemini_api_key") or "dummy")
         case LLMProvider.OLLAMA:
             base_url = base_url or "http://localhost:11434/v1"
             api_key = "ollama"
