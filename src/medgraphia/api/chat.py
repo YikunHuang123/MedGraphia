@@ -27,6 +27,7 @@ from medgraphia.api.deps import create_or_get_session, save_session
 from medgraphia.api.schemas import ChatRequest, ChatResponse
 from medgraphia.domain.base import Language, QueryType
 from medgraphia.domain.chat import Message
+from medgraphia.generation.citation import build_numbered_context, inject_citations
 from medgraphia.generation.pipeline import GenerationPipeline
 from medgraphia.logger import get_logger
 from medgraphia.observability import TraceContext, get_langfuse_client
@@ -88,13 +89,20 @@ async def chat(
     request_id: str = request.state.request_id if hasattr(request.state, "request_id") else ""
     langfuse = get_langfuse_client()
 
+    # Auto-detect language if UNKNOWN
+    language = body.language
+    if language == Language.UNKNOWN:
+        language = Language.detect(body.message)
+    
+    logger.info("query_received", language=language.value, stream=False)
+
     with langfuse.trace(
         "chat",
         session_id=session.session_id,
         user_id=principal.get("id", "anonymous"),
         input=body.message,
         metadata={
-            "language": body.language.value,
+            "language": language.value,
             "domain": body.domain or "",
             "request_id": request_id,
         },
@@ -103,7 +111,7 @@ async def chat(
         try:
             result = await _run_full_pipeline(
                 query=body.message,
-                language=body.language,
+                language=language,
                 trace=trace,
             )
         except Exception as exc:
@@ -170,13 +178,20 @@ async def chat_stream(
     request_id: str = request.state.request_id if hasattr(request.state, "request_id") else ""
     langfuse = get_langfuse_client()
 
+    # Auto-detect language if UNKNOWN
+    language = body.language
+    if language == Language.UNKNOWN:
+        language = Language.detect(body.message)
+    
+    logger.info("query_received", language=language.value, stream=True)
+
     async def _event_stream() -> AsyncIterator[str]:
         with langfuse.trace(
             "chat_stream",
             session_id=session.session_id,
             user_id=principal.get("id", "anonymous"),
             input=body.message,
-            metadata={"language": body.language.value, "request_id": request_id},
+            metadata={"language": language.value, "request_id": request_id},
             tags=["stream"],
         ) as trace:
             # ── Step 1: Retrieval ───────────────────────────────────────────
@@ -187,7 +202,7 @@ async def chat_stream(
                 try:
                     reranked = await retrieval.execute(
                         query=body.message,
-                        language=body.language,
+                        language=language,
                     )
                 except Exception as exc:
                     logger.error("stream_retrieval_failed", error=str(exc))
@@ -200,31 +215,33 @@ async def chat_stream(
                 span.end(output=f"{len(items)} items")
 
             # ── Step 2: Prepare Prompts ─────────────────────────────────────
-            from medgraphia.generation.citation import build_numbered_context, inject_citations
             from medgraphia.generation.llm_router import LLMRouter
             from medgraphia.llm.gateway import CompletionRequest
+            from medgraphia.generation.prompts import get_no_info_message
 
             context_str = build_numbered_context(items)
             
-            # Use the NEW public interface to get prompts (avoids internal API leakage)
-            components = generation.get_streaming_components(query_type, body.language)
+            # Map internal language to human name for the prompt
+            lang_map = {Language.EN: "English", Language.ZH: "Chinese", Language.DE: "German"}
+            target_lang = lang_map.get(language, "English")
+            no_info_msg = get_no_info_message(language)
+
+            components = generation.get_streaming_components(query_type, language)
             system_prompt = components["system_prompt"]
             disclaimer = components["disclaimer"]
 
             user_prompt = (
                 f"<context>\n{context_str}\n</context>\n\n"
-                f"QUESTION: {body.message}\n"
-                f"RESPONSE LANGUAGE: {body.language.value.upper()}\n\n"
-                "### INSTRUCTIONS:\n"
-                "1. CHITCHAT: If the question is a casual greeting or small talk (e.g., 'hi', 'hello'), respond naturally and politely in the requested language, and IGNORE the context entirely.\n"
-                "2. STRICT GROUNDING: For all other questions, you MUST answer based ONLY on the information provided between the <context> tags.\n"
-                "3. IRRELEVANCE: If the provided context is irrelevant to the question or does not contain the answer, state explicitly that you do not have enough medical information in the requested context to answer this. DO NOT guess or use external knowledge.\n"
-                "4. CITATIONS: When using the context, you must cite the source inline using [N].\n"
-                "5. Provide a direct and clear medical explanation."
+                f"QUESTION: {body.message}\n\n"
+                f"### MANDATORY INSTRUCTIONS:\n"
+                f"1. LANGUAGE: You MUST answer ONLY in {target_lang}.\n"
+                f"2. CITATIONS: Use [N] for inline citations (e.g., [1], [2]) for every factual claim.\n"
+                f"3. GROUNDING: If the context is irrelevant to the question, respond ONLY with: {no_info_msg}\n"
+                f"4. Output ONLY the response text."
             )
 
             llm_router = LLMRouter.from_settings()
-            gateway, routing = llm_router.route(query_type, body.language)
+            gateway, routing = llm_router.route(query_type, language)
 
             # ── Step 3: Stream LLM tokens (Pure Text) ────────────────────────
             stream_req = CompletionRequest(

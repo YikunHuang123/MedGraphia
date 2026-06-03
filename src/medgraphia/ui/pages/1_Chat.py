@@ -65,7 +65,7 @@ def render_chat_sidebar() -> None:
                     unsafe_allow_html=True)
 
         if st.button("+ New conversation", use_container_width=True, type="primary"):
-            chat_history.new_conversation(language=st.session_state.get("chat_language", "en"))
+            chat_history.new_conversation(language="unknown")
             st.rerun()
 
         convs = chat_history.list_conversations()
@@ -122,37 +122,20 @@ banner("Chat", "Ask a clinical question — answers cite their source chunks.")
 
 
 # ---------------------------------------------------------------------------
-# Top control bar — language + streaming toggle + active conv summary
+# Top control bar — active conv summary
 # ---------------------------------------------------------------------------
 
 active = chat_history.ensure_active(
-    language=st.session_state.get("chat_language", "en")
+    language=st.session_state.get("chat_language", "unknown")
 )
 
-ctrl_l, ctrl_r = st.columns([3, 1])
-with ctrl_l:
-    st.markdown(
-        f"**{active['title']}**  "
-        f"<span style='color:#5A6478;font-size:0.82rem'>· {len(active['messages'])} "
-        f"message(s) · backend session "
-        f"<code>{active.get('backend_session_id') or 'pending'}</code></span>",
-        unsafe_allow_html=True,
-    )
-with ctrl_r:
-    lang_options = ["en", "zh", "de"]
-    current_lang = active.get("language", "en")
-    if current_lang not in lang_options:
-        current_lang = "en"
-    new_lang = st.selectbox(
-        "Language",
-        options=lang_options,
-        index=lang_options.index(current_lang),
-        format_func={"en": "English", "zh": "中文", "de": "Deutsch"}.get,
-        label_visibility="collapsed",
-    )
-    active["language"] = new_lang
-    st.session_state["chat_language"] = new_lang
-    streaming = st.toggle("Stream tokens", value=True)
+st.markdown(
+    f"**{active['title']}**  "
+    f"<span style='color:#5A6478;font-size:0.82rem'>· {len(active['messages'])} "
+    f"message(s) · backend session "
+    f"<code>{active.get('backend_session_id') or 'pending'}</code></span>",
+    unsafe_allow_html=True,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -220,39 +203,19 @@ if prompt:
     client = _client()
     with st.chat_message("assistant"):
         try:
-            if streaming:
-                meta: dict = {}
-                events = client.chat_stream(
-                    message=prompt,
-                    session_id=active.get("backend_session_id"),
-                    language=active["language"],
-                )
-                full_text = st.write_stream(_stream_tokens(events, meta))
-                done = meta.get("done", {})
-                citations = meta.get("citations", [])
-                disclaimer = done.get("disclaimer", "")
-                model_used = done.get("model_used", "")
-                if sid := done.get("session_id"):
-                    chat_history.attach_backend_session(active["id"], sid)
-            else:
-                with st.spinner("Retrieving and generating…"):
-                    resp = client.chat(
-                        message=prompt,
-                        session_id=active.get("backend_session_id"),
-                        language=active["language"],
-                    )
-                full_text = resp.get("content", "")
-                citations = resp.get("citations", [])
-                disclaimer = resp.get("disclaimer", "")
-                model_used = resp.get("model_used", "")
-                chat_history.attach_backend_session(
-                    active["id"], resp.get("session_id", "")
-                )
-                # Replace `st.write_stream` output with rendered citation modals
-                render_message_with_citations(
-                    full_text, citations,
-                    message_key=f"new-{active['id']}-{len(active['messages'])}",
-                )
+            meta: dict = {}
+            events = client.chat_stream(
+                message=prompt,
+                session_id=active.get("backend_session_id"),
+                language="unknown",  # Force auto-detection on backend
+            )
+            full_text = st.write_stream(_stream_tokens(events, meta))
+            done = meta.get("done", {})
+            citations = meta.get("citations", [])
+            disclaimer = done.get("disclaimer", "")
+            model_used = done.get("model_used", "")
+            if sid := done.get("session_id"):
+                chat_history.attach_backend_session(active["id"], sid)
 
             # Citation cards + disclaimer + model badge
             render_citation_cards(citations)
