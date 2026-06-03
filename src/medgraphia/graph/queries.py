@@ -4,9 +4,10 @@ the rest of the codebase never constructs Cypher strings inline.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from medgraphia.domain import Chunk, Entity, Relation, RawDocument
+from medgraphia.domain import Chunk, Entity, Relation, RawDocument, Session, Message
 from medgraphia.graph.client import get_session
 from medgraphia.logger import get_logger
 
@@ -361,6 +362,139 @@ async def get_graph_stats() -> dict[str, int]:
         except Exception as exc:
             logger.warning("graph_stats_fallback_failed", error=str(exc))
             return {"nodes": 0, "relations": 0}
+
+
+# ---------------------------------------------------------------------------
+# Chat Persistence
+# ---------------------------------------------------------------------------
+
+async def upsert_chat_session(session: Session) -> None:
+    """Create or update a ChatSession node."""
+    cypher = """
+    MERGE (s:ChatSession {session_id: $session_id})
+    SET s.user_id    = $user_id,
+        s.language   = $language,
+        s.domain     = $domain,
+        s.created_at = $created_at,
+        s.updated_at = $updated_at
+    """
+    async with get_session() as g_session:
+        await g_session.run(
+            cypher,
+            session_id=session.session_id,
+            user_id=session.user_id,
+            language=session.language.value,
+            domain=session.domain,
+            created_at=session.created_at.isoformat(),
+            updated_at=session.updated_at.isoformat(),
+        )
+
+
+async def save_chat_message(message: Message) -> None:
+    """
+    Persist a ChatMessage and link it to its Session.
+    Citations are stored as JSON on the message for now (Phase 8 MVP).
+    """
+    import json
+
+    cypher = """
+    MATCH (s:ChatSession {session_id: $session_id})
+    MERGE (m:ChatMessage {message_id: $message_id})
+    SET m.role                 = $role,
+        m.content              = $content,
+        m.model_used           = $model_used,
+        m.retrieval_paths_used = $retrieval_paths_used,
+        m.created_at           = $created_at,
+        m.citations_json       = $citations_json
+    MERGE (s)-[:HAS_MESSAGE]->(m)
+    """
+    async with get_session() as g_session:
+        await g_session.run(
+            cypher,
+            session_id=message.session_id,
+            message_id=str(message.message_id),
+            role=message.role,
+            content=message.content,
+            model_used=message.model_used,
+            retrieval_paths_used=message.retrieval_paths_used,
+            created_at=message.created_at.isoformat(),
+            citations_json=json.dumps([c.model_dump() for c in message.citations]),
+        )
+
+
+async def get_chat_session(session_id: str) -> Session | None:
+    """Retrieve a full Session with all its Messages from Neo4j."""
+    from medgraphia.domain import Session, Message, Language, Citation
+    import json
+
+    cypher = """
+    MATCH (s:ChatSession {session_id: $session_id})
+    OPTIONAL MATCH (s)-[:HAS_MESSAGE]->(m:ChatMessage)
+    RETURN s, collect(m) AS messages
+    """
+    async with get_session() as g_session:
+        result = await g_session.run(cypher, session_id=session_id)
+        record = await result.single()
+        if not record:
+            return None
+
+        s_node = record["s"]
+        m_nodes = record["messages"]
+
+        # Sort messages by created_at (since collect() order is non-deterministic)
+        m_nodes = sorted(m_nodes, key=lambda x: x.get("created_at", ""))
+
+        messages = []
+        for m in m_nodes:
+            # Parse citations back from JSON
+            c_data = json.loads(m.get("citations_json", "[]"))
+            citations = [Citation(**c) for c in c_data]
+
+            messages.append(
+                Message(
+                    message_id=m["message_id"],
+                    session_id=session_id,
+                    role=m["role"],
+                    content=m["content"],
+                    citations=citations,
+                    model_used=m.get("model_used", ""),
+                    retrieval_paths_used=m.get("retrieval_paths_used", []),
+                    created_at=datetime.fromisoformat(m["created_at"]),
+                )
+            )
+
+        return Session(
+            session_id=s_node["session_id"],
+            user_id=s_node.get("user_id", "anonymous"),
+            language=Language(s_node.get("language", "en")),
+            domain=s_node.get("domain", ""),
+            messages=messages,
+            created_at=datetime.fromisoformat(s_node["created_at"]),
+            updated_at=datetime.fromisoformat(s_node["updated_at"]),
+        )
+
+
+async def list_chat_sessions(user_id: str = "anonymous") -> list[dict[str, Any]]:
+    """Return a summary of all chat sessions for a user."""
+    cypher = """
+    MATCH (s:ChatSession {user_id: $user_id})
+    OPTIONAL MATCH (s)-[:HAS_MESSAGE]->(m:ChatMessage)
+    WITH s, m
+    ORDER BY m.created_at ASC
+    WITH s, collect(m) AS msgs
+    RETURN s.session_id AS session_id,
+           s.language   AS language,
+           s.updated_at AS updated_at,
+           size(msgs)   AS message_count,
+           msgs[0].content AS first_message
+    ORDER BY s.updated_at DESC
+    """
+    sessions = []
+    async with get_session() as g_session:
+        result = await g_session.run(cypher, user_id=user_id)
+        async for record in result:
+            sessions.append(dict(record))
+    return sessions
 
 
 # ---------------------------------------------------------------------------

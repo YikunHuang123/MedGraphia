@@ -26,7 +26,7 @@ from medgraphia.api.auth import require_api_key
 from medgraphia.api.deps import create_or_get_session, save_session
 from medgraphia.api.schemas import ChatRequest, ChatResponse
 from medgraphia.domain.base import Language, QueryType
-from medgraphia.domain.chat import Message
+from medgraphia.domain.chat import Message, Session
 from medgraphia.generation.citation import build_numbered_context, inject_citations
 from medgraphia.generation.pipeline import GenerationPipeline
 from medgraphia.logger import get_logger
@@ -71,6 +71,36 @@ async def _get_generation() -> GenerationPipeline:
 
 
 # ---------------------------------------------------------------------------
+# GET /chat/sessions — list history
+# ---------------------------------------------------------------------------
+
+@router.get("/sessions", summary="List all chat sessions for the current user")
+async def list_sessions(
+    principal: dict = Depends(require_api_key),
+) -> list[dict[str, Any]]:
+    """Return a summary of all stored chat sessions."""
+    from medgraphia.graph.queries import list_chat_sessions
+    user_id = principal.get("id", "anonymous")
+    return await list_chat_sessions(user_id=user_id)
+
+
+@router.get("/sessions/{session_id}", response_model=Session, summary="Retrieve a specific session")
+async def get_session_history(
+    session_id: str,
+    principal: dict = Depends(require_api_key),
+) -> Session:
+    """Retrieve the full message history and metadata for a session."""
+    from medgraphia.api.deps import get_session
+    session = await get_session(session_id)
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session {session_id} not found.",
+        )
+    return session
+
+
+# ---------------------------------------------------------------------------
 # POST /chat — synchronous
 # ---------------------------------------------------------------------------
 
@@ -85,7 +115,7 @@ async def chat(
     complete, citation-annotated answer.
     """
     t0 = time.monotonic()
-    session = create_or_get_session(body.session_id)
+    session = await create_or_get_session(body.session_id)
     request_id: str = request.state.request_id if hasattr(request.state, "request_id") else ""
     langfuse = get_langfuse_client()
 
@@ -135,7 +165,7 @@ async def chat(
                 retrieval_paths_used=result["retrieval_paths"],
             )
         )
-        save_session(session)
+        await save_session(session)
 
         latency_ms = int((time.monotonic() - t0) * 1000)
         logger.info("chat_ok", session_id=session.session_id, latency_ms=latency_ms)
@@ -174,7 +204,7 @@ async def chat_stream(
     2. LLM streams raw text tokens (immediate UI feedback).
     3. Structured citations and disclaimer sent as final metadata events.
     """
-    session = create_or_get_session(body.session_id)
+    session = await create_or_get_session(body.session_id)
     request_id: str = request.state.request_id if hasattr(request.state, "request_id") else ""
     langfuse = get_langfuse_client()
 
@@ -283,7 +313,7 @@ async def chat_stream(
                     retrieval_paths_used=retrieval_paths,
                 )
             )
-            save_session(session)
+            await save_session(session)
 
             # ── Step 5: Send Metadata Events ────────────────────────────────
             yield _sse({

@@ -100,6 +100,74 @@ def append_message(conv_id: str, message: dict[str, Any]) -> None:
         conv["title"] = content[:48] + ("…" if len(content) > 48 else "")
 
 
+def sync_from_backend(client: Any) -> None:
+    """
+    Fetch the list of sessions from the backend and populate st.session_state.
+    Only does this once per browser session unless forced.
+    """
+    if st.session_state.get("_history_synced"):
+        return
+
+    try:
+        backend_sessions = client.list_sessions()
+        store = _store()
+        for s in backend_sessions:
+            sid = s["session_id"]
+            # Avoid overwriting if already in local store
+            if sid not in store:
+                # Derive a title if first_message exists
+                title = s.get("first_message") or "Untitled Conversation"
+                if len(title) > 40:
+                    title = title[:37] + "..."
+                
+                # Convert ISO string to epoch if needed
+                updated_at = s.get("updated_at", time.time())
+                if isinstance(updated_at, str):
+                    try:
+                        from datetime import datetime
+                        updated_at = datetime.fromisoformat(updated_at).timestamp()
+                    except:
+                        updated_at = time.time()
+
+                store[sid] = {
+                    "id": sid,
+                    "backend_session_id": sid,
+                    "title": title,
+                    "language": s.get("language", "en"),
+                    "messages": [], # Messages will be lazy-loaded when active
+                    "created_at": updated_at,
+                    "updated_at": updated_at,
+                    "is_lazy": True, # Flag indicating messages need fetching
+                }
+        st.session_state["_history_synced"] = True
+    except Exception as e:
+        st.warning(f"Could not sync history from backend: {e}")
+
+
+def load_full_session(client: Any, conv_id: str) -> None:
+    """Lazy-load full message history for a specific session."""
+    conv = _store().get(conv_id)
+    if not conv or not conv.get("is_lazy"):
+        return
+    
+    try:
+        full_data = client.get_session(conv["backend_session_id"])
+        # Map backend message model to UI message dict
+        messages = []
+        for m in full_data.get("messages", []):
+            messages.append({
+                "role": m["role"],
+                "content": m["content"],
+                "citations": m.get("citations", []),
+                "model_used": m.get("model_used", ""),
+                "ts": m.get("created_at") or time.time(),
+            })
+        conv["messages"] = messages
+        conv["is_lazy"] = False
+    except Exception as e:
+        st.error(f"Failed to load session details: {e}")
+
+
 def attach_backend_session(conv_id: str, backend_session_id: str) -> None:
     """Bind the backend-issued session_id once the first reply comes back."""
     conv = _store().get(conv_id)

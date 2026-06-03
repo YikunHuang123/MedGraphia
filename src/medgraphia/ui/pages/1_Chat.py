@@ -118,6 +118,11 @@ def render_chat_sidebar() -> None:
 
 
 render_chat_sidebar()
+
+# ── Sync history from backend on first load ────────────────────────────────
+if (st.session_state.get("api_key") or st.session_state.get("admin_key")):
+    chat_history.sync_from_backend(_client())
+
 banner("Chat", "Ask a clinical question — answers cite their source chunks.")
 
 
@@ -128,6 +133,11 @@ banner("Chat", "Ask a clinical question — answers cite their source chunks.")
 active = chat_history.ensure_active(
     language=st.session_state.get("chat_language", "unknown")
 )
+
+# Lazy-load content if this was synced from backend summary
+if active.get("is_lazy"):
+    with st.spinner("Loading conversation..."):
+        chat_history.load_full_session(_client(), active["id"])
 
 st.markdown(
     f"**{active['title']}**  "
