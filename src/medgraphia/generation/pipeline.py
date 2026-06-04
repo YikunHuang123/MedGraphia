@@ -16,6 +16,7 @@ from typing import Any
 from medgraphia.domain.base import Language, QueryType
 from medgraphia.domain.chat import Citation, Message
 from medgraphia.generation.citation import build_numbered_context, inject_citations
+from medgraphia.generation.guard import LlamaGuard
 from medgraphia.generation.llm_router import LLMRouter, RoutingDecision
 from medgraphia.generation.prompts import PromptRegistry, MedicalAnswer
 from medgraphia.logger import get_logger
@@ -59,6 +60,7 @@ class GenerationPipeline:
     ) -> None:
         self._router = router or LLMRouter.from_settings()
         self._prompts = prompts or PromptRegistry()
+        self._guard = LlamaGuard()
 
     async def generate(
         self,
@@ -110,8 +112,18 @@ class GenerationPipeline:
                 language=language,
                 gateway=gateway,
             )
+
+            # 5. Output Safety Check
+            safety = await self._guard.check_output(question, prediction.answer)
+            if not safety.is_safe:
+                logger.warning("generation_redacted_by_guard", category=safety.category)
+                prediction.answer = (
+                    "⚠️ [Blocked by Safety Guardrails] The generated response was found to "
+                    f"violate safety policies ({safety.category}). Please rephrase your question."
+                )
+                prediction.citations = [] # Remove citations for unsafe content
             
-            # 5. Resolve the [N] citations into full objects with metadata
+            # 6. Resolve the [N] citations into full objects with metadata
             citation_result = inject_citations(
                 answer_text=prediction.answer,
                 context_items=retrieved_items,

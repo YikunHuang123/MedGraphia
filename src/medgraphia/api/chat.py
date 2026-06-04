@@ -31,6 +31,7 @@ from medgraphia.api.schemas import ChatRequest, ChatResponse
 from medgraphia.domain.base import Language, QueryType
 from medgraphia.domain.chat import Message, Session
 from medgraphia.generation.citation import build_numbered_context, inject_citations
+from medgraphia.generation.guard import LlamaGuard
 from medgraphia.generation.pipeline import GenerationPipeline
 from medgraphia.logger import get_logger
 from medgraphia.observability import TraceContext, get_langfuse_client
@@ -45,9 +46,11 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 _retrieval_pipeline: RetrievalPipeline | None = None
 _generation_pipeline: GenerationPipeline | None = None
+_guard: LlamaGuard | None = None
 
 _retrieval_lock = asyncio.Lock()
 _generation_lock = asyncio.Lock()
+_guard_lock = asyncio.Lock()
 
 
 async def _get_retrieval() -> RetrievalPipeline:
@@ -55,10 +58,7 @@ async def _get_retrieval() -> RetrievalPipeline:
     global _retrieval_pipeline
     if _retrieval_pipeline is None:
         async with _retrieval_lock:
-            # Double-check pattern
             if _retrieval_pipeline is None:
-                # Use a blocking-to-async wrapper if initialization is heavy
-                # but for now synchronous factory is called in the async context.
                 _retrieval_pipeline = RetrievalPipeline.from_settings()
     return _retrieval_pipeline
 
@@ -71,6 +71,16 @@ async def _get_generation() -> GenerationPipeline:
             if _generation_pipeline is None:
                 _generation_pipeline = GenerationPipeline.from_settings()
     return _generation_pipeline
+
+
+async def _get_guard() -> LlamaGuard:
+    """Async-safe getter for the safety guard singleton."""
+    global _guard
+    if _guard is None:
+        async with _guard_lock:
+            if _guard is None:
+                _guard = LlamaGuard()
+    return _guard
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +138,22 @@ async def chat(
         language = Language.detect(body.message)
     
     logger.info("query_received", language=language.value, stream=False)
+
+    guard = await _get_guard()
+    safety = await guard.check_input(body.message)
+    if not safety.is_safe:
+        return ChatResponse(
+            session_id=session.session_id,
+            content=(
+                "⚠️ [Blocked by Safety Guardrails] Your query was found to violate "
+                f"our safety policies ({safety.category}). Please rephrase your question."
+            ),
+            citations=[],
+            retrieval_paths_used=[],
+            model_used="guardrail",
+            query_type=QueryType.PATIENT_FAQ,
+            disclaimer="This query was blocked for safety reasons.",
+        )
 
     with langfuse.trace(
         "chat",
@@ -242,6 +268,16 @@ async def chat_stream(
             metadata={"language": language.value, "request_id": request_id},
             tags=["stream"],
         ) as trace:
+            # ── Step 0: Input Safety Check ──────────────────────────────────
+            guard = await _get_guard()
+            input_safety = await guard.check_input(body.message)
+            if not input_safety.is_safe:
+                yield _sse({
+                    "type": "error", 
+                    "detail": f"Blocked by safety guardrails: {input_safety.category}"
+                })
+                return
+
             # ── Step 1: Retrieval ───────────────────────────────────────────
             retrieval = await _get_retrieval()
             generation = await _get_generation()
@@ -324,6 +360,16 @@ async def chat_stream(
             full_text = "".join(accumulated)
 
             # ── Step 4: Finalise (Citations & History) ──────────────────────
+            # ── Step 4a: Output Safety Check ────────────────────────────────
+            output_safety = await guard.check_output(body.message, full_text)
+            if not output_safety.is_safe:
+                yield _sse({
+                    "type": "moderated",
+                    "category": output_safety.category,
+                    "detail": "Response redacted due to safety violation."
+                })
+                return
+
             # Inject citations from the final text
             citation_result = inject_citations(full_text, items)
 

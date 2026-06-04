@@ -5,6 +5,12 @@ of reading env vars directly.
 """
 from __future__ import annotations
 
+import os
+from dotenv import load_dotenv
+
+# Force load .env and override any existing system environment variables
+load_dotenv(override=True)
+
 from functools import lru_cache
 from typing import Literal
 
@@ -18,6 +24,8 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        # Force .env to take precedence over system environment variables
+        env_priority=1, 
     )
 
     # ------------------------------------------------------------------
@@ -56,10 +64,10 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # LLM
     # ------------------------------------------------------------------
+    # llm_provider: Literal["deepseek", "openai", "anthropic", "gemini", "groq", "ollama", "local"] = "ollama"
     llm_provider: Literal["deepseek", "openai", "anthropic", "gemini", "groq", "ollama", "local"] = "groq"
+    llm_model: str = "llama-3.1-8b-instant"
     # llm_model: str = "qwen2.5:3b"
-    # llm_model: str = "deepseek-chat"
-    llm_model: str = "Llama3.1:8B"
     llm_base_url: str = ""
     llm_max_tokens: int = 2048
     llm_temperature: float = 0.1
@@ -91,8 +99,9 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Safety guardrails
     # ------------------------------------------------------------------
-    guardrails_enabled: bool = False
-    llama_guard_model: str = "meta-llama/Llama-Guard-4-8B"
+    guardrails_enabled: bool = True
+    llama_guard_provider: str = "ollama"
+    llama_guard_model: str = "llama-guard3:1b"
     ragas_faithfulness_threshold: float = 0.75
 
     # ------------------------------------------------------------------

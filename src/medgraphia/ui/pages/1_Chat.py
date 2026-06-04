@@ -214,6 +214,10 @@ def _stream_tokens(events: Iterator[dict], meta_sink: dict) -> Iterator[str]:
         elif kind == "error":
             yield f"\n\n_[error] {ev.get('detail', 'stream interrupted')}_"
             return
+        elif kind == "moderated":
+            meta_sink["moderated"] = True
+            yield f"\n\n⚠️ **[MODERATED]** {ev.get('detail', 'Content redacted for safety')}"
+            return
         elif kind == "citations":
             meta_sink["citations"] = ev.get("citations", [])
         elif kind == "done":
@@ -248,22 +252,34 @@ if prompt:
                 language="unknown",  # Force auto-detection on backend
             )
             full_text = st.write_stream(_stream_tokens(events, meta))
-            done = meta.get("done", {})
-            citations = meta.get("citations", [])
-            disclaimer = done.get("disclaimer", "")
-            model_used = done.get("model_used", "")
-            if sid := done.get("session_id"):
-                chat_history.attach_backend_session(active["id"], sid)
+            
+            # Check for moderation
+            if meta.get("moderated"):
+                full_text = (
+                    "⚠️ [Blocked by Safety Guardrails] The generated response was found to "
+                    "violate safety policies. Please rephrase your question."
+                )
+                citations = []
+                disclaimer = ""
+                model_used = "guardrail"
+            else:
+                done = meta.get("done", {})
+                citations = meta.get("citations", [])
+                disclaimer = done.get("disclaimer", "")
+                model_used = done.get("model_used", "")
+                if sid := done.get("session_id"):
+                    chat_history.attach_backend_session(active["id"], sid)
 
             # Citation cards + disclaimer + model badge
-            render_citation_cards(citations)
-            if disclaimer:
-                st.markdown(
-                    f'<div class="mg-disclaimer">{disclaimer}</div>',
-                    unsafe_allow_html=True,
-                )
-            if model_used:
-                st.caption(f"Model: `{model_used}`")
+            if not meta.get("moderated"):
+                render_citation_cards(citations)
+                if disclaimer:
+                    st.markdown(
+                        f'<div class="mg-disclaimer">{disclaimer}</div>',
+                        unsafe_allow_html=True,
+                    )
+                if model_used:
+                    st.caption(f"Model: `{model_used}`")
 
             # Persist to client-side history
             chat_history.append_message(
