@@ -1,6 +1,10 @@
 # 🧬 MedGraphia
 
-**A GraphRAG-powered multilingual medical knowledge Q&A system** that fuses a Neo4j knowledge graph, three-path hybrid retrieval, and a multi-model LLM strategy to deliver clinically explainable answers with full evidence trails — in English, Chinese, and German.
+A multilingual medical QA system powered by a Knowledge-Graph based Graph-RAG architecture. It
+achieves deep cross-lingual alignment (English, Chinese, German) via the MeSH ontology. By
+constructing long-short-term memory through time-decay graph edges and integrating multi-tier LLM
+intelligent routing with DSPy-optimized prompt management for rigorous reasoning, it builds a safe,
+traceable clinical AI brain.
 
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -930,4 +934,9 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 **Email:** q1945948369@gmail.com
 **GitHub:** [@YikunHuang123](https://github.com/YikunHuang123)
 
-> Built as a production-oriented medical GraphRAG system — covering multilingual NLP pipelines, knowledge graph construction, three-path hybrid retrieval, and compliance-aware LLM generation across Chinese, English, and German.
+> Moving beyond simple hybrid search, MedGraphia bridges the semantic gap across Chinese, English,
+  and German medical data through deep ontology alignment. It ensures clinical rigor via DSPy prompt
+  optimization and proactive Llama-Guard safety checks. Equipped with a dual long-short-term memory
+  system featuring time-decay attention, intelligent query-complexity LLM routing, and an integrated
+  RAGAS evaluation suite, it is designed from the ground up for safe, scalable, and personalized
+  healthcare AI.
