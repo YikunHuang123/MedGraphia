@@ -57,19 +57,18 @@
 
 ```
 ┌────────────────────────────────── DATA SOURCES ──────────────────────────────────────┐
-│ [EN] PubMed, FDA DailyMed  │ [ZH] Chinese Medical QA  │ [DE] German Medical Data     │
-│ [EN/DE] EMA SmPC XML       │ [Anchor] MeSH Multilingual Descriptor Index             │
+│ [EN] PubMed, FDA, DrugBank │ [ZH] Medical QA (Huatuo) │ [DE] Clin. Cases (GERNERMED) │
+│ [EN] EMA SmPC (Local PDFs) │ [Anchor] MeSH Multilingual Descriptor Index             │
 └──────────────────────────────────────────┬───────────────────────────────────────────┘
                                            │  (API / bulk download)
          ┌─────────────────────────────────┼──────────────────────────────────┐
          │                                 │                                  │
 ┌────────▼────────────┐          ┌──────────▼────────────┐          ┌─────────▼─────────┐
-│  Parse & OCR        │          │ Section-aware Chunking│          │  Multi-lang NER   │
-│  Docling  (EN / DE) │─────────▶│ anchor: section →     │─────────▶│  GLiNER-biomed    │
-│  MinerU   (ZH)      │          │ paragraph → sentence  │          │  BioBERT (EN)     │
-│  Tesseract+PaddleOCR│          │ + FHIR Timing Norm.   │          │  ClinicalBERT-CN  │
-└─────────────────────┘          └───────────────────────┘          │  GerMedBERT (DE)  │
-                                                                    └─────────┬─────────┘
+│  Parse & OCR        │          │ Section-aware Chunking│          │  Multi-lang NER:  │
+│  Docling  (EN / DE) │─────────▶│ anchor: section →     │─────────▶│  GLiNER + BERT    │
+│  MinerU   (ZH)      │          │ paragraph → sentence  │          │                   │
+│  Tesseract+PaddleOCR│          │ + FHIR Timing Norm.   │          └─────────┬─────────┘
+└─────────────────────┘          └───────────────────────┘                    │
                                                                               │
                     ┌─────────────────────────────────────────────────────────▼──────────┐
                     │  Entity Linking: SapBERT-XLMR + BM25 candidates → MeSH ID          │
@@ -77,8 +76,8 @@
                     └─────────────────────────────────────┬──────────────────────────────┘
                                                           │
                     ┌─────────────────────────────────────▼────────────────────────────────┐
-                    │  Schema-guided Relation Extraction (LLM + closed schema)             │
-                    │  Nodes: TREATS · CAUSES · INTERACTS_WITH · DOSAGE_FOR · SYMPTOM_OF   │
+                    │  Schema-guided Relation Extraction (LLM + DSPy)                      │
+                    │  TREATS · CAUSES · INTERACTS_WITH · DOSAGE_FOR · SYMPTOM_OF · etc.   │
                     │  Each edge: evidence_text · source_id · chunk_id · confidence        │
                     └────────────────────────┬─────────────────────────────────────────────┘
                                              │
@@ -275,51 +274,60 @@ When you run `scripts/pipeline/build_graph.py` (or trigger the Prefect DAG), dat
 
 **Stage 1 — Fetch**
 
-Data is pulled exclusively from authorized sources (APIs and official bulk downloads): PubMed abstracts via E-utilities, FDA DailyMed drug labels via REST API, EMA SmPC local PDFs, and DrugBank XML.
+Data is ingested from a multilingual corpus across three languages:
+- **English (EN)**: 
+    - **PubMed**: Large-scale clinical abstracts (fetched via E-utilities or loaded from `data/raw/pubmed`).
+    - **FDA DailyMed**: Structured US drug labels (REST API).
+    - **EMA SmPC**: European drug labels (local PDFs in `data/raw/ema_smpc`).
+    - **DrugBank**: High-quality pharmacological data (XML).
+- **Chinese (ZH)**: 
+    - **Huatuo-Lite**: Large-scale medical QA dataset (`data/raw/huatuo`).
+- **German (DE)**: 
+    - **GERNERMED**: Specialized German clinical case data (`data/raw/germed`).
 
 **Stage 2 — Parse**
 
-Raw documents are parsed into structured form:
-
-- **EN/DE PDFs** (EMA SmPC, AWMF guidelines, PubMed full-text): processed by **Docling**, which preserves table structure, formula layout, and figure captions.
-- **ZH PDFs** (国家卫健委 clinical pathways, CNKI): processed by **MinerU**, optimized for Chinese double-column academic layouts.
-- **Scanned documents**: **Tesseract 5 + PaddleOCR** fallback, language-auto-detected at paragraph level.
-- **Structured data** (JSON/JSONL medical QA datasets): processed by `structured_parser.py`.
+Documents are converted into a unified `RawDocument` schema using language-optimized engines:
+- **Multilingual PDFs (EN/DE)**: Handled by **Docling** to preserve complex tables and section paths.
+- **Chinese Academic PDFs**: Optimized via **MinerU** for double-column layouts and formula extraction.
+- **Structured Datasets (ZH/DE/EN)**: The `StructuredParser` handles JSON/JSONL formats (Huatuo, GERNERMED, PubMed-preparsed) to ensure high-fidelity knowledge extraction.
+- **Scanned Artifacts**: Fallback to **OCR (Tesseract 5 + PaddleOCR)** for image-only medical records.
 
 **Stage 3 — Section-aware Chunking + Normalization**
 
-Text is split following the document's structural hierarchy (`section → paragraph → sentence`), not by a fixed token count. Each chunk carries a `section_path` metadata tag (e.g. `"Dosing > Pediatric > Renal adjustment"`) to enable provenance tracing. A domain normalizer unifies dose expressions across all three languages (e.g. `"bid"`, `"2 x täglich"`, `"每日两次"`, `"q 12 h"` → FHIR Timing code).
+Text is split following the document's structural hierarchy (`section → paragraph → sentence`). Each chunk carries a `section_path` metadata tag. A domain normalizer (`MedicalNormalizer`) unifies clinical expressions across languages:
+- **Dosing**: `"每日两次"`, `"bid"`, `"twice daily"` → `"bid"` (**FHIR Timing code**).
+- **Units**: `"500mg"` → `"500 mg"`, `"10μg"` → `"10 mcg"`.
 
 **Stage 4 — Multi-language NER**
 
-A two-stage pipeline extracts medical entities:
-
-1. **Coarse pass**: GLiNER (`urchade/gliner_mediumv2.1`) performs zero-shot, language-agnostic entity detection to enumerate candidate spans.
-2. **Fine pass** (optional): A language-specific BERT model refines each candidate — `d4data/biomedical-ner-all` (EN), `iioSnail/bert-base-chinese-medical-ner` (ZH); German model is configurable via `NER_BERT_DE_MODEL` (disabled by default). All language variants are implemented in the unified `bert_ner.py` module.
-
-This hybrid approach is dramatically cheaper than asking an LLM to perform NER directly over the full corpus.
+A two-stage pipeline extracts medical entities (`EntityType.DISEASE`, `EntityType.DRUG`, etc.):
+1. **Coarse pass**: GLiNER (`gliner_mediumv2.1`) performs zero-shot multilingual entity detection across EN, ZH, and DE.
+2. **Fine pass**: Language-specific BERT models refine candidate spans for higher precision.
+    - **English**: `biomedical-ner-all`.
+    - **Chinese**: `bert-base-chinese-medical-ner`.
+    - **German**: Multilingual coarse pass only (fine pass model configurable).
 
 **Stage 5 — Entity Linking to MeSH ID**
 
-Each recognized mention is resolved to a MeSH ID via SapBERT-XLMR (trained on UMLS synonym pairs with contrastive learning):
-
-1. BM25 retrieves the top-50 UMLS concept candidates.
-2. SapBERT cross-encoder reranks them by semantic similarity.
-3. Candidates below a confidence threshold are flagged for human review.
-
-This is the cross-lingual backbone: "心肌梗死", "myocardial infarction", and "Myokardinfarkt" resolve to the same CUI (`C0027051`) and therefore share graph edges and vector neighbors.
+Provisional mentions are resolved to global **MeSH CUIs**:
+1. **BM25 retrieval**: Finds top-K lexical candidates from the MeSH index.
+2. **SapBERT-XLMR**: Cross-lingual semantic re-ranking to find the best CUI match.
+3. **Graph Write**: Linked entities and `MENTIONED_IN` relationships are written to Neo4j.
 
 **Stage 6 — Relation Extraction**
 
-An LLM (configured via `LLM_MODEL`) extracts relations within each chunk, restricted to a closed schema. Free-form relationship types are rejected. Each produced edge stores `evidence_text`, `source_id`, `chunk_id`, `confidence`, and `extracted_by_model_version` — enabling full audit trails. Extracted relations are written to Neo4j immediately.
+A **DSPy-powered extractor** identifies relationships between linked entities using the `LLM_MODEL`. Extraction is strictly constrained to the system's `RelationType` schema:
+- `TREATS`, `CAUSES`, `INTERACTS_WITH`, `SYMPTOM_OF`, `COMPLICATION_OF`, `CONTRAINDICATED_IN`, `DOSAGE_FOR`, `CODED_AS`.
+- Every relation includes `evidence_text` and `confidence` score.
 
 **Stage 7 — Embedding**
 
-All text chunks are embedded with **BGE-M3**, which simultaneously produces **dense** (semantic) and **sparse** (BM25-style) representations per chunk. Both are stored in Qdrant under the `medgraphia_chunks` collection.
+Chunks are embedded using **BGE-M3**, producing both **dense** (semantic) and **sparse** (lexical) vectors. These are indexed in Qdrant for hybrid retrieval.
 
 **Stage 8 — Community Detection**
 
-Leiden community detection clusters the entity graph, and a second LLM pass generates a natural-language summary for each community (used by the community retriever at query time). Summaries are written to Neo4j `Community` nodes.
+The **Leiden algorithm** clusters the entity graph based on relationship topology. An LLM then generates hierarchical summaries for each community, which are stored in Neo4j to support global "overview" queries.
 
 ---
 
@@ -451,7 +459,7 @@ ADMIN_BOOTSTRAP_KEY=your-admin-key
 docker compose up --build
 ```
 
-This starts: `neo4j`, `qdrant`, `minio`, `api` (port **8058**), `worker`, `ui` (port **8501**), `langfuse`.
+This starts: `neo4j`, `qdrant`, `api` (port **8058**), `worker`, `ui` (port **8501**), `langfuse`.
 
 **4. Bootstrap the knowledge graph**
 
