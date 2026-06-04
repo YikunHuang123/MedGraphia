@@ -9,11 +9,31 @@ It can be used to compare different strategies, such as the time-decay memory fa
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+import types
+
+# --- MONKEYPATCH for RAGAS 0.4.3 compatibility with latest LangChain ---
+try:
+    import langchain_google_vertexai
+    sys.modules["langchain_community.chat_models.vertexai"] = langchain_google_vertexai
+except ImportError:
+    vertex_mock = types.ModuleType("vertexai")
+    vertex_mock.ChatVertexAI = None
+    sys.modules["langchain_community.chat_models.vertexai"] = vertex_mock
+
+try:
+    # Some environments use langchain_aws, others might need a mock
+    import langchain_aws
+    sys.modules["langchain_community.chat_models.bedrock"] = langchain_aws
+except ImportError:
+    bedrock_mock = types.ModuleType("bedrock")
+    bedrock_mock.BedrockChat = None
+    sys.modules["langchain_community.chat_models.bedrock"] = bedrock_mock
+
 import asyncio
 import json
 import os
-import sys
-from pathlib import Path
 from typing import Any
 
 import click
@@ -21,7 +41,7 @@ import pandas as pd
 from datasets import Dataset
 from ragas import evaluate
 from ragas.metrics import (
-    answer_relevance,
+    answer_relevancy,
     context_precision,
     context_recall,
     faithfulness,
@@ -72,9 +92,9 @@ EVAL_SAMPLES = [
 # ---------------------------------------------------------------------------
 
 async def run_evaluation(
+    samples: list[dict[str, Any]],
     user_id: str | None = "eval_user",
     language: Language = Language.EN,
-    limit: int | None = None
 ) -> pd.DataFrame:
     """
     Run the RAG pipeline on samples and collect data for RAGAS.
@@ -83,7 +103,6 @@ async def run_evaluation(
     retrieval = RetrievalPipeline.from_settings()
     generation = GenerationPipeline.from_settings()
 
-    samples = EVAL_SAMPLES[:limit] if limit else EVAL_SAMPLES
     results = []
 
     logger.info("eval_starting", count=len(samples), user_id=user_id)
@@ -91,24 +110,28 @@ async def run_evaluation(
     for i, sample in enumerate(samples):
         history = []
         
-        # Handle multi-turn if present
+        # Handle multi-turn if present (only for hardcoded samples usually)
         question = sample["question"]
-        if "follow_up" in sample:
+        if "follow_up" in sample and sample["follow_up"]:
             # 1. First turn to establish context/memory
             logger.info("eval_turn_1", q=question)
-            ret_1 = await retrieval.execute(question, user_id=user_id, language=language)
-            gen_1 = await generation.generate(question, ret_1.query_type, ret_1.items, language=language)
-            
-            # Update history for the second turn
-            from medgraphia.domain.chat import Message, Role
-            history = [
-                Message(role=Role.USER, content=question),
-                Message(role=Role.ASSISTANT, content=gen_1.answer)
-            ]
-            # Switch to follow-up for the actual evaluation point
-            question = sample["follow_up"]
+            try:
+                ret_1 = await retrieval.execute(question, user_id=user_id, language=language)
+                gen_1 = await generation.generate(question, ret_1.query_type, ret_1.items, language=language)
+                
+                # Update history for the second turn
+                from medgraphia.domain.chat import Message, Role
+                history = [
+                    Message(role=Role.USER, content=question),
+                    Message(role=Role.ASSISTANT, content=gen_1.answer)
+                ]
+                # Switch to follow-up for the actual evaluation point
+                question = sample["follow_up"]
+            except Exception as e:
+                logger.error("eval_multi_turn_setup_failed", error=str(e))
+                continue
 
-        logger.info(f"eval_processing_{i+1}/{len(samples)}", q=question[:50])
+        logger.info(f"eval_processing_{i+1}/{len(samples)}", q=str(question)[:50])
 
         # 2. Main turn (the one being scored)
         try:
@@ -133,11 +156,16 @@ async def run_evaluation(
             # Contexts must be a list of strings
             contexts = [item.text for item in ret_result.items]
             
+            # Handle list-formatted ground truth from CSV if needed
+            gt = sample["ground_truth"]
+            if isinstance(gt, list):
+                gt = " ".join(gt)
+            
             results.append({
                 "question": question,
                 "contexts": contexts,
                 "answer": gen_result.answer,
-                "ground_truth": sample["ground_truth"],
+                "ground_truth": gt,
                 "category": sample.get("category", "general")
             })
 
@@ -147,30 +175,33 @@ async def run_evaluation(
     return pd.DataFrame(results)
 
 
-def run_ragas_scoring(df: pd.DataFrame) -> dict[str, float]:
+def run_ragas_scoring(df: pd.DataFrame) -> Any:
     """
     Use the RAGAS library to score the collected results.
     """
     if df.empty:
-        return {}
+        return None
 
     logger.info("ragas_scoring_started", rows=len(df))
     
-    # Convert to RAGAS dataset
+    # RAGAS 0.4.3 might need certain columns in the dataset
     dataset = Dataset.from_pandas(df)
-
-    # Note: RAGAS evaluate uses the environment's OPENAI_API_KEY by default.
-    # To use other models (Ollama/Groq), you'd normally pass an llm/embeddings 
-    # wrapper from langchain, but here we assume the environment is configured.
+    
+    # Explicitly provide LLM and Embeddings to avoid 401/env issues
+    from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+    eval_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    eval_embeddings = OpenAIEmbeddings()
     
     result = evaluate(
         dataset,
         metrics=[
             faithfulness,
-            answer_relevance,
+            answer_relevancy,
             context_precision,
             context_recall,
         ],
+        llm=eval_llm,
+        embeddings=eval_embeddings
     )
 
     return result
@@ -181,34 +212,51 @@ def run_ragas_scoring(df: pd.DataFrame) -> dict[str, float]:
 # ---------------------------------------------------------------------------
 
 @click.command()
+@click.option("--input", default=None, help="Input CSV file with test samples")
 @click.option("--limit", default=None, type=int, help="Limit number of test samples")
 @click.option("--output", default="eval_results.csv", help="Output CSV path")
 @click.option("--user-id", default="eval_user", help="User ID for memory/decay testing")
-def main(limit: int | None, output: str, user_id: str) -> None:
+def main(input: str | None, limit: int | None, output: str, user_id: str) -> None:
     configure_logging("INFO")
     
     # Check for API Key
     if not os.getenv("OPENAI_API_KEY"):
-        logger.warning("OPENAI_API_KEY_NOT_FOUND", msg="RAGAS evaluation usually requires an OpenAI key for the judge model.")
+        logger.warning("OPENAI_API_KEY_NOT_FOUND", msg="RAGAS evaluation requires an OpenAI key.")
 
     click.echo("\n" + "=" * 60)
     click.echo("  MedGraphia — RAGAS Quality Evaluation")
     click.echo("=" * 60 + "\n")
 
+    # Load samples
+    if input:
+        click.echo(f"Loading samples from {input}...")
+        df_input = pd.read_csv(input)
+        # Ensure minimum columns exist
+        if "question" not in df_input.columns or "ground_truth" not in df_input.columns:
+            click.echo("Error: Input CSV must contain 'question' and 'ground_truth' columns.")
+            return
+        samples = df_input.to_dict("records")
+    else:
+        click.echo("Using hardcoded EVAL_SAMPLES.")
+        samples = EVAL_SAMPLES
+
+    if limit:
+        samples = samples[:limit]
+
     # 1. Run Pipeline
-    df = asyncio.run(run_evaluation(limit=limit, user_id=user_id))
+    df = asyncio.run(run_evaluation(samples, user_id=user_id))
     
     if df.empty:
         click.echo("Error: No data collected from the pipeline.")
         return
 
     # 2. Run RAGAS Scoring
-    scores = run_ragas_scoring(df)
+    result = run_ragas_scoring(df)
 
     # 3. Report
     click.echo("\n" + "-" * 20 + " RAGAS SCORES " + "-" * 20)
-    for metric, score in scores.items():
-        click.echo(f"  {metric:20}: {score:.4f}")
+    if result:
+        click.echo(result)
     click.echo("-" * 54 + "\n")
 
     # 4. Save detailed results

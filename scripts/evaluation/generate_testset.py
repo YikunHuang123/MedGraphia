@@ -129,19 +129,65 @@ def main(data_dir: str, test_size: int, output: str, docs_limit: int) -> None:
         click.echo("No documents found to generate questions from.")
         return
 
-    # 2. Initialize Generator (Ragas 0.4.3 style)
+    # 2. Initialize Generator (RAGAS 0.4.3 style)
     click.echo(f"Initializing RAGAS TestsetGenerator for {test_size} questions...")
     
-    # Use gpt-4o-mini: faster, cheaper, and better at following JSON schema for extraction
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    # Use gpt-4o-mini with enhanced stability settings
+    llm = ChatOpenAI(
+        model="gpt-4o-mini", 
+        temperature=0,
+        max_retries=10,
+        timeout=120
+    )
     embeddings = OpenAIEmbeddings()
 
+    # Define personas manually to avoid automatic generation failures
+    from ragas.testset.persona import Persona
+    medical_personas = [
+        Persona(
+            name="Clinical Pharmacologist", 
+            role_description="An expert in drug mechanisms and interactions."
+        ),
+        Persona(
+            name="Medical Researcher", 
+            role_description="A scientist focusing on clinical trial data."
+        )
+    ]
+
+    # Initialize generator without persona_list first (api-compliant)
     generator = TestsetGenerator.from_langchain(
         llm=llm,
         embedding_model=embeddings
     )
+    # Inject personas directly into the instance (RAGAS 0.4.3 compatible)
+    generator.persona_list = medical_personas
 
-    # 3. Generate with RunConfig for robustness
+    # 3. Manually define stable transforms to avoid HeadlinesExtractor/HeadlineSplitter bugs
+    from ragas.testset.transforms.extractors import SummaryExtractor, EmbeddingExtractor
+    from ragas.testset.transforms.extractors.llm_based import NERExtractor, ThemesExtractor
+    from ragas.testset.transforms.relationship_builders import CosineSimilarityBuilder, OverlapScoreBuilder
+    from ragas.testset.transforms.filters import CustomNodeFilter
+    from ragas.testset.transforms.engine import Parallel
+
+    # Simplified stable transform pipeline
+    ragas_llm = generator.llm
+    ragas_emb = generator.embedding_model
+    
+    stable_transforms = [
+        SummaryExtractor(llm=ragas_llm),
+        CustomNodeFilter(llm=ragas_llm),
+        Parallel(
+            EmbeddingExtractor(embedding_model=ragas_emb, property_name="summary_embedding", embed_property_name="summary"),
+            ThemesExtractor(llm=ragas_llm),
+            NERExtractor(llm=ragas_llm)
+        ),
+        Parallel(
+            CosineSimilarityBuilder(property_name="summary_embedding", new_property_name="summary_similarity", threshold=0.7),
+            OverlapScoreBuilder(threshold=0.01)
+        )
+    ]
+
+    # 4. Generate with RunConfig for robustness
     from ragas.run_config import RunConfig
     run_config = RunConfig(timeout=120, max_retries=3, max_wait=60)
 
@@ -150,21 +196,32 @@ def main(data_dir: str, test_size: int, output: str, docs_limit: int) -> None:
         testset = generator.generate_with_langchain_docs(
             documents,
             testset_size=test_size,
+            transforms=stable_transforms, # Use our stable pipeline
             run_config=run_config
         )
-        
-        # 4. Save and Report
+
+        # 4. Convert to DataFrame and standardize column names
+        df = testset.to_pandas()
+
+        # RAGAS 0.4.3 uses user_input/reference/reference_contexts
+        # We rename them to question/ground_truth/contexts for downstream compatibility
+        column_map = {
+            "user_input": "question",
+            "reference": "ground_truth",
+            "reference_contexts": "contexts"
+        }
+        df = df.rename(columns={k: v for k, v in column_map.items() if k in df.columns})
+
+        # 5. Save and Report
         output_path = Path(output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        df = testset.to_pandas()
-        df.to_csv(output_path, index=False)
-        
+        df.to_csv(output, index=False)
+
         click.echo("\n" + "="*40)
         click.echo(f"SUCCESS: Generated {len(df)} questions.")
-        click.echo(f"Saved to: {output_path}")
+        click.echo(f"Saved to: {output}")
         click.echo("="*40 + "\n")
-        
+
         click.echo("Sample questions:")
         for i, row in df.head(3).iterrows():
             click.echo(f"[{i+1}] {row['question']}")
