@@ -317,57 +317,24 @@ async def chat_stream(
                 retrieval_paths = list({item.source.value for item in items})
                 span.end(output=f"{len(items)} items")
 
-            # ── Step 2: Prepare Prompts ─────────────────────────────────────
-            from medgraphia.generation.llm_router import LLMRouter
-            from medgraphia.llm.gateway import CompletionRequest
-            from medgraphia.prompts import get_no_info_message
-
-            context_str = build_numbered_context(items)
-            
-            # Map internal language to human name for the prompt
-            lang_map = {Language.EN: "English", Language.ZH: "Chinese", Language.DE: "German"}
-            target_lang = lang_map.get(language, "English")
-            no_info_msg = get_no_info_message(language)
-
-            components = generation.get_streaming_components(query_type, language)
-            system_prompt = components["system_prompt"]
-            disclaimer = components["disclaimer"]
-
-            # Format history for prompt (Layer 4)
-            history_str = ""
-            for m in session.messages[-5:]:
-                role = "User" if m.role == "user" else "Assistant"
-                history_str += f"{role}: {m.content}\n"
-
-            user_prompt = (
-                f"<context>\n{context_str}\n</context>\n\n"
-                f"CONVERSATION HISTORY:\n{history_str}\n"
-                f"CURRENT QUESTION: {body.message}\n\n"
-                f"### INSTRUCTIONS:\n"
-                f"- ANSWERING: Use the provided context to answer the question accurately.\n"
-                f"- LANGUAGE: You MUST answer ONLY in {target_lang}.\n"
-                f"- CITATIONS: Use [N] for inline citations (e.g., [1], [2]) for every factual claim.\n"
-                f"- GROUNDING: If the context truly contains no information to answer the question, state that you don't have enough specific details, but try to use any relevant fragments provided.\n"
-                f"- FORMAT: Output ONLY the response text."
-            )
-
-            llm_router = LLMRouter.from_settings()
-            gateway, routing = llm_router.route(query_type, language)
-
-            # ── Step 3: Stream LLM tokens (Pure Text) ────────────────────────
-            stream_req = CompletionRequest(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                stream=True,
-                temperature=0.1,
-            )
-
+            # ── Step 2 & 3: Stream LLM tokens via Unified Generation Pipeline ──
+            # This ENSURES compiled DSPy rigor and term database consistency
             accumulated: list[str] = []
+            
+            # Get disclaimer and routing info
+            disclaimer = generation.get_streaming_components(query_type, language)["disclaimer"]
+            _, routing = (await _get_generation()).router.route(query_type, language)
+
             with trace.span("generation_stream", input=body.message):
                 try:
-                    async for token in gateway.astream(stream_req):
+                    async for token in generation.generate_stream(
+                        question=body.message,
+                        query_type=query_type,
+                        retrieved_items=items,
+                        history=session.messages,
+                        language=language,
+                    ):
                         accumulated.append(token)
-                        # Yield raw text chunk (Best for UX: no JSON overhead)
                         yield _sse({"type": "chunk", "content": token})
                 except Exception as exc:
                     logger.error("stream_generation_failed", error=str(exc))

@@ -100,7 +100,7 @@ def get_lm(
         
     # Construct model_id ensuring provider prefix is present for LiteLLM
     # e.g., "deepseek/deepseek-chat" or "openai/gpt-4o"
-    if "/" in model:
+    if model.startswith(f"{provider}/"):
         model_id = model
     else:
         model_id = f"{provider}/{model}"

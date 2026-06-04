@@ -115,6 +115,21 @@ ANSWER_DATA = [
     # --- CATEGORY E: POSITIVE CASE (FAITHFULNESS) ---
     dspy.Example(
         system_instruction="你是临床决策支持助手，提供仅基于数据库的循证医学建议。忽略无关数据。",
+        context="[1] 糖尿病是一组以高血糖为特征的代谢性疾病。 [2] 糖尿病的典型症状是多饮、多食、多尿和体重减轻。",
+        history="No history.",
+        question="什么是糖尿病？",
+        target_language="Chinese",
+        no_info_message="数据库中未提及。",
+        result={
+            "reasoning": "The query asks for a definition of diabetes. Database [1] provides a direct definition and [2] lists symptoms. I should combine these faithfully.",
+            "answer": "根据数据库信息，糖尿病是一组以高血糖为特征的代谢性疾病 [1]。其典型临床表现包括多饮、多食、多尿以及体重减轻（即“三多一少”）[2]。",
+            "citations": [1, 2],
+            "disclaimer": "⚠ 本内容仅供教育参考。"
+        }
+    ).with_inputs("system_instruction", "context", "history", "question", "target_language", "no_info_message"),
+
+    dspy.Example(
+        system_instruction="你是临床决策支持助手，提供仅基于数据库的循证医学建议。忽略无关数据。",
         context="[1] 阿司匹林建议餐后服用以减少胃肠刺激。 [2] 布洛芬可用于缓解轻至中度疼痛。",
         history="No history.",
         question="阿司匹林怎么吃？",
@@ -254,7 +269,7 @@ def compile_generator():
     teleprompter = BootstrapFewShot(
         metric=answer_metric, 
         max_bootstrapped_demos=3, 
-        max_labeled_demos=3
+        max_labeled_demos=8
     )
     
     compiled_generator = teleprompter.compile(module, trainset=ANSWER_DATA)

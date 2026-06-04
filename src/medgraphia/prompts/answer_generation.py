@@ -19,8 +19,8 @@ class MedicalAnswer(BaseModel):
     )
 
 class GenerateClinicalAnswer(dspy.Signature):
-    """Answer the medical question in the requested language using ONLY the provided context.
-    Cite context using [N]. If no info is found, state that clearly."""
+    """Answer the medical question in the requested language using ONLY the provided database.
+    Cite sources using [N]. If no info is found, state that clearly."""
     
     system_instruction: str = dspy.InputField(desc="Core role and persona for the assistant")
     context: str = dspy.InputField(desc="Numbered medical context paragraphs")

@@ -1,8 +1,13 @@
 from __future__ import annotations
 from datetime import datetime, timezone
+from enum import Enum
 from pydantic import BaseModel, Field
 from uuid import UUID, uuid4
 from medgraphia.domain.base import Language
+
+class Role(str, Enum):
+    USER = "user"
+    ASSISTANT = "assistant"
 
 class Citation(BaseModel):
     citation_number: int
@@ -15,7 +20,7 @@ class Citation(BaseModel):
 class Message(BaseModel):
     message_id: UUID = Field(default_factory=uuid4)
     session_id: str
-    role: str                         # "user" | "assistant"
+    role: Role                         # Changed from str to Role Enum
     content: str
     citations: list[Citation] = Field(default_factory=list)
     model_used: str = ""

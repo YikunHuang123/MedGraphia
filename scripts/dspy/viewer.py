@@ -26,14 +26,15 @@ def inspect():
     # Run one prediction to populate history
     with dspy.context(lm=lm):
         try:
-            generator(
-                system_instruction="你是一位友善的医疗健康教育者。",
-                context=context,
+            prediction = generator(
+                system_instruction="你是临床决策支持助手，提供仅基于数据库的循证医学建议。忽略无关数据。",
+                context=case['context'],
                 history="No history.",
-                question=question,
+                question=case['question'],
                 target_language="Chinese",
-                no_info_message="抱歉，参考资料中没有足够的信息。"
+                no_info_message="抱歉，数据库中没有足够的信息。"
             )
+
             # Print the rendered prompt
             lm.inspect_history(n=1)
         except Exception as e:

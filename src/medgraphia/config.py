@@ -166,7 +166,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Reranker
     # ------------------------------------------------------------------
-    reranker_threshold: float = 0.10  # Minimum score for a passage to be considered relevant
+    reranker_threshold: float = 0.0  # Minimum score for a passage to be considered relevant
 
     ner_gliner_model: str = "urchade/gliner_mediumv2.1"
     ner_gliner_threshold: float = 0.30  # lowered further
