@@ -333,48 +333,35 @@ The **Leiden algorithm** clusters the entity graph based on relationship topolog
 
 ### 2 — Online Query Pipeline
 
-When a user submits a query, the system runs the following steps:
+When a user submits a query, the system executes a multi-stage pipeline orchestrated by the API and the `RetrievalPipeline`:
 
-**Step 1 — Query Classification & Language Routing**
+**Step 0 — Proactive Defense (Safety Check)**
+Before any processing, **Llama-Guard 3** inspects the input query and conversation history. Violations of S1-S14 safety categories (e.g., self-harm, illegal acts) trigger an immediate safe refusal.
 
-The **LangGraph agent** classifies the incoming query into one of five strategies and detects the query language. Cross-lingual retrieval is always enabled: a Chinese question can retrieve German or English evidence if it matches via CUI.
+**Step 1 — Contextual Rewriting (Short-Term Memory)**
+If conversation history exists, the `QueryRewriter` resolves pronouns and ellipsis (e.g., "What are its side effects?" → "What are the side effects of Metformin?"), and create an overview of historical chat records in a fixed window, to create a standalone search query.
 
-**Step 1.5 — Multilingual Query Expansion**
+**Step 2 — Intent Routing & Multilingual Expansion**
+- **NER & Linking**: The `QueryRouter` runs a multilingual NER pass on the query to identify medical entities and link them to MeSH CUIs.
+- **Intent Classification**: The query is classified into one of five categories: `CLINICAL_DECISION`, `DRUG_INTERACTION`, `LITERATURE_MULTIHOP`, `CROSS_CORPUS`, or `PATIENT_FAQ`.
+- **Multilingual expansion**: To eliminate lexical bias in sparse retrieval, the `QueryTranslator` translates the query into all three corpus languages (ZH / EN / DE) in parallel.
 
-When `MULTILINGUAL_RETRIEVAL_ENABLED=true` (default), the `QueryTranslator` translates the rewritten query into all three corpus languages (ZH / EN / DE) in parallel before vector retrieval. The vector retriever then runs one Qdrant search per language — filtered to that language's chunks — with a per-language quota (default `MULTILINGUAL_PER_LANG_QUOTA=7`), plus an unfiltered pass. Results are de-duplicated and score-merged into a single candidate pool.
+**Step 3 — Three-Path Retrieval & Fusion**
+The system executes a concurrent retrieval plan:
+1. **Graph Traversal**: 1-2 hop expansion from query CUIs in Neo4j to find structured clinical facts.
+2. **Hybrid Vector Search**: Parallel per-language Qdrant searches using BGE-M3 (dense + sparse) with quota-based merging.
+3. **Community Summary**: Semantic search over Leiden-detected community summaries for global insights.
 
-This solves a structural problem in BGE-M3 hybrid search: the sparse (BM25-style) component assigns `abs(hash(token)) % 2³¹` to each token, so tokens from different languages for the same concept (e.g. `肾衰竭` vs `Nierenversagen`) have **zero overlap** in the sparse space. Without expansion, a Chinese query would systematically under-rank German chunks regardless of their dense-vector semantic proximity.
+**Reciprocal Rank Fusion (RRF)** merges these paths, followed by a **bge-reranker-v2-m3** cross-encoder pass to select the top-20 most relevant context passages.
 
-**Step 2 — Three-Path Retrieval (parallel)**
+**Step 4 — Generation & Clinical Rigor**
+- **LLM Routing**: The `LLMRouter` selects the optimal model tier (`SMALL`, `MEDIUM`, or `LARGE`) based on query complexity and language preference.
+- **DSPy Prompt**: The generation is handled by a **compiled DSPy program** that enforces reasoning chains (CoT) and clinical rigor through pre-tuned few-shot demonstrations.
+- **Output Moderation**: A final Llama-Guard check ensures the generated answer is safe before delivery.
 
-| Path | Mechanism | Best for |
-|---|---|---|
-| **Graph traversal** | NER + entity linking on the query → Neo4j 1–2-hop subgraph expansion | Drug interactions, clinical relationships, structured fact lookup |
-| **Hybrid vector search** | BGE-M3 dense + sparse hybrid on Qdrant; with multilingual expansion, runs separate per-language quota searches and merges candidates | Semantic similarity, paraphrase, cross-language retrieval |
-| **Community summary** | Semantic search over Leiden community summaries | "What are all comorbidities of T2DM?" — global, cross-corpus synthesis |
-
-**Step 3 — RRF Fusion + Neural Reranking**
-
-Results from all three paths are merged with Reciprocal Rank Fusion, then passed through **bge-reranker-v2-m3** (multilingual cross-encoder) to produce a final ranked candidate list.
-
-**Step 4 — LLM Router**
-
-The router selects the generation model based on query risk level and complexity:
-
-| Risk | Complexity | Selected model |
-|---|---|---|
-| Patient FAQ | Low | Qwen2.5-7B / DeepSeek (self-hosted or API) |
-| Drug interaction, dosing | Medium | DeepSeek-Chat / GPT-4o-mini |
-| Clinical decision support | High | Claude 3.5 / GPT-4 via EU data-residency channel |
-
-**Step 5 — Clinical Rigor, Safety & Citation**
-
-This stage ensures the final response adheres to medical standards:
-1. **Adversarial Gatekeeping**: Every query is processed by a **compiled DSPy program** using pre-tuned reasoning traces. This enforces a "zero-assumption principle" to intercept ambiguous queries or irrelevant context.
-2. **Safety Filtering**: Llama-Guard 3 performs proactive input filtering (S1-S14 categories) and post-generation output moderation.
-3. **Evidence Citation**: Answers include numbered citations `[1][2]` linked to the exact source chunk, section path, and document version. 
-
-Pipeline quality is verified via offline RAGAS evaluation cycles.
+**Step 5 — Persistence & Long-Term Memory**
+- **Evidence Citation**: The system injects numbered citations `[1][2]` that map exactly to the source chunks and section paths.
+- **Async Interest Update**: User interactions are recorded in Neo4j by creating or updating `INTERESTED_IN` relationships with an **exponential time-decay algorithm**, building a longitudinal user profile for language-agnostic personalization.
 
 
 ---
@@ -392,7 +379,7 @@ MedGraphia supports two deployment configurations that share the same codebase. 
 | **Neo4j memory** | 16 GB+ page cache | 1–2 GB page cache (< 100K nodes / 500K edges) |
 | **LLM** | vLLM/SGLang self-hosted 70B + cloud routed | Ollama 7B 4-bit GGUF or DeepSeek/Qwen API |
 | **Auth** | Keycloak SSO + OPA role-based ACL | API key invite flow |
-| **Observability** | Langfuse + Prometheus + Grafana | Langfuse only |
+| **Observability** | Langfuse (GDPR-safe tracing) | Langfuse only |
 | **Compose file** | `docker-compose.yml` | `docker-compose.lite.yml` |
 
 > **Architecture parity**: Lite mode preserves the full code path — graph retrieval, hybrid vector, community summaries, LLM router, citations. Upgrading to enterprise requires only a larger dataset, more memory, and switching compose files.
@@ -727,7 +714,6 @@ All settings are loaded from `.env` via Pydantic Settings. Key variables:
 | `EMBEDDING_PROVIDER`| `ollama` | `huggingface` \| `openai` \| `ollama` |
 | **Observability** | | |
 | `TRACING_ENABLED` | `false` | Enable Langfuse tracing |
-| `METRICS_ENABLED` | `false` | Enable Prometheus metrics |
 | **Compliance** | | |
 | `GUARDRAILS_ENABLED`| `true` | Enable Llama-Guard safety checks |
 | `LLAMA_GUARD_PROVIDER`| `ollama` | Provider for the safety model |
@@ -901,6 +887,8 @@ MedGraphia/
 ---
 
 ## 🔮 Roadmap
+
+- [ ] **Adaptive Context Injection**: Dynamically adjust context window based on LLM's uncertainty.
 
 ---
 
