@@ -167,8 +167,20 @@ async def run_evaluation(
             )
 
             # Prepare data for RAGAS
-            # Contexts must be a list of strings
-            contexts = [item.text for item in ret_result.items]
+            # We must use the same formatting as the UI to ensure the [N] markers 
+            # in the answer match the context items for RAGAS metrics.
+            from medgraphia.generation.citation import _source_hint
+            
+            contexts = []
+            for i, item in enumerate(ret_result.items, start=1):
+                # Replicate UI/API formatting: [N] Text (Source Hint)
+                # This allows RAGAS to correctly resolve [N] citations in the answer.
+                text = item.text[:800].strip()
+                hint = _source_hint(item)
+                formatted_line = f"[{i}] {text}"
+                if hint:
+                    formatted_line += f"  ({hint})"
+                contexts.append(formatted_line)
             
             # Handle list-formatted ground truth from CSV if needed
             gt = sample["ground_truth"]
