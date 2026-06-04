@@ -23,6 +23,7 @@
 - [Deployment Modes](#-deployment-modes)
 - [Installation](#-installation)
 - [Usage](#-usage)
+- [Evaluation](#-evaluation)
 - [Configuration](#-configuration)
 - [Project Structure](#-project-structure)
 - [Roadmap](#-roadmap)
@@ -35,11 +36,11 @@
 
 | Feature                                                         | Description                                                                                                                                                                                                                                                                                   |
 |-----------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 🧠 Multi-Route GraphRAG Retrieval                               | Three-path hybrid: Neo4j subgraph traversal + Hybrid retrieval combining BGE-M3 dense/sparse embeddings indexed in Qdrant + Leiden algorithm community summaries — combined via RRF                                                                                                          |
+| 🧠 Advanced GraphRAG Engine | A deep implementation of GraphRAG principles: <br>• **Local Search**: NER-driven subgraph traversal (1-2 hops) for precise clinical triples.<br>• **Global Search**: **Leiden algorithm** community detection + LLM-generated hierarchical summaries for cross-corpus synthesis.<br>• **Hybrid RRF**: Merging graph traversal, dense/sparse vector search, and community insights via Reciprocal Rank Fusion.<br>• **Semantic Glue**: All data is anchored to MeSH CUIs, enabling the graph to act as a cross-lingual and cross-document relational bridge. |
 | 🌐 Multilingual (ZH / EN / DE) align                            | All surface forms of the same concept ("心肌梗死 / myocardial infarction / Myokardinfarkt") are aligned to a single CUI (MeSH ID) via SapBERT-XLMR for graph retrieval. At query time, **multilingual expansion** (Step 0.5) translates the query into all three corpus languages via `QueryTranslator` and runs parallel per-language Qdrant searches with quota-based merging — eliminating the hybrid-search lexical bias where BGE-M3 sparse vectors have zero token overlap across languages (e.g., a Chinese "肾衰竭" query would otherwise miss German "Nierenversagen" chunks despite semantic proximity in the dense space). |
 | 🔬️ DSPy-driven Prompt Optimization                    | Leveraging **compiled DSPy programs** to enforce a "zero-assumption principle". Optimization strategies include:<br>• **Adversarial Few-Shot Bootstrapping**: Tuning via high-quality ambiguous/negative samples.<br>• **Explicit Reasoning Chain (CoT) Optimization**: Hardcoding medical logic into reasoning traces to forbid speculative answering.<br>• **Minimalist Response Enforcement**: Training the model to avoid summarizing irrelevant context noise.<br>• **Semantic Mismatch Detection**: Fine-tuning the boundary between grounded knowledge and retrieval noise.<br>• **Cross-Language Synthesis Training**: Few-shot demos explicitly teach the LLM to translate and synthesize foreign-language context paragraphs (DE/EN in a ZH answer) rather than treating them as missing information; updated metric penalises false refusals on positive cross-language cases. Clinical context (differential diagnoses, case notes) is treated as valid evidence, not refused for lacking an encyclopedic definition. |
 | ⏳ Long-Short Term Memory System                                 | **Short-Term:** LLM-based Contextual Query Rewriting resolves pronouns across recent chat turns into standalone queries. **Long-Term:** Async Neo4j updates build cross-session user profiles with an **exponential time-decay algorithm** graph edge, enabling language-agnostic personalization. |
-| 🏥 Two-Stage Cascade NER & Entity Linking                       | GLiNER zero-shot multilingual coarse pass + language-specific BERT precision pass (d4data/biomedical-ner-all EN / bert-base-chinese-medical-ner ZH / configurable DE) → SapBERT-XLMR linking to CUI (MeSH ID)                                                                                 |
+| 🏥 Two-Stage Cascade NER & Entity Linking                       | GLiNER zero-shot multilingual coarse pass + language-specific BERT precision pass (d4data/biomedical-ner-all EN / iioSnail/bert-base-chinese-medical-ner ZH / configurable DE) → SapBERT-XLMR linking to CUI (MeSH ID)                                                                                 |
 | ⚡ Schema-Constrained LLM Relation Extraction                    | LLM relation extraction limited to a closed medical schema (TREATS, CAUSES, INTERACTS_WITH, DOSAGE_FOR…) — no hallucinated relationship types                                                                                                                  |
 | 🏗️ Section-aware Chunking                                      | Text is split based on structural hierarchy (Section → Sub-section → Paragraph) rather than fixed token counts. Each chunk carries a metadata section_path, ensuring contextual grounding during retrieval.                                                                                   |
 | 👁️ Multilingual PDF files support (Multi-Engine Parsing & OCR) | Hybrid pipeline using Docling (EN/DE) and MinerU (ZH) for structural layout analysis (tables/formulas). Integrated Tesseract 5 + PaddleOCR fallback for scanned medical records.                                                                               |
@@ -93,7 +94,7 @@
           ┌─────────────────────────▼───────────────────────────────────▼──────────┐
           │                          STORAGE LAYER                                 │
           │   ┌─────────────────────────┐   ┌────────────────┐   ┌──────────────┐  │
-          │   │  Neo4j 5.x              │   │  Qdrant        │   │  MinIO       │  │
+          │   │  Neo4j 5.x              │   │  Qdrant        │   │  Local Disk  │  │
           │   │  Knowledge Graph        │   │  Vector Store  │   │              │  │
           │   │  entities · relations   │   │  dense + sparse│   │  raw docs    │  │
           │   │  community summaries    │   │  hybrid index  │   │  provenance  │  │
@@ -181,64 +182,89 @@
 
 ### Node Types
 
-| Label | Description | Primary Source |
-|---|---|---|
-| `Disease` | Disease / syndrome (SNOMED CT concepts) | UMLS · CMeKG · ICD-10/11 |
-| `Drug` | Drug substance (RxNorm / ATC-DDD) | DrugBank · EMA SmPC · FDA DailyMed |
-| `Symptom` | Clinical sign or symptom | SNOMED CT · UMLS |
-| `Gene` | Gene / protein target | NCBI Gene |
-| `Procedure` | Clinical procedure (SNOMED) | UMLS |
-| `Chunk` | Source text chunk with `section_path` + `source_version` | PubMed · Guidelines · Labels |
-| `Community` | Leiden-detected entity cluster with LLM summary | Computed |
+#### 1. Medical Entities (MeSH-Anchored)
+Core knowledge nodes. All medical entities are uniquely identified by their **MeSH CUI**.
 
-Every node carries a `cui` (MeSH ID) property as the cross-lingual anchor, plus `lang_labels` for ZH/EN/DE surface forms.
+| Label | Description | Key Properties |
+|---|---|---|
+| `Disease` | Clinical conditions / syndromes | `cui`, `label`, `lang_zh`, `lang_de`, `confidence` |
+| `Drug` | Substances / pharmaceutical products | `cui`, `label`, `lang_zh`, `lang_de`, `confidence` |
+| `Symptom` | Signs and symptoms | `cui`, `label`, `lang_zh`, `lang_de`, `confidence` |
+| `Gene` | Genes / proteins / markers | `cui`, `label`, `lang_zh`, `lang_de`, `confidence` |
+| `Procedure` | Diagnostic or therapeutic procedures | `cui`, `label`, `lang_zh`, `lang_de`, `confidence` |
+
+#### 2. Knowledge & Application Structure
+Nodes supporting the RAG workflow and system metadata.
+
+| Label | Description | Key Properties |
+|---|---|---|
+| `Document` | Source document metadata | `doc_id`, `title`, `source_id`, `format`, `language` |
+| `Chunk` | Section-aware text fragment | `chunk_id`, `text`, `section_path`, `token_count` |
+| `Community` | Leiden-detected entity cluster | `community_id`, `summary`, `size` |
+| `User` | Application user profile | `id` (user_id) |
+| `ChatSession` | Metadata for a chat thread | `session_id`, `user_id`, `language`, `domain` |
+| `ChatMessage` | Individual message content | `message_id`, `role`, `content`, `model_used` |
+| `ApiKey` | Authentication keys | `key_hash`, `prefix`, `role`, `active` |
+| `PipelineStatus`| Progress of build tasks | `domain`, `stage`, `progress`, `error` |
+
+---
 
 ### Relationship Types
 
-| Type | Example triple | Stored properties |
+#### 1. Semantic Relations (LLM Extracted)
+Directed edges between two **Medical Entities**, derived from text evidence.
+
+| Type | Example Triple (Source → Target) | Stored Properties |
 |---|---|---|
-| `TREATS` | Metformin → T2DM | confidence · evidence_text · chunk_id |
-| `CAUSES` | T2DM → Retinopathy | confidence · evidence_text · chunk_id |
-| `INTERACTS_WITH` | Warfarin ↔ Aspirin | severity · mechanism · chunk_id |
-| `DOSAGE_FOR` | (Chunk) → Metformin | route · population · chunk_id |
-| `SYMPTOM_OF` | Polyuria → T2DM | frequency · chunk_id |
-| `COMPLICATION_OF` | Nephropathy → T2DM | prevalence · chunk_id |
-| `CODED_AS` | T2DM → ICD-10 E11 | code_system · version |
-| `CONTRAINDICATED_IN` | Metformin → Renal Failure | evidence_level · chunk_id |
+| `TREATS` | Metformin → T2DM | `confidence`, `evidence_text`, `chunk_id`, `source_id`, `extracted_by` |
+| `CAUSES` | T2DM → Retinopathy | `confidence`, `evidence_text`, `chunk_id`, `source_id`, `extracted_by` |
+| `INTERACTS_WITH` | Warfarin → Aspirin | `confidence`, `evidence_text`, `chunk_id`, `source_id`, `extracted_by` |
+| `SYMPTOM_OF` | Polyuria → T2DM | `confidence`, `evidence_text`, `chunk_id`, `source_id`, `extracted_by` |
+| `COMPLICATION_OF` | Nephropathy → T2DM | `confidence`, `evidence_text`, `chunk_id`, `source_id`, `extracted_by` |
+| `CONTRAINDICATED_IN`| Metformin → Renal Failure | `confidence`, `evidence_text`, `chunk_id`, `source_id`, `extracted_by` |
+| `DOSAGE_FOR` | Tablets → Aspirin | `confidence`, `evidence_text`, `chunk_id`, `source_id`, `extracted_by` |
+| `CODED_AS` | T2DM → E11 (ICD-10) | `confidence`, `evidence_text`, `chunk_id`, `source_id`, `extracted_by` |
+
+#### 2. Structural & System Relations
+
+| Type | Source → Target | Description |
+|---|---|---|
+| `MENTIONED_IN` | Entity → Chunk | Indicates an entity mention within a specific text fragment |
+| `FROM_DOC` | Chunk → Document | Links a chunk back to its parent source document |
+| `MEMBER_OF` | Entity → Community | Assigns an entity to a Leiden-detected community cluster |
+| `HAS_MESSAGE` | ChatSession → ChatMessage| History chain for a specific conversation session |
+| `INTERESTED_IN` | User → Entity | Tracks user-specific interests with decaying `weight` |
 
 ---
 
 ## 🛠 Tech Stack
 
-| Layer | Technology | Notes                                                                 |
-|---|---|-----------------------------------------------------------------------|
-| **Language** | Python 3.12 |                                                                       |
-| **API Framework** | FastAPI + Uvicorn | SSE streaming support                                                 |
-| **Agent Orchestration** | LangGraph (LangChain) | Stateful, branching, retriable query agent                            |
-| **Prompt Optimization** | DSPy | Optimized via **Adversarial Few-Shot Bootstrapping**; enforces clinical rigor through pre-compiled reasoning traces |
-| **GraphRAG Framework** | LightRAG | less cost vs Microsoft GraphRAG |
-| **Graph Database** | Neo4j 5.x | Nodes and relationships                                              |
-| **Vector Store** | Qdrant | Native dense + sparse hybrid    |
-| **Object Storage** | MinIO + Apache Iceberg | Raw docs, parse artifacts, provenance snapshots                       |
-| **Embedding** | BGE-M3 (BAAI) | Dense + sparse + ColBERT; 100+ languages                |
-| **Entity NER** | GLiNER (`urchade/gliner_mediumv2.1`) · `d4data/biomedical-ner-all` (EN) · `bert-base-chinese-medical-ner` (ZH) · configurable DE | Multi-lang, domain-specialized; all language models unified in `bert_ner.py` |
-| **Entity Linking** | SapBERT-XLMR + BM25 | Cross-lingual → MeSH ID                                               |
-| **Reranker** | bge-reranker-v2-m3 | Cross-encoder, multilingual                                           |
-| **Community Detection** | Leiden algorithm | Graph clustering for global QA                                        |
-| **Document Parsing** | Docling (EN/DE) · MinerU (ZH) | Section-aware; table / formula extraction                             |
-| **OCR** | Tesseract 5 + PaddleOCR | Fallback for scanned PDFs and images                                  |
-| **LLM (ZH)** | Qwen2.5 / DeepSeek | Self-hosted via vLLM/Ollama, or API                                   |
-| **LLM (DE)** | LeoLM / EuroLLM + BioMistral | German-native; medical pre-training                                   |
-| **LLM (EN medical)** | BioMistral / Me-LLaMA | PubMed pre-trained                                                    |
-| **LLM (high-risk)** | Claude / GPT-4 | Via Azure OpenAI EU data residency or Anthropic                       |
-| **LLM Gateway** | LiteLLM (self-hosted) | Unified audit log, cost tracking, routing                             |
-| **Safety** | Llama-Guard-3-1B / NeMo Guardrails | Input + output filtering; S1-S14 policy |
-| **Observability** | Langfuse (self-hosted) | GDPR-safe; prompt/token/latency/cost tracing                          |
-| **Evaluation** | RAGAS | Faithfulness · Answer Relevance · Context Precision/Recall · **Synthetic Testset Generation** |
-| **Auth** | API Key / Keycloak SSO | Configurable strategy: `none`, `apikey`, or `oidc`                    |
-| **Pipeline Orchestration** | Prefect 3 / Airflow 2 | Incremental build DAG                                                 |
-| **UI** | Streamlit | Chat · KG explorer · pipeline monitor · admin                         |
-| **Containerization** | Docker + Docker Compose | Multi-target Dockerfiles                                              |
+| Layer | Technology                                                                                                                                    | Notes                                                               |
+|---|-----------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------|
+| **Language** | Python 3.12                                                                                                                                   |                                                                     |
+| **API Framework** | FastAPI + Uvicorn                                                                                                                             | SSE streaming support                                               |
+| **Agent Orchestration** | LangGraph (LangChain)                                                                                                                         | Stateful, branching, retriable query agent                          |
+| **Prompt Optimization** | DSPy                                                                                                                                          | Optimized via **Adversarial Few-Shot Bootstrapping**; enforces clinical rigor through pre-compiled reasoning traces |
+| **GraphRAG Framework** | Custom Implementation                                                                                                                         | Fuses **Leiden community summarization** (Global), **Entity-centric traversal** (Local), and **MeSH-anchored semantic alignment** for complex cross-corpus reasoning. |
+| **Graph Database** | Neo4j 5.x                                                                                                                                     | Nodes and relationships                                            |
+| **Vector Store** | Qdrant                                                                                                                                        | Native dense + sparse hybrid   |
+| **Object Storage** | Local Disk                                                                                                                                    | Raw documents, parse artifacts, and provenance snapshots            |
+| **Embedding** | BGE-M3 (BAAI)                                                                                                                                 | Dense + sparse                |
+| **Entity NER** | GLiNER (`urchade/gliner_mediumv2.1`) · `d4data/biomedical-ner-all` (EN / DE) · `iioSnail/bert-base-chinese-medical-ner` (ZH) | Multi-lang, domain-specialized |
+| **Entity Linking** | SapBERT-XLMR + BM25                                                                                                                           | Cross-lingual → MeSH ID                                             |
+| **Relation Extraction** | Schema-guided LLM                                                                                                                       | Zero-shot extraction constrained to closed medical ontology          |
+| **Reranker** | bge-reranker-v2-m3                                                                                                                            | Cross-encoder, multilingual                                         |
+| **Community Detection** | Leiden algorithm                                                                                                                              | Graph clustering for global QA                                      |
+| **Document Parsing** | Docling (EN/DE) · MinerU (ZH)                                                                                                                 | Section-aware; table / formula extraction                           |
+| **OCR** | Tesseract 5 + PaddleOCR                                                                                                                       | Fallback for scanned PDFs and images                                |
+| **LLM Inference** | LiteLLM Gateway                                                                                                                               | Unified API layer. Supports **DeepSeek** (`deepseek-chat`), **OpenAI** (`gpt-4o`), **Anthropic** (`claude`), **Groq**, and **Ollama** (`qwen2.5`). |
+| **Safety** | Llama-Guard-3-1B                                                                                                                              | Input + output filtering; S1-S14 policy |
+| **Observability** | Langfuse (self-hosted)                                                                                                                        | GDPR-safe; prompt/token/latency/cost tracing                        |
+| **Evaluation** | RAGAS                                                                                                                                         | Faithfulness · Answer Relevance · Context Precision/Recall · **Synthetic Testset Generation** |
+| **Auth** | API Key                                                                                                                                       | Simple and secure key-based access control                          |
+| **Pipeline Orchestration** | Prefect 3                                                                                                                                     | Automated ingestion and build DAG                                   |
+| **UI** | Streamlit                                                                                                                                     | Chat · KG explorer · pipeline monitor · admin                       |
+| **Containerization** | Docker + Docker Compose                                                                                                                       | Multi-target Dockerfiles                                            |
 
 ---
 
@@ -263,14 +289,14 @@ Raw documents are parsed into structured form:
 
 **Stage 3 — Section-aware Chunking + Normalization**
 
-Text is split following the document's structural hierarchy (`section → paragraph → sentence`), not by a fixed token count. Each chunk carries a `section_path` metadata tag (e.g. `"Dosing > Pediatric > Renal adjustment"`) to enable provenance tracing. A domain normalizer unifies dose expressions across all three languages (e.g. `"bid"`, `"2 x täglich"`, `"每日两次"`, `"q 12 h"` → FHIR Timing object).
+Text is split following the document's structural hierarchy (`section → paragraph → sentence`), not by a fixed token count. Each chunk carries a `section_path` metadata tag (e.g. `"Dosing > Pediatric > Renal adjustment"`) to enable provenance tracing. A domain normalizer unifies dose expressions across all three languages (e.g. `"bid"`, `"2 x täglich"`, `"每日两次"`, `"q 12 h"` → FHIR Timing code).
 
 **Stage 4 — Multi-language NER**
 
 A two-stage pipeline extracts medical entities:
 
 1. **Coarse pass**: GLiNER (`urchade/gliner_mediumv2.1`) performs zero-shot, language-agnostic entity detection to enumerate candidate spans.
-2. **Fine pass** (optional): A language-specific BERT model refines each candidate — `d4data/biomedical-ner-all` (EN), `bert-base-chinese-medical-ner` (ZH); German model is configurable via `NER_BERT_DE_MODEL` (disabled by default). All language variants are implemented in the unified `bert_ner.py` module.
+2. **Fine pass** (optional): A language-specific BERT model refines each candidate — `d4data/biomedical-ner-all` (EN), `iioSnail/bert-base-chinese-medical-ner` (ZH); German model is configurable via `NER_BERT_DE_MODEL` (disabled by default). All language variants are implemented in the unified `bert_ner.py` module.
 
 This hybrid approach is dramatically cheaper than asking an LLM to perform NER directly over the full corpus.
 
@@ -331,7 +357,7 @@ The router selects the generation model based on query risk level and complexity
 | Risk | Complexity | Selected model |
 |---|---|---|
 | Patient FAQ | Low | Qwen2.5-7B / DeepSeek (self-hosted or API) |
-| Drug interaction, dosing | Medium | BioMistral / LeoLM |
+| Drug interaction, dosing | Medium | DeepSeek-Chat / GPT-4o-mini |
 | Clinical decision support | High | Claude 3.5 / GPT-4 via EU data-residency channel |
 
 **Step 5 — Clinical Rigor, Safety & Citation**
@@ -354,7 +380,7 @@ MedGraphia supports two deployment configurations that share the same codebase. 
 |---|---|---|
 | **Target** | Production server / cloud | 16 GB Mac / PC (M1/M2 or RTX 3060+) |
 | **Data scope** | Full multi-domain corpus | Single domain (e.g. T2DM), 100–500 abstracts + 50 drug labels |
-| **UMLS** | Full Metathesaurus | MetamorphoSys subset (SNOMED CT + RxNorm + MeSH, EN+ZH only) |
+| **Knowledge Base** | MeSH (Full Multilingual Index) | MeSH (Selected Descriptors) |
 | **Vector DB** | Qdrant (dense + sparse hybrid) | Qdrant (dense + sparse hybrid, reduced memory footprint) |
 | **Neo4j memory** | 16 GB+ page cache | 1–2 GB page cache (< 100K nodes / 500K edges) |
 | **LLM** | vLLM/SGLang self-hosted 70B + cloud routed | Ollama 7B 4-bit GGUF or DeepSeek/Qwen API |
@@ -593,7 +619,7 @@ curl -X POST http://localhost:8058/chat \
     }
   ],
   "retrieval_paths_used": ["graph_traversal", "hybrid_vector"],
-  "model_used": "BioMistral-7B"
+  "model_used": "deepseek/deepseek-chat"
 }
 ```
 
@@ -638,6 +664,44 @@ curl "http://localhost:8058/graph/entity?name=metformin&lang=en&hops=2" \
 
 ---
 
+## 📊 Evaluation
+
+MedGraphia includes a comprehensive evaluation suite using RAGAS for quality measurement and automated testset generation.
+
+> **Note**: Evaluation scripts require `OPENAI_API_KEY` to be set in your environment, as they use GPT-4o-mini as a "judge" model.
+
+### 1. Synthetic Testset Generation
+
+Generate high-quality medical QA pairs from your processed data:
+
+```bash
+python scripts/evaluation/generate_testset.py \
+  --data-dir data/processed \
+  --test-size 50 \
+  --docs-limit 10 \
+  --output data/evaluation/synthetic_testset.csv
+```
+
+**Parameters:**
+- `--data-dir`: Directory containing processed JSON files.
+- `--test-size`: Number of QA pairs to generate.
+- `--docs-limit`: Number of source documents to load.
+- `--output`: Output CSV path.
+- `--append`: Append to existing file instead of overwriting.
+- `--max-workers`: Number of parallel RAGAS workers (default: 4).
+
+### 2. RAG Pipeline Metrics
+
+Evaluate the full RAG pipeline (Faithfulness, Relevance, Precision, Recall) using the generated testset:
+
+```bash
+python scripts/evaluation/eval_rag_metrics.py \
+  --input data/evaluation/synthetic_testset.csv \
+  --output eval_results.csv
+```
+
+---
+
 ## ⚙️ Configuration
 
 All settings are loaded from `.env` via Pydantic Settings. Key variables:
@@ -645,8 +709,7 @@ All settings are loaded from `.env` via Pydantic Settings. Key variables:
 | Variable | Default | Description |
 |---|---|---|
 | **Architecture** | | |
-| `STORAGE_BACKEND` | `local` | `local` (disk) or `s3` (MinIO/AWS S3) |
-| `AUTH_STRATEGY` | `apikey` | `none`, `apikey`, or `oidc` (Keycloak); env var: `AUTH_STRATEGY` |
+| `AUTH_STRATEGY` | `apikey` | Authentication strategy: `none` or `apikey` (Default) |
 | **Neo4j** | | |
 | `NEO4J_URI` | `bolt://localhost:7687` | Neo4j connection URI |
 | `NEO4J_PAGE_CACHE` | `1G` | Page cache size (e.g., `1G` for laptop, `32G` for server) |
@@ -659,7 +722,6 @@ All settings are loaded from `.env` via Pydantic Settings. Key variables:
 | `TRACING_ENABLED` | `false` | Enable Langfuse tracing |
 | `METRICS_ENABLED` | `false` | Enable Prometheus metrics |
 | **Compliance** | | |
-| `PII_DEIDENTIFY` | `false` | Run Microsoft Presidio PHI de-identification |
 | `GUARDRAILS_ENABLED`| `true` | Enable Llama-Guard safety checks |
 | `LLAMA_GUARD_PROVIDER`| `ollama` | Provider for the safety model |
 | `LLAMA_GUARD_MODEL`| `llama-guard3:1b`| Model name for the safety guardrails |
@@ -682,6 +744,8 @@ MedGraphia/
 ├── .env.example                    # Enterprise env template
 ├── .env.lite.example               # Lite-mode env template
 ├── pyproject.toml
+├── data/
+│   └── dspy/                   # Compiled DSPy programs (optimized reasoning traces)
 ├── scripts/
 │   ├── dspy/                   # DSPy optimization and inspection tools
 │   │   ├── optimize.py         # Adversarial tuning pipeline
@@ -696,7 +760,9 @@ MedGraphia/
 │   │   └── import_mesh.py          # Load MeSH Descriptor Index into local data dir
 │   ├── pipeline/
 │   │   ├── build_graph.py          # Bootstrap: thin CLI wrapper for ingestion/pipeline.py
+│   │   ├── clean_short_chunks.py   # Utility to remove low-info chunks
 │   │   ├── embed_entities.py       # Standalone entity embedding task
+│   │   ├── extract_relations_only.py # Schema-guided RE only mode
 │   │   ├── ingest_multilingual.py  # Ingest multilingual corpus
 │   │   ├── retrieval.py            # Ad-hoc retrieval test script
 │   │   ├── ask_llm.py              # One-shot LLM query helper
@@ -708,6 +774,8 @@ MedGraphia/
 │   │   ├── reset_databases.py      # Wipe Neo4j + Qdrant for a fresh run
 │   │   └── setup_chat_storage.py   # Create Neo4j chat history indexes
 │   └── evaluation/
+│       ├── generate_testset.py      # Automated synthetic testset generation (RAGAS)
+│       ├── eval_rag_metrics.py      # RAG pipeline evaluation (Faithfulness, etc.)
 │       ├── blind_test_normalizer.py # Evaluate dose/unit normalizer accuracy
 │       └── eval_ner_linking.py      # Evaluate NER + entity linking pipeline
 │
@@ -739,7 +807,7 @@ MedGraphia/
     │   │   ├── ocr_parser.py       # Tesseract 5 + PaddleOCR fallback for scanned docs
     │   │   └── structured_parser.py # JSON/JSONL medical QA datasets (Huatuo etc.)
     │   ├── chunker.py              # Section-aware anchor chunking — not fixed-size 512
-    │   ├── normalizer.py           # Dose/unit normalization → FHIR Timing object
+    │   ├── normalizer.py           # Dose/unit normalization → FHIR Timing code
     │   ├── ner/
     │   │   ├── gliner_ner.py       # GLiNER zero-shot multilingual coarse NER
     │   │   ├── bert_ner.py         # Unified BERT precision pass: EN / ZH / DE in one module
@@ -760,17 +828,18 @@ MedGraphia/
     │   └── qdrant_store.py         # Qdrant: dense + sparse hybrid (enterprise & lite)
     │
     ├── llm/                        # LLM client layer
-    │   ├── gateway.py              # LiteLLMGateway: unified multi-provider interface (OpenAI / Anthropic / DeepSeek / Gemini / Groq / Ollama)
-    │   └── client.py               # pydantic-ai model factory for structured LLM output
+    │   ├── gateway.py              # LiteLLMGateway: unified multi-provider interface
+    │   ├── client.py               # pydantic-ai model factory for structured LLM output
+    │   └── dspy_setup.py           # DSPy configuration and program loader
     │
     ├── retrieval/                  # Online query pipeline (three-path hybrid)
     │   ├── pipeline.py             # RetrievalPipeline: orchestrates all retrieval steps
     │   ├── router.py               # Query classification → retrieval strategy selection
     │   ├── rewriter.py             # QueryRewriter: condense history into standalone query
-    │   ├── query_translator.py     # QueryTranslator: translate query into ZH/EN/DE for per-language quota retrieval (Step 0.5)
+    │   ├── query_translator.py     # QueryTranslator: translate query into ZH/EN/DE
     │   ├── query_ner.py            # NER on incoming query for entity-based graph lookup
     │   ├── graph_retriever.py      # Neo4j 1–2-hop subgraph from entity CUIs in query
-    │   ├── vector_retriever.py     # BGE-M3 dense + sparse hybrid search on Qdrant; retrieve_multilingual() for per-language quota search
+    │   ├── vector_retriever.py     # BGE-M3 dense + sparse hybrid search on Qdrant
     │   ├── community_retriever.py  # Leiden community summary search (global QA)
     │   ├── reranker.py             # bge-reranker-v2-m3 cross-encoder
     │   └── fusion.py               # Reciprocal Rank Fusion (RRF) across all three paths
@@ -778,8 +847,15 @@ MedGraphia/
     ├── generation/                 # LLM generation layer
     │   ├── pipeline.py             # GenerationPipeline: context prep → routing → LLM → citations
     │   ├── llm_router.py           # Route by query type / language → SMALL / MEDIUM / LARGE tier
-    │   ├── citation.py             # Inline citation injection → provenance to chunk_id + section
-    │   └── prompts.py              # Pydantic-typed prompt modules (per scenario × language)
+    │   ├── citation.py             # Inline citation injection → provenance
+    │   └── guard.py                # Llama-Guard 3 safety filtering logic
+    │
+    ├── prompts/                    # Pydantic-typed prompt modules (DSPy signatures)
+    │   ├── answer_generation.py
+    │   ├── community_summary.py
+    │   ├── query_rewriting.py
+    │   ├── relation_extraction.py
+    │   └── safety.py
     │
     ├── api/                        # FastAPI application
     │   ├── __init__.py             # App factory with lifespan management
@@ -787,7 +863,7 @@ MedGraphia/
     │   ├── deps.py                 # FastAPI Depends: auth, session, rate limit
     │   ├── middleware.py           # Audit logging, GDPR-safe request tracing
     │   ├── chat.py                 # POST /chat (blocking) + POST /chat/stream (SSE)
-    │   ├── knowledge.py            # GET /graph/entity, GET /graph/subgraph, GET /graph/community
+    │   ├── knowledge.py            # GET /graph/entity, GET /graph/entity/search, GET /graph/stats
     │   ├── admin.py                # Pipeline trigger, model config, user management
     │   ├── health.py               # GET /health/live  &  GET /health/ready
     │   └── auth.py                 # API key auth (lite) / Keycloak OIDC (enterprise)
