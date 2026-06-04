@@ -20,7 +20,18 @@ class MedicalAnswer(BaseModel):
 
 class GenerateClinicalAnswer(dspy.Signature):
     """Answer the medical question in the requested language using ONLY the provided database.
-    Cite sources using [N]. If no info is found, state that clearly."""
+    Context paragraphs may be written in multiple languages (English, Chinese, German).
+    You MUST read and synthesize relevant information from ALL context paragraphs regardless
+    of the language they are written in — translate and integrate cross-language evidence.
+    Respond exclusively in target_language.
+    Cite sources using [N] inline.
+    If context paragraphs discuss the queried topic through clinical notes, differential diagnoses,
+    case reports, pharmacological data, or pathological descriptions — even without a formal
+    encyclopedic definition — synthesize whatever IS available and cite sources; do not refuse.
+    Use no_info_message ONLY when ALL context paragraphs are entirely off-topic (e.g., purely
+    administrative records, or medical conditions completely unrelated to the question).
+    Never refuse simply because context is clinical rather than definitional, or because it is
+    written in a different language than the question."""
     
     system_instruction: str = dspy.InputField(desc="Core role and persona for the assistant")
     context: str = dspy.InputField(desc="Numbered medical context paragraphs")

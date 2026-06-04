@@ -19,6 +19,7 @@ from medgraphia.logger import get_logger
 from medgraphia.retrieval.community_retriever import CommunityRetriever
 from medgraphia.retrieval.fusion import RRFFusion
 from medgraphia.retrieval.graph_retriever import GraphRetriever
+from medgraphia.retrieval.query_translator import QueryTranslator, TranslatedQuery
 from medgraphia.retrieval.reranker import RerankedResult, Reranker
 from medgraphia.retrieval.rewriter import QueryRewriter
 from medgraphia.retrieval.router import QueryRouter, RetrievalPlan
@@ -48,6 +49,7 @@ class RetrievalPipeline:
         community_retriever: CommunityRetriever | None = None,
         fusion: RRFFusion | None = None,
         reranker: Reranker | None = None,
+        query_translator: QueryTranslator | None = None,
     ) -> None:
         self.router = router or QueryRouter.from_settings()
         self.rewriter = rewriter or QueryRewriter.from_settings()
@@ -56,6 +58,7 @@ class RetrievalPipeline:
         self.community_retriever = community_retriever or CommunityRetriever.from_settings()
         self.fusion = fusion or RRFFusion.from_settings()
         self.reranker = reranker or Reranker.from_settings()
+        self.query_translator = query_translator or QueryTranslator.from_settings()
 
     @classmethod
     def from_settings(cls) -> RetrievalPipeline:
@@ -96,6 +99,37 @@ class RetrievalPipeline:
             logger.info("retrieval_using_rewritten_query", rewritten=search_query)
 
         # ---------------------------------------------------------
+        # Step 0.5: Multilingual query expansion
+        # ---------------------------------------------------------
+        # Translate the search query into all other supported languages so that
+        # the vector retriever can run per-language searches.  This removes the
+        # lexical-bias disadvantage that hybrid (dense+sparse) search introduces
+        # for cross-language queries (e.g. Chinese query vs. German corpus chunk).
+        queries_by_language: dict[Language, str] | None = None
+        _known = {Language.EN, Language.ZH, Language.DE}
+        src_lang = language if language in _known else None
+        # Expand whenever the source language is a known corpus language.
+        # The lexical-bias problem affects ALL source languages — an English
+        # query "kidney failure" misses German "Nierenversagen" for the same
+        # sparse-token-mismatch reason as a Chinese query would.
+        if src_lang is not None:
+            try:
+                from medgraphia.config import get_settings
+                cfg = get_settings()
+                if cfg.multilingual_retrieval_enabled:
+                    translated: TranslatedQuery = await self.query_translator.translate(
+                        query=search_query,
+                        source_language=src_lang,
+                    )
+                    queries_by_language = translated.all_queries()
+                    logger.info(
+                        "multilingual_queries_ready",
+                        languages=[lg.value for lg in queries_by_language],
+                    )
+            except Exception as exc:
+                logger.warning("multilingual_expansion_skipped", error=str(exc))
+
+        # ---------------------------------------------------------
         # Step 1: Route & Plan (using the rewritten query)
         # ---------------------------------------------------------
         plan: RetrievalPlan = self.router.route(search_query, language=language)
@@ -123,14 +157,27 @@ class RetrievalPipeline:
 
         # Setup Vector task
         if plan.use_vector:
-            tasks.append(
-                asyncio.create_task(
-                    self.vector_retriever.retrieve(
-                        query=search_query,
-                        limit=plan.vector_limit,
+            if queries_by_language is not None:
+                from medgraphia.config import get_settings
+                _cfg = get_settings()
+                tasks.append(
+                    asyncio.create_task(
+                        self.vector_retriever.retrieve_multilingual(
+                            queries_by_language=queries_by_language,
+                            per_lang_quota=_cfg.multilingual_per_lang_quota,
+                            total_limit=plan.vector_limit,
+                        )
                     )
                 )
-            )
+            else:
+                tasks.append(
+                    asyncio.create_task(
+                        self.vector_retriever.retrieve(
+                            query=search_query,
+                            limit=plan.vector_limit,
+                        )
+                    )
+                )
             task_names.append("vector")
         else:
             task_names.append("skip_vector")

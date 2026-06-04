@@ -7,9 +7,11 @@ the sparse vector is empty.
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+from medgraphia.domain.base import Language
 from medgraphia.logger import get_logger
 
 logger = get_logger(__name__)
@@ -157,6 +159,94 @@ class VectorRetriever:
             logger.warning("vector_retriever_failed", error=f"{type(exc).__name__}: {exc}")
 
         return result
+
+    async def retrieve_multilingual(
+        self,
+        queries_by_language: dict[Language, str],
+        per_lang_quota: int = 7,
+        total_limit: int = 20,
+    ) -> VectorRetrievalResult:
+        """
+        Per-language parallel retrieval that eliminates hybrid-search lexical bias.
+
+        Problem recap
+        -------------
+        BGE-M3 hybrid search merges a dense vector (semantic) and a sparse
+        token-hash vector (lexical).  A Chinese query like "肾衰竭" produces zero
+        sparse overlap with German tokens for "Nierenversagen", so German chunks are
+        systematically under-ranked even when their dense vectors are semantically
+        close.
+
+        Strategy
+        --------
+        1. For each language, encode the *language-specific translation* of the query
+           and run a Qdrant search filtered to that language's chunks, guaranteeing
+           `per_lang_quota` candidates from every language in the corpus.
+        2. Run one unfiltered pass with the source-language query to capture chunks
+           whose `language` payload field is missing or cross-lingual.
+        3. Deduplicate by chunk_id (keeping the highest score) and cap at
+           `total_limit`.  The cross-encoder reranker handles the final ordering.
+
+        Args:
+            queries_by_language: {Language → query text in that language}
+                                 (source language maps to the original query;
+                                  other languages map to LLM translations).
+            per_lang_quota:      Guaranteed minimum candidates per language.
+            total_limit:         Hard cap on the merged candidate pool size.
+
+        Returns:
+            VectorRetrievalResult deduplicated and sorted by score descending.
+        """
+        best: dict[str, VectorHit] = {}  # chunk_id → highest-scoring hit
+
+        # Source language and its query (first entry from the dict)
+        source_lang = next(iter(queries_by_language))
+        source_query = queries_by_language[source_lang]
+
+        # Build one task per language (filtered) + one unfiltered pass
+        retrieval_tasks: list[Any] = []
+        task_labels: list[str] = []
+
+        for lang, query_text in queries_by_language.items():
+            retrieval_tasks.append(
+                self.retrieve(
+                    query=query_text,
+                    limit=per_lang_quota,
+                    filter_payload={"language": lang.value},
+                )
+            )
+            task_labels.append(lang.value)
+
+        # Unfiltered pass with the source query — catches unlabeled chunks
+        retrieval_tasks.append(
+            self.retrieve(query=source_query, limit=total_limit, filter_payload=None)
+        )
+        task_labels.append("unfiltered")
+
+        results = await asyncio.gather(*retrieval_tasks, return_exceptions=True)
+
+        for label, result in zip(task_labels, results):
+            if isinstance(result, Exception):
+                logger.warning(
+                    "multilingual_lane_failed", label=label, error=str(result)
+                )
+                continue
+            for hit in result.hits:
+                cid = hit.chunk_id or ""
+                if cid not in best or hit.score > best[cid].score:
+                    best[cid] = hit
+
+        merged = sorted(best.values(), key=lambda h: h.score, reverse=True)[:total_limit]
+
+        logger.info(
+            "multilingual_vector_done",
+            languages=len(queries_by_language),
+            per_lang_quota=per_lang_quota,
+            total_hits=len(merged),
+        )
+        out = VectorRetrievalResult(query=source_query)
+        out.hits = merged
+        return out
 
     # ------------------------------------------------------------------
     # Internal

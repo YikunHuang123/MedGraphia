@@ -168,6 +168,12 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     reranker_threshold: float = 0.0  # Minimum score for a passage to be considered relevant
 
+    # ------------------------------------------------------------------
+    # Multilingual retrieval
+    # ------------------------------------------------------------------
+    multilingual_retrieval_enabled: bool = True
+    multilingual_per_lang_quota: int = 7
+
     ner_gliner_model: str = "urchade/gliner_mediumv2.1"
     ner_gliner_threshold: float = 0.30  # lowered further
     ner_bert_en_model: str = "d4data/biomedical-ner-all"

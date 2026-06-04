@@ -46,19 +46,29 @@ REWRITE_DATA = [
     ).with_inputs("history", "latest_message"),
 ]
 
-# Sample Dataset for Clinical Answer Generation (High-Quality Adversarial Set)
+# Shared cross-language note appended to every system_instruction so the LLM
+# learns to synthesize multilingual context throughout the training set.
+_CROSSLANG_ZH = "数据库内容可能包含中文、英文或德文，请综合所有语言的相关内容并用中文回答。"
+_CROSSLANG_EN = "Context paragraphs may be in English, Chinese, or German — synthesize all relevant content and respond in English."
+_CROSSLANG_DE = "Die Kontextabsätze können auf Englisch, Chinesisch oder Deutsch verfasst sein — fassen Sie alle relevanten Inhalte zusammen und antworten Sie auf Deutsch."
+
+_SYS_ZH = f"你是临床决策支持助手，提供仅基于数据库的循证医学建议。{_CROSSLANG_ZH}"
+_SYS_EN = f"You are a clinical decision-support assistant. Provide evidence-based guidance based ONLY on the database. {_CROSSLANG_EN}"
+_SYS_DE = f"Sie sind ein klinischer Entscheidungsunterstützungsassistent. Geben Sie Empfehlungen basierend auf der Datenbank. {_CROSSLANG_DE}"
+
+# Sample Dataset for Clinical Answer Generation (High-Quality Adversarial + Positive Set)
 ANSWER_DATA = [
     # --- CATEGORY A: AMBIGUOUS PRONOUNS (THE "IT" TRAP) ---
     dspy.Example(
-        system_instruction="你是临床决策支持助手，提供仅基于数据库的循证医学建议。忽略无关数据。",
+        system_instruction=_SYS_ZH,
         context="[1] 尖锐湿疣的物理治疗包括激光和冷冻。 [2] 子宫粘连可能导致不孕。 [3] 某些口腔溃疡具有复发性。",
         history="No history.",
         question="怎么治疗它？",
         target_language="Chinese",
-        no_info_message="抱歉，数据库中没有足够的信息来回答。请明确您指的“它”是什么疾病。",
+        no_info_message="抱歉，数据库中没有足够的信息来回答这个问题。",
         result={
-            "reasoning": "The query uses an ambiguous pronoun '它' (it) with no chat history. I must respond ONLY with the no_info_message and ask for the specific disease name. Mentioning context entities like genital warts or oral ulcers is strictly forbidden.",
-            "answer": "抱歉，数据库中没有足够的信息来回答。由于对话历史为空且主语不明，请明确您指的“它”指代哪种具体疾病，以便我为您查找治疗建议。",
+            "reasoning": "The query uses an ambiguous pronoun ‘它’ (it) with no chat history to resolve it. Cannot determine which condition the user means. Must request clarification via no_info_message without listing context entities.",
+            "answer": "抱歉，数据库中没有足够的信息来回答这个问题。请明确您指的「它」是什么疾病，以便我为您查找治疗建议。",
             "citations": [],
             "disclaimer": "⚠ 本内容仅供参考。"
         }
@@ -66,70 +76,116 @@ ANSWER_DATA = [
 
     # --- CATEGORY B: VAGUE COMPARISONS (THE "BETTER WAY" TRAP) ---
     dspy.Example(
-        system_instruction="你是临床决策支持助手，提供仅基于数据库的循证医学建议。忽略无关数据。",
+        system_instruction=_SYS_ZH,
         context="[1] 胃溃疡的典型表现是餐后痛。 [2] 痔疮患者常伴有局部疼痛或出血。",
         history="No history.",
         question="能有更好的办法吗？",
         target_language="Chinese",
-        no_info_message="抱歉，数据库中没有足够的信息。请问您是指哪种疾病或治疗的‘更好办法’？",
+        no_info_message="抱歉，数据库中没有足够的信息来回答这个问题。",
         result={
-            "reasoning": "Vague comparison '更好的办法' without a subject. Database is irrelevant to 'methods'. I must reject the query directly using the no_info_message without summarizing unrelated symptoms.",
-            "answer": "抱歉，数据库中没有足够的信息来回答。请问您是指哪种具体疾病或哪种治疗方案的“更好办法”？",
+            "reasoning": "Vague comparison ‘更好的办法’ with no subject and no chat history. Cannot infer which disease or treatment the user means. Must use no_info_message to request clarification.",
+            "answer": "抱歉，数据库中没有足够的信息来回答这个问题。请问您是指哪种具体疾病或治疗方案的「更好办法」？",
             "citations": [],
             "disclaimer": "⚠ 本内容仅供教育参考。"
         }
     ).with_inputs("system_instruction", "context", "history", "question", "target_language", "no_info_message"),
 
-    # --- CATEGORY C: ENTITY MISMATCH (THE "KIDNEY" CASE) ---
+    # --- CATEGORY C: CROSS-LANGUAGE SYNTHESIS — ZH QUESTION + DE/EN CONTEXT ---
+    # CRITICAL: replaces the old harmful "肾衰竭 → no_info" example.
+    # Teaches the model to translate and synthesize foreign-language context
+    # instead of treating it as missing information.
     dspy.Example(
-        system_instruction="你是临床决策支持助手，提供仅基于数据库的循证医学建议。忽略无关数据。",
-        context="[1] 肾病综合征通常表现为大量蛋白尿、高度水肿。 [2] 慢性肾炎患者应定期复查肾功能。",
+        system_instruction=_SYS_ZH,
+        context="[1] 肾病综合征通常表现为大量蛋白尿、高度水肿。 [2] Nierenversagen bezeichnet den vollständigen oder teilweisen Verlust der Nierenfunktion. Es wird in akutes Nierenversagen (ANV) und chronisches Nierenversagen (CNV) unterteilt. Ursachen sind u.a. Diabetes mellitus, Hypertonie und Glomerulonephritis. [3] Renal failure is characterized by the kidneys’ inability to filter waste products from the blood adequately.",
         history="No history.",
         question="什么是肾衰竭？",
         target_language="Chinese",
-        no_info_message="抱歉，数据库中没有关于“肾衰竭”的直接定义。",
+        no_info_message="抱歉，数据库中没有足够的信息来回答这个问题。",
         result={
-            "reasoning": "Query is '肾衰竭', database mentions '肾病综合征' and '慢性肾炎'. They are different entities. I must state that information is missing. Do NOT summarize unrelated content.",
-            "answer": "抱歉，数据库中没有关于“肾衰竭”的直接定义。如果您需要了解数据库中提及的肾病综合征或慢性肾炎，请明确告知。",
-            "citations": [],
-            "disclaimer": "⚠ 本内容仅供教育参考。"
+            "reasoning": "The user asks for a definition of ‘肾衰竭’ (kidney failure). Context [2] is in German and [3] is in English — both directly define kidney failure / Nierenversagen. Context [1] is in Chinese and covers related nephrotic syndrome. I MUST synthesize ALL paragraphs regardless of language, translate the German and English content into Chinese, and answer comprehensively. The no_info_message must NOT be triggered here — relevant medical information exists in the context, even though it is in a different language than the question.",
+            "answer": "根据数据库资料，肾衰竭（德文：Nierenversagen）是指肾脏功能完全或部分丧失，无法有效过滤血液中的废物 [2][3]。按发病缓急可分为急性肾衰竭（ANV）和慢性肾衰竭（CNV）[2]。常见病因包括糖尿病、高血压和肾小球肾炎 [2]。数据库中还提及肾病综合征，其特征为大量蛋白尿和高度水肿，可能是肾衰竭的相关前期疾病 [1]。",
+            "citations": [1, 2, 3],
+            "disclaimer": "⚠ 本内容仅供教育参考，不构成医疗建议。请务必咨询合格的医疗专业人员。"
         }
     ).with_inputs("system_instruction", "context", "history", "question", "target_language", "no_info_message"),
 
-    # --- CATEGORY D: CROSS-LINGUAL NOISE ---
+    # --- CATEGORY C2: CROSS-LANGUAGE CLINICAL CONTEXT (NOT ENCYCLOPEDIC) ---
+    # Teaches the model that clinical differential/case-note context IS valid evidence.
+    # The LLM must synthesize from clinical German/English content instead of refusing
+    # because it lacks a formal encyclopedic definition.
     dspy.Example(
-        system_instruction="You are a clinical decision-support assistant. Provide evidence-based guidance based ONLY on the database.",
+        system_instruction=_SYS_ZH,
+        context="[1] 肾虚是中医中的一个概念，指的是肾脏功能的虚弱或不足，与西医的肾衰竭（Nierenversagen）是不同的病理概念。 [2] Das Differential für das akute Nierenversagen umfasst prärenale Ursachen (z.B. Hypovolämie, Herzinsuffizienz), renale Ursachen (z.B. Glomerulonephritis, akute Tubulusnekrose) sowie postrenale Ursachen (z.B. Harnwegsobstruktion). [3] Renal Impairment: reduced kidney function may result from prerenal, intrinsic renal, or postrenal causes. Acute kidney injury is characterized by a rapid decline in glomerular filtration rate. [4] Nierenversagen - Der Patient entwickelte eine oligurische Niereninsuffizienz mit Kreatininanstieg auf 4,2 mg/dl.",
+        history="No history.",
+        question="什么是肾衰竭？",
+        target_language="Chinese",
+        no_info_message="抱歉，数据库中没有足够的信息来回答这个问题。",
+        result={
+            "reasoning": (
+                "The user asks about kidney failure (肾衰竭). [1] Chinese: '肾虚' (TCM) differs from kidney failure. "
+                "[2] German: clinical differential for acute kidney failure — prerenal, renal, postrenal. "
+                "[3] English: renal impairment / acute kidney injury = rapid GFR decline. "
+                "[4] German: clinical case — oliguria, creatinine 4.2 mg/dl. "
+                "[2][3][4] all discuss kidney failure in clinical context — this IS relevant. "
+                "I must NOT refuse because I lack a formal definition. Clinical content must be synthesized."
+            ),
+            "answer": "根据数据库中的临床资料，肾衰竭（德文：Nierenversagen）是指肾脏功能严重减退，表现为肾小球滤过率（GFR）迅速下降，可出现少尿、肌酐显著升高等症状 [3][4]。临床上，急性肾衰竭可分为三类：肾前性（如低血容量、心力衰竭）、肾性（如肾小球肾炎、急性肾小管坏死）和肾后性（如尿路梗阻）[2]。注意：中医的「肾虚」概念与西医肾衰竭是不同的病理概念 [1]。",
+            "citations": [1, 2, 3, 4],
+            "disclaimer": "⚠ 本内容基于数据库临床资料，仅供教育参考，不构成医疗建议。"
+        }
+    ).with_inputs("system_instruction", "context", "history", "question", "target_language", "no_info_message"),
+
+    # --- CATEGORY D: CROSS-LANGUAGE SYNTHESIS — EN QUESTION + ZH/DE CONTEXT ---
+    # Teaches the model to synthesize Chinese and German evidence for an English answer.
+    dspy.Example(
+        system_instruction=_SYS_EN,
+        context="[1] 二甲双胍是治疗2型糖尿病的一线药物，通过抑制肝糖输出发挥作用。 [2] Metformin ist ein orales Antidiabetikum der Biguanid-Klasse. Es reduziert die hepatische Glukoseproduktion und verbessert die Insulinsensitivität.",
+        history="No history.",
+        question="How does metformin work?",
+        target_language="English",
+        no_info_message="I do not have enough medical information in the database to answer this question.",
+        result={
+            "reasoning": "The user asks how metformin works. Context [1] is in Chinese and [2] is in German — both describe the mechanism of action directly. I must read and translate both foreign-language paragraphs, synthesize their content, and answer in English. The no_info_message must NOT be used because [1] and [2] directly and fully answer the question.",
+            "answer": "Metformin is a first-line oral antidiabetic agent in the biguanide class [2]. It works primarily by inhibiting hepatic glucose production (gluconeogenesis) [1][2] and improving peripheral insulin sensitivity [2]. These combined mechanisms lower blood glucose levels in patients with type 2 diabetes [1].",
+            "citations": [1, 2],
+            "disclaimer": "⚠ This information is for educational purposes only and does not constitute medical advice."
+        }
+    ).with_inputs("system_instruction", "context", "history", "question", "target_language", "no_info_message"),
+
+    # --- CATEGORY E: AMBIGUOUS ENGLISH PRONOUN (REFUSAL) ---
+    dspy.Example(
+        system_instruction=_SYS_EN,
         context="[1] Hypertension is high blood pressure. [2] Diabetes involves insulin resistance.",
         history="No history.",
         question="How to cure it fast?",
         target_language="English",
-        no_info_message="I'm sorry, I don't have enough information in the database to identify what 'it' refers to.",
+        no_info_message="I do not have enough medical information in the database to answer this question.",
         result={
-            "reasoning": "Ambiguous 'it'. Must refuse without listing entities in the database. Strict boundary enforcement.",
-            "answer": "I am sorry, but the database does not contain enough information to answer this question. Please specify which condition you are referring to by 'it'.",
+            "reasoning": "Ambiguous pronoun ‘it’ with no history to resolve the reference. Context has two unrelated conditions. Cannot infer which one the user means. Must refuse without speculating.",
+            "answer": "I am sorry, but the database does not contain enough information to answer this question. Please specify which condition you are referring to by ‘it’.",
             "citations": [],
             "disclaimer": "⚠ Clinical guidance only."
         }
     ).with_inputs("system_instruction", "context", "history", "question", "target_language", "no_info_message"),
 
-    # --- CATEGORY E: POSITIVE CASE (FAITHFULNESS) ---
+    # --- CATEGORY F: POSITIVE MONOLINGUAL ZH (FAITHFULNESS) ---
     dspy.Example(
-        system_instruction="你是临床决策支持助手，提供仅基于数据库的循证医学建议。忽略无关数据。",
+        system_instruction=_SYS_ZH,
         context="[1] 糖尿病是一组以高血糖为特征的代谢性疾病。 [2] 糖尿病的典型症状是多饮、多食、多尿和体重减轻。",
         history="No history.",
         question="什么是糖尿病？",
         target_language="Chinese",
         no_info_message="数据库中未提及。",
         result={
-            "reasoning": "The query asks for a definition of diabetes. Database [1] provides a direct definition and [2] lists symptoms. I should combine these faithfully.",
-            "answer": "根据数据库信息，糖尿病是一组以高血糖为特征的代谢性疾病 [1]。其典型临床表现包括多饮、多食、多尿以及体重减轻（即“三多一少”）[2]。",
+            "reasoning": "The query asks for a definition of diabetes. Database [1] provides a direct definition and [2] lists symptoms. Both are in Chinese. Synthesize and cite both faithfully.",
+            "answer": "根据数据库信息，糖尿病是一组以高血糖为特征的代谢性疾病 [1]。其典型临床表现包括多饮、多食、多尿以及体重减轻（即「三多一少」）[2]。",
             "citations": [1, 2],
             "disclaimer": "⚠ 本内容仅供教育参考。"
         }
     ).with_inputs("system_instruction", "context", "history", "question", "target_language", "no_info_message"),
 
     dspy.Example(
-        system_instruction="你是临床决策支持助手，提供仅基于数据库的循证医学建议。忽略无关数据。",
+        system_instruction=_SYS_ZH,
         context="[1] 阿司匹林建议餐后服用以减少胃肠刺激。 [2] 布洛芬可用于缓解轻至中度疼痛。",
         history="No history.",
         question="阿司匹林怎么吃？",
@@ -137,23 +193,24 @@ ANSWER_DATA = [
         no_info_message="数据库中未提及。",
         result={
             "reasoning": "Direct match for Aspirin in [1]. Provide the specific dosage advice with citation from the database.",
-            "answer": "根据数据库记录建议，阿司匹林应当在餐后服用，以减少对胃肠道的刺激 [1]。",
+            "answer": "根据数据库记录，阿司匹林应当在餐后服用，以减少对胃肠道的刺激 [1]。",
             "citations": [1],
             "disclaimer": "⚠ 请遵循医嘱。"
         }
     ).with_inputs("system_instruction", "context", "history", "question", "target_language", "no_info_message"),
 
-    # --- CATEGORY F: IRRELEVANT FRAGMENTS ---
+    # --- CATEGORY G: IRRELEVANT CONTEXT (GENUINE NO-INFO CASE) ---
+    # no_info_message is correct here because ALL context is administratively irrelevant.
     dspy.Example(
-        system_instruction="你是临床决策支持助手，提供仅基于数据库的循证医学建议。忽略无关数据。",
+        system_instruction=_SYS_ZH,
         context="[1] 门诊时间为周一至周五。 [2] 医院停车场位于北门。",
         history="No history.",
         question="感冒了怎么办？",
         target_language="Chinese",
-        no_info_message="抱歉，数据库中没有关于感冒治疗的信息。",
+        no_info_message="抱歉，数据库中没有足够的信息来回答这个问题。",
         result={
-            "reasoning": "Query is medical, but database content is administrative. Complete mismatch. Refuse without mentioning any database content.",
-            "answer": "抱歉，数据库中没有关于“感冒”治疗建议的相关医疗信息。",
+            "reasoning": "The user asks about cold treatment. ALL context paragraphs are purely administrative (clinic hours, parking). There is zero medical relevance across every language. This is a genuine no-info case and the no_info_message is appropriate.",
+            "answer": "抱歉，数据库中没有关于感冒治疗的相关医疗信息。",
             "citations": [],
             "disclaimer": "⚠ 本内容仅供参考。"
         }
@@ -183,38 +240,46 @@ def rewrite_metric(example: dspy.Example, pred: dspy.Prediction, trace=None) -> 
 
 
 def answer_metric(example: dspy.Example, pred: dspy.Prediction, trace=None) -> float:
-    """Evaluate if the answer matches the reference and has correct citations."""
+    """
+    Evaluate if the answer matches the reference, has correct citations,
+    and does NOT incorrectly refuse when cross-language context is available.
+    """
     predicted_ans = pred.result.answer
     predicted_cites = pred.result.citations
-    
     expected_cites = example.result["citations"]
-    
+
     score = 0.0
-    
-    # 1. Correctness of citations (weighted)
+
+    # 1. Citation correctness (0.4 points)
     if set(expected_cites) == set(predicted_cites):
         score += 0.4
     elif set(expected_cites).issubset(set(predicted_cites)):
-        score += 0.2 # Penalize over-citation
-        
-    # 2. Formatting: Are [N] markers in the text?
-    all_markers_present = all(f"[{c}]" in predicted_ans for c in predicted_cites)
-    if all_markers_present and predicted_cites:
-        score += 0.3
-    elif not predicted_cites:
-        score += 0.3 # If no citations expected and none found, that's good
-        
-    # 3. Content Relevance (Simple heuristic for now)
-    # If it's a refusal case, check if the refusal message or keywords are there
-    if not expected_cites:
-        if any(kw in predicted_ans for kw in ["抱歉", "没", "不足", "clear", "sorry"]):
+        score += 0.2  # over-citation is a minor penalty
+
+    # 2. [N] markers present in text (0.3 points)
+    if predicted_cites:
+        if all(f"[{c}]" in predicted_ans for c in predicted_cites):
             score += 0.3
     else:
-        # If it's a helpful case, check if length is reasonable
-        if len(predicted_ans) > 20:
+        score += 0.3  # no citations expected and none produced
+
+    # 3. Content quality (0.3 points)
+    is_refusal_case = len(expected_cites) == 0
+    refusal_keywords = ["抱歉", "没有足够", "不足", "sorry", "not enough", "cannot identify"]
+
+    if is_refusal_case:
+        # Refusal cases: reward concise refusal, penalise hallucination
+        if any(kw in predicted_ans for kw in refusal_keywords):
             score += 0.3
-            
-    return score
+    else:
+        # Positive (synthesis) cases: reward substantive answers, penalise false refusal.
+        # A cross-language case that incorrectly says "抱歉/sorry" loses all content points.
+        if any(kw in predicted_ans for kw in refusal_keywords):
+            score -= 0.3  # false refusal when context IS relevant
+        elif len(predicted_ans) > 50:
+            score += 0.3
+
+    return max(0.0, score)
 
 # ---------------------------------------------------------
 # 3. Compilation Functions

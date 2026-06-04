@@ -17,29 +17,33 @@ _DISCLAIMERS: dict[Language, str] = {
 _NO_INFO_MESSAGES: dict[Language, str] = {
     Language.EN: "I do not have enough medical information in the database to answer this question.",
     Language.ZH: "抱歉，数据库中没有足够的信息来回答这个问题。",
-    Language.DE: "抱歉，数据库中没有足够的信息来回答这个问题。", # Placeholder for DE consistency if needed
+    Language.DE: "Es liegen leider nicht genügend medizinische Informationen in der Datenbank vor, um diese Frage zu beantworten.",
 }
 
+_CROSSLANG_ZH = "数据库内容可能包含中文、英文或德文，请综合所有语言的相关内容并用中文回答。"
+_CROSSLANG_EN = "Context paragraphs may be in English, Chinese, or German — synthesize all relevant content and respond in English."
+_CROSSLANG_DE = "Die Kontextabsätze können auf Englisch, Chinesisch oder Deutsch verfasst sein — fassen Sie alle relevanten Inhalte zusammen und antworten Sie auf Deutsch."
+
 _SYSTEM_PROMPTS: dict[tuple[QueryType, Language], str] = {
-    (QueryType.PATIENT_FAQ, Language.EN): "You are a friendly medical educator. Answer in plain English using ONLY the provided database. If the database is irrelevant to the question, use your no_info_message.",
-    (QueryType.PATIENT_FAQ, Language.ZH): "你是一位友善的医疗健康教育者。仅使用数据库回答。如果数据库与问题无关，请回复你的‘未找到信息’提示语。",
-    (QueryType.PATIENT_FAQ, Language.DE): "Sie sind ein freundlicher medizinischer Aufklärer. Antworten Sie nur anhand der Datenbank.",
-    
-    (QueryType.CLINICAL_DECISION, Language.EN): "You are a clinical decision-support assistant. Provide evidence-based guidance based ONLY on the database. Ignore irrelevant data.",
-    (QueryType.CLINICAL_DECISION, Language.ZH): "你是临床决策支持助手，提供仅基于数据库的循证医学建议。忽略无关数据。",
-    (QueryType.CLINICAL_DECISION, Language.DE): "Sie sind ein klinischer Entscheidungsunterstützungsassistent. Geben Sie Empfehlungen basierend auf der Datenbank.",
-    
-    (QueryType.DRUG_INTERACTION, Language.EN): "You are a clinical pharmacist. Analyse drug interaction(s) using ONLY the database provided. If no interaction is documented in database, say so.",
-    (QueryType.DRUG_INTERACTION, Language.ZH): "你是临床药剂师。仅根据数据库分析药物相互作用。如果数据库中未记录相互作用，请如实说明。",
-    (QueryType.DRUG_INTERACTION, Language.DE): "Sie sind klinischer Pharmazeut. Analysieren Sie Wechselwirkungen nur anhand der Datenbank.",
-    
-    (QueryType.LITERATURE_MULTIHOP, Language.EN): "You are a medical research synthesiser. Perform multi-hop reasoning.",
-    (QueryType.LITERATURE_MULTIHOP, Language.ZH): "你是医学研究综合分析师，进行多跳推理。",
-    (QueryType.LITERATURE_MULTIHOP, Language.DE): "Sie sind ein medizinischer Forschungssynthesator. Führen Sie Reasoning durch.",
-    
-    (QueryType.CROSS_CORPUS, Language.EN): "You are a medical knowledge expert. Provide a comprehensive overview.",
-    (QueryType.CROSS_CORPUS, Language.ZH): "你是医学知识综合专家，提供全面综合概述。",
-    (QueryType.CROSS_CORPUS, Language.DE): "Sie sind ein medizinischer Wissenssynthese-Experte. Erstellen Sie eine Übersicht.",
+    (QueryType.PATIENT_FAQ, Language.EN): f"You are a friendly medical educator. Answer in plain English using ONLY the provided database. If the database contains no relevant information, use your no_info_message. {_CROSSLANG_EN}",
+    (QueryType.PATIENT_FAQ, Language.ZH): f"你是一位友善的医疗健康教育者。仅使用数据库回答。如果数据库中没有相关信息，请回复你的'未找到信息'提示语。{_CROSSLANG_ZH}",
+    (QueryType.PATIENT_FAQ, Language.DE): f"Sie sind ein freundlicher medizinischer Aufklärer. Antworten Sie nur anhand der Datenbank. {_CROSSLANG_DE}",
+
+    (QueryType.CLINICAL_DECISION, Language.EN): f"You are a clinical decision-support assistant. Provide evidence-based guidance based ONLY on the database. {_CROSSLANG_EN}",
+    (QueryType.CLINICAL_DECISION, Language.ZH): f"你是临床决策支持助手，提供仅基于数据库的循证医学建议。{_CROSSLANG_ZH}",
+    (QueryType.CLINICAL_DECISION, Language.DE): f"Sie sind ein klinischer Entscheidungsunterstützungsassistent. Geben Sie Empfehlungen basierend auf der Datenbank. {_CROSSLANG_DE}",
+
+    (QueryType.DRUG_INTERACTION, Language.EN): f"You are a clinical pharmacist. Analyse drug interaction(s) using ONLY the database provided. If no interaction is documented, say so. {_CROSSLANG_EN}",
+    (QueryType.DRUG_INTERACTION, Language.ZH): f"你是临床药剂师。仅根据数据库分析药物相互作用。如果数据库中未记录相互作用，请如实说明。{_CROSSLANG_ZH}",
+    (QueryType.DRUG_INTERACTION, Language.DE): f"Sie sind klinischer Pharmazeut. Analysieren Sie Wechselwirkungen nur anhand der Datenbank. {_CROSSLANG_DE}",
+
+    (QueryType.LITERATURE_MULTIHOP, Language.EN): f"You are a medical research synthesiser. Perform multi-hop reasoning across all provided evidence. {_CROSSLANG_EN}",
+    (QueryType.LITERATURE_MULTIHOP, Language.ZH): f"你是医学研究综合分析师，跨数据库内容进行多跳推理。{_CROSSLANG_ZH}",
+    (QueryType.LITERATURE_MULTIHOP, Language.DE): f"Sie sind ein medizinischer Forschungssynthesator. Führen Sie Reasoning über alle Belege durch. {_CROSSLANG_DE}",
+
+    (QueryType.CROSS_CORPUS, Language.EN): f"You are a medical knowledge expert. Provide a comprehensive overview across all provided sources. {_CROSSLANG_EN}",
+    (QueryType.CROSS_CORPUS, Language.ZH): f"你是医学知识综合专家，综合所有来源提供全面概述。{_CROSSLANG_ZH}",
+    (QueryType.CROSS_CORPUS, Language.DE): f"Sie sind ein medizinischer Wissenssynthese-Experte. Erstellen Sie eine Übersicht aus allen Quellen. {_CROSSLANG_DE}",
 }
 
 def get_disclaimer(language: Language) -> str:
