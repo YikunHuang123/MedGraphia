@@ -66,8 +66,10 @@ def get_model(model_override: str | None = None, provider_override: str | None =
             api_key = get_val("deepseek_api_key") or "dummy"
             base_url = "https://api.deepseek.com"
         case LLMProvider.GROQ:
-            api_key = get_val("groq_api_key") or "dummy"
-            base_url = "https://api.groq.com/openai/v1"
+            from pydantic_ai.models.groq import GroqModel
+            from pydantic_ai.providers.groq import GroqProvider
+            key = get_val("groq_api_key") or "dummy"
+            return GroqModel(model_name, provider=GroqProvider(api_key=key))
         case LLMProvider.GEMINI:
             from pydantic_ai.models.gemini import GeminiModel
             return GeminiModel(model_name, api_key=get_val("gemini_api_key") or "dummy")

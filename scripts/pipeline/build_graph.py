@@ -10,6 +10,8 @@ This script is a thin CLI wrapper.
 
 # python scripts/pipeline/build_graph.py --skip-fetch --skip-parse --skip-chunk --skip-ner --skip-link --skip-extract --skip-community
 
+# python scripts/pipeline/build_graph.py --skip-fetch --skip-parse --skip-chunk --skip-ner --skip-link --include-drugbank
+
 
 from __future__ import annotations
 
