@@ -12,8 +12,22 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 import types
+import os
 
-# --- MONKEYPATCH for RAGAS 0.4.3 compatibility with latest LangChain ---
+# --- Load .env first and FORCE OVERRIDE environment variables ---
+from dotenv import load_dotenv
+# We find the .env file in the root
+env_path = Path(__file__).parent.parent.parent / ".env"
+load_dotenv(dotenv_path=env_path, override=True)
+
+# Clear base_url if it's set in shell but we want to use official OpenAI for RAGAS
+if "OPENAI_BASE_URL" in os.environ:
+    # If it points to siliconflow but we have an sk-proj- key, it will fail.
+    # We clear it to default to official OpenAI for the evaluation judge.
+    if "siliconflow" in os.environ["OPENAI_BASE_URL"].lower():
+        del os.environ["OPENAI_BASE_URL"]
+
+# --- MONKEYPATCH for RAGAS 0.4.3 compatibility ---
 try:
     import langchain_google_vertexai
     sys.modules["langchain_community.chat_models.vertexai"] = langchain_google_vertexai
@@ -189,8 +203,14 @@ def run_ragas_scoring(df: pd.DataFrame) -> Any:
     
     # Explicitly provide LLM and Embeddings to avoid 401/env issues
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+    from ragas.run_config import RunConfig
+    
     eval_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     eval_embeddings = OpenAIEmbeddings()
+    
+    # Increase timeout and reduce parallelism to avoid rate limits/timeouts
+    # Sequential execution (max_workers=1) is safest for debugging/small tests
+    run_config = RunConfig(timeout=600, max_retries=10, max_wait=180, max_workers=1)
     
     result = evaluate(
         dataset,
@@ -201,7 +221,8 @@ def run_ragas_scoring(df: pd.DataFrame) -> Any:
             context_recall,
         ],
         llm=eval_llm,
-        embeddings=eval_embeddings
+        embeddings=eval_embeddings,
+        run_config=run_config
     )
 
     return result

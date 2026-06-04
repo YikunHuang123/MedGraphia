@@ -116,7 +116,8 @@ def load_documents(data_dir: str, limit: int = 5) -> list[Document]:
 @click.option("--test-size", default=10, help="Number of questions to generate")
 @click.option("--output", default="data/evaluation/synthetic_testset.csv", help="Output CSV path")
 @click.option("--docs-limit", default=2, help="Number of documents to sample from")
-def main(data_dir: str, test_size: int, output: str, docs_limit: int) -> None:
+@click.option("--append", is_flag=True, help="Append to existing output file instead of overwriting")
+def main(data_dir: str, test_size: int, output: str, docs_limit: int, append: bool) -> None:
     configure_logging("INFO")
     
     if not os.getenv("OPENAI_API_KEY"):
@@ -212,15 +213,26 @@ def main(data_dir: str, test_size: int, output: str, docs_limit: int) -> None:
         }
         df = df.rename(columns={k: v for k, v in column_map.items() if k in df.columns})
 
-        # 5. Save and Report
+        # 5. Handle Append logic
         output_path = Path(output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(output, index=False)
+        
+        final_df = df
+        if append and output_path.exists():
+            click.echo(f"Appending to existing file: {output}")
+            existing_df = pd.read_csv(output_path)
+            final_df = pd.concat([existing_df, df], ignore_index=True)
+            # Optional: Deduplicate if needed (by question)
+            # final_df = final_df.drop_duplicates(subset=["question"])
+
+        # 6. Save and Report
+        final_df.to_csv(output, index=False)
 
         click.echo("\n" + "="*40)
-        click.echo(f"SUCCESS: Generated {len(df)} questions.")
+        click.echo(f"SUCCESS: Total cases now {len(final_df)} (Added {len(df)} new).")
         click.echo(f"Saved to: {output}")
         click.echo("="*40 + "\n")
+
 
         click.echo("Sample questions:")
         for i, row in df.head(3).iterrows():
