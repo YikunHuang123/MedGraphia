@@ -93,6 +93,7 @@ class RetrievalPipeline:
             search_query = await self.rewriter.rewrite(
                 query=query, history=history, language=language or Language.EN
             )
+            logger.info("retrieval_using_rewritten_query", rewritten=search_query)
 
         # ---------------------------------------------------------
         # Step 1: Route & Plan (using the rewritten query)
@@ -139,7 +140,7 @@ class RetrievalPipeline:
             tasks.append(
                 asyncio.create_task(
                     self.community_retriever.retrieve(
-                        query=query,
+                        query=search_query,
                         limit=plan.community_limit,
                     )
                 )
@@ -181,7 +182,7 @@ class RetrievalPipeline:
         # Step 3: Reciprocal Rank Fusion (RRF)
         # ---------------------------------------------------------
         fusion_result = self.fusion.fuse(
-            query=query,
+            query=search_query,
             graph_result=graph_result,
             vector_result=vector_result,
             community_result=community_result,

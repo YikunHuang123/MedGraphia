@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from medgraphia.config import settings
 from medgraphia.logger import get_logger
 from medgraphia.retrieval.fusion import FusedItem, FusionResult
 
@@ -76,15 +77,17 @@ class Reranker:
         self,
         model_name: str = _DEFAULT_MODEL,
         use_fp16: bool = True,
+        threshold: float | None = None,
     ) -> None:
         self._model_name = model_name
         self._use_fp16 = use_fp16
+        self._threshold = threshold if threshold is not None else settings.reranker_threshold
         self._model: Any = None  # lazy-loaded
         self._backend: str | None = None  # "flag" | "sentence_transformers"
 
     @classmethod
     def from_settings(cls) -> "Reranker":
-        return cls()
+        return cls(threshold=settings.reranker_threshold)
 
     # ------------------------------------------------------------------
     # Public API
@@ -139,10 +142,16 @@ class Reranker:
         ranked = sorted(
             zip(scores, items),
             key=lambda x: -x[0],
-        )[:top_k]
+        )
+
+        # Apply threshold filtering
+        filtered_ranked = [
+            (score, item) for score, item in ranked
+            if score >= self._threshold
+        ][:top_k]
 
         reranked_items = []
-        for score, item in ranked:
+        for score, item in filtered_ranked:
             item.metadata["reranker_score"] = float(score)
             reranked_items.append(item)
 
@@ -151,6 +160,7 @@ class Reranker:
             input=len(items),
             output=len(reranked_items),
             top_score=f"{ranked[0][0]:.4f}" if ranked else "n/a",
+            threshold=self._threshold,
         )
         return RerankedResult(
             items=reranked_items,

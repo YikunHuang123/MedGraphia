@@ -140,7 +140,9 @@ def _build_extra_kwargs(provider: LLMProvider, cfg: Any) -> dict[str, Any]:
             key = get_secret("deepseek_api_key")
             if key:
                 kwargs["api_key"] = key
-            kwargs["api_base"] = "https://api.deepseek.com"
+            # Allow override via llm_base_url if provided, otherwise use official
+            base = getattr(cfg, "llm_base_url", "")
+            kwargs["api_base"] = base or "https://api.deepseek.com"
 
         case LLMProvider.GEMINI:
             key = get_secret("gemini_api_key")

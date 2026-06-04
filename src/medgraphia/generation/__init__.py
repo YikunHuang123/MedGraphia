@@ -10,10 +10,8 @@ from medgraphia.generation.llm_router import (
     ModelTier,
     RoutingDecision,
 )
-from medgraphia.generation.prompts import (
+from medgraphia.prompts import (
     MedicalAnswer,
-    MedicalPredictor,
-    PromptRegistry,
 )
 from medgraphia.llm.gateway import (
     CompletionRequest,
@@ -34,8 +32,6 @@ __all__ = [
     "RoutingDecision",
     # Prompts
     "MedicalAnswer",
-    "MedicalPredictor",
-    "PromptRegistry",
     # Citations
     "inject_citations",
     "build_numbered_context",

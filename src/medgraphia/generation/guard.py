@@ -3,58 +3,22 @@ Safety Guardrails using Llama-Guard (Input and Output Moderation).
 """
 from __future__ import annotations
 
-import re
+import httpx
 from dataclasses import dataclass
 
 from medgraphia.config import get_settings
 from medgraphia.llm.gateway import CompletionRequest, LiteLLMGateway, LLMProvider
 from medgraphia.logger import get_logger
+from medgraphia.prompts.safety import LLAMA_GUARD_SYSTEM_PROMPT
+from medgraphia.domain.chat import Message
 
 logger = get_logger(__name__)
-
-# Standard System Prompt for Llama-Guard 3 / 4
-# Ref: https://huggingface.co/meta-llama/Llama-Guard-3-8B
-LLAMA_GUARD_SYSTEM_PROMPT = """Task: Check if there is unsafe content in '{role}' messages in conversations according our safety policy with the below categories.
-
-<BEGIN UNSAFE CONTENT CATEGORIES>
-S1: Violent Crimes. 
-S2: Non-Violent Crimes. 
-S3: Sex Crimes. 
-S4: Child Exploitation. 
-S5: Defamation. 
-S6: Specialized Advice. 
-S7: Privacy. 
-S8: Intellectual Property. 
-S9: Obscure Weapons. 
-S10: Hate. 
-S11: Suicide & Self-Harm. 
-S12: Sexual Content. 
-S13: Elections. 
-S14: Code Interpreter Abuse.
-<END UNSAFE CONTENT CATEGORIES>
-
-<BEGIN CONVERSATION>
-{conversation_history}
-<END CONVERSATION>
-
-Provide your safety assessment for ONLY THE LAST {role} MESSAGE in the above conversation:
-- First line must read 'safe' or 'unsafe'.
-- If unsafe, a second line must include a comma-separated list of violated categories."""
 
 @dataclass
 class SafetyResult:
     is_safe: bool
     reason: str = ""
     category: str = ""
-
-import httpx
-from medgraphia.config import get_settings
-from medgraphia.llm.gateway import CompletionRequest, LiteLLMGateway, LLMProvider
-from medgraphia.logger import get_logger
-
-logger = get_logger(__name__)
-
-# ... (LLAMA_GUARD_SYSTEM_PROMPT remains same) ...
 
 class LlamaGuard:
     """
@@ -123,19 +87,26 @@ class LlamaGuard:
             except Exception as exc:
                 logger.error("guardrails_model_pull_error", error=str(exc))
 
-    async def check_input(self, question: str) -> SafetyResult:
+    async def check_input(self, question: str, history: list[Message] | None = None) -> SafetyResult:
         """
         Check if the user's prompt violates safety policies before retrieval.
+        Includes history for multi-turn context.
         """
         if not self.enabled:
             return SafetyResult(is_safe=True)
             
         logger.info("guardrails_checking_input", query_len=len(question))
         
-        conversation = f"User: {question}"
+        conversation = ""
+        if history:
+            for m in history[-5:]: # Look at last 5 turns for context
+                role = "User" if m.role == "user" else "Assistant"
+                conversation += f"{role}: {m.content}\n\n"
+        
+        conversation += f"User: {question}"
         return await self._call_llama_guard(role="User", conversation=conversation)
 
-    async def check_output(self, question: str, answer: str) -> SafetyResult:
+    async def check_output(self, question: str, answer: str, history: list[Message] | None = None) -> SafetyResult:
         """
         Check if the generated response is safe for the patient/user.
         """
@@ -144,8 +115,14 @@ class LlamaGuard:
             
         logger.info("guardrails_checking_output", answer_len=len(answer))
         
-        conversation = f"User: {question}\n\nAgent: {answer}"
-        return await self._call_llama_guard(role="Agent", conversation=conversation)
+        conversation = ""
+        if history:
+            for m in history[-5:]:
+                role = "User" if m.role == "user" else "Assistant"
+                conversation += f"{role}: {m.content}\n\n"
+        
+        conversation += f"User: {question}\n\nAssistant: {answer}"
+        return await self._call_llama_guard(role="Assistant", conversation=conversation)
 
     async def _call_llama_guard(self, role: str, conversation: str) -> SafetyResult:
         """Internal helper to invoke the model."""
@@ -161,23 +138,46 @@ class LlamaGuard:
             max_tokens=20
         )
         
-        resp = await self.gateway.acomplete(req)
+        try:
+            resp = await self.gateway.acomplete(req)
+        except Exception as exc:
+            logger.error("guardrails_exception", error=str(exc))
+            return SafetyResult(is_safe=True)
         
         if not resp.ok:
             logger.error("guardrails_failed", error=resp.metadata.get("error"))
-            # In a medical context, failing open (is_safe=True) is risky but 
-            # failing closed (is_safe=False) breaks the UX. 
-            # Default to safe but log heavily.
             return SafetyResult(is_safe=True)
             
         text = resp.text.strip().lower()
+        lines = text.split("\n")
+        first_line = lines[0].strip()
         
-        if text.startswith("safe"):
+        # Robust parsing:
+        # 1. If it starts with 'safe', it's safe.
+        # 2. If it contains 'unsafe', it's unsafe.
+        # 3. Otherwise, if it's ambiguous, we default to safe to avoid false positives (RAG context).
+        
+        if first_line.startswith("safe"):
             return SafetyResult(is_safe=True)
         
-        # Handle "unsafe\nS1, S2"
-        lines = text.split("\n")
-        category = lines[1] if len(lines) > 1 else "Unknown"
-        
-        logger.warning("guardrails_violation_detected", role=role, category=category)
-        return SafetyResult(is_safe=False, category=category, reason=f"Violates {category}")
+        if "unsafe" in first_line:
+            category_str = lines[1].strip().upper() if len(lines) > 1 else "Unknown"
+            violated = [c.strip() for c in category_str.split(",")]
+            
+            # Categories that must ALWAYS be blocked
+            hard_danger = {"S1", "S2", "S3", "S4", "S5", "S7", "S8", "S9", "S10", "S11", "S12", "S13", "S14"}
+            
+            # ── HARD OVERRIDE: Allow Medical/Specialized Advice ─────────────
+            # Only allow if S6 is present AND no hard danger categories are present.
+            if "S6" in violated and not any(c in hard_danger for c in violated):
+                logger.info("guardrails_overridden_s6_allowed", role=role)
+                return SafetyResult(is_safe=True)
+                
+            logger.warning("guardrails_violation_detected", role=role, category=category_str)
+            return SafetyResult(is_safe=False, category=category_str, reason=f"Violates {category_str}")
+
+        # If the model didn't clearly say 'unsafe', we default to safe.
+        # This prevents small models (like 1B) from blocking benign content like "Hello" 
+        # if they output something unexpected.
+        logger.info("guardrails_ambiguous_output", output=text)
+        return SafetyResult(is_safe=True)

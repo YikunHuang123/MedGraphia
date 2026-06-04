@@ -24,8 +24,6 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
-        # Force .env to take precedence over system environment variables
-        env_priority=1, 
     )
 
     # ------------------------------------------------------------------
@@ -72,6 +70,22 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 2048
     llm_temperature: float = 0.1
 
+    # Task-specific LLM overrides
+    rewriter_llm_provider: str = "openai"
+    rewriter_llm_model: str = "Qwen/Qwen2.5-7B-Instruct"
+    rewriter_llm_api_key: SecretStr = SecretStr("")
+    rewriter_llm_base_url: str = ""
+    
+    extractor_llm_provider: str = "openai"
+    extractor_llm_model: str = "Qwen/Qwen2.5-7B-Instruct"
+    extractor_llm_api_key: SecretStr = SecretStr("")
+    extractor_llm_base_url: str = ""
+    
+    summarizer_llm_provider: str = "groq"
+    summarizer_llm_model: str = "llama-3.1-8b-instant"
+    summarizer_llm_api_key: SecretStr = SecretStr("")
+    summarizer_llm_base_url: str = ""
+
     deepseek_api_key: SecretStr = SecretStr("")
     openai_api_key: SecretStr = SecretStr("")
     openai_base_url: str = "https://api.openai.com/v1"
@@ -84,12 +98,18 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Each tier maps to a (provider, model) pair.  Falls back to llm_provider /
     # llm_model when not explicitly set.
-    llm_small_provider: str = "ollama"        # e.g. "ollama"
-    llm_small_model: str = "qwen2.5:3b"           # e.g. "qwen2.5:7b"
-    llm_medium_provider: str = "ollama"       # e.g. "deepseek"
-    llm_medium_model: str = "qwen2.5:3b"          # e.g. "deepseek-chat"
-    llm_large_provider: str = "ollama"        # e.g. "openai"
-    llm_large_model: str = "qwen2.5:3b"           # e.g. "gpt-4o"
+    # llm_small_provider: str = "ollama"        # e.g. "ollama"
+    # llm_small_model: str = "qwen2.5:3b"           # e.g. "qwen2.5:7b"
+    # llm_medium_provider: str = "ollama"       # e.g. "deepseek"
+    # llm_medium_model: str = "qwen2.5:3b"          # e.g. "deepseek-chat"
+    # llm_large_provider: str = "ollama"        # e.g. "openai"
+    # llm_large_model: str = "qwen2.5:3b"           # e.g. "gpt-4o"
+    llm_small_provider: str = "deepseek"  # e.g. "ollama"
+    llm_small_model: str = "deepseek-chat"           # e.g. "qwen2.5:7b"
+    llm_medium_provider: str = "deepseek"       # e.g. "deepseek"
+    llm_medium_model: str = "deepseek-chat"          # e.g. "deepseek-chat"
+    llm_large_provider: str = "deepseek"        # e.g. "openai"
+    llm_large_model: str = "deepseek-chat"           # e.g. "gpt-4o"
 
     # Model used for community summary generation; defaults to llm_model if empty
     community_summary_llm: str = ""
@@ -144,8 +164,10 @@ class Settings(BaseSettings):
     drug_label_limit: int = 30
 
     # ------------------------------------------------------------------
-    # NER (Named Entity Recognition)
+    # Reranker
     # ------------------------------------------------------------------
+    reranker_threshold: float = 0.10  # Minimum score for a passage to be considered relevant
+
     ner_gliner_model: str = "urchade/gliner_mediumv2.1"
     ner_gliner_threshold: float = 0.30  # lowered further
     ner_bert_en_model: str = "d4data/biomedical-ner-all"

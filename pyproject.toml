@@ -82,7 +82,8 @@ dependencies = [
     "click>=8.1.0",
     "orjson>=3.10.0",
     "structlog>=24.2.0",
-    "fast-langdetect>=1.1.0",
+    "fast-langdetect>=1.0.1",
+    "dspy-ai>=2.5.0",
 ]
 
 [project.optional-dependencies]
@@ -105,8 +106,7 @@ enterprise = [
     "pyarrow>=16.0.0",
 ]
 generation = [
-    # DSPy TypedPredictor support (optional — prompts.py falls back without it)
-    "dspy-ai>=2.5.0",
+    # DSPy Predictor support
 ]
 ui = [
     # Streamlit frontend (Phase 9). Installs the UI process dependencies

@@ -140,7 +140,7 @@ async def chat(
     logger.info("query_received", language=language.value, stream=False)
 
     guard = await _get_guard()
-    safety = await guard.check_input(body.message)
+    safety = await guard.check_input(body.message, history=session.messages)
     if not safety.is_safe:
         return ChatResponse(
             session_id=session.session_id,
@@ -167,6 +167,7 @@ async def chat(
         },
         tags=["sync"],
     ) as trace:
+        # ── Step 2: Generation ────────────────────────────────────────────
         try:
             result = await _run_full_pipeline(
                 query=body.message,
@@ -181,6 +182,22 @@ async def chat(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Pipeline execution failed. Please try again.",
             ) from exc
+
+        # ── Step 2a: Output Safety Check ────────────────────────────────
+        output_safety = await guard.check_output(body.message, result["answer"], history=session.messages)
+        if not output_safety.is_safe:
+            return ChatResponse(
+                session_id=session.session_id,
+                content=(
+                    "⚠️ [Blocked by Safety Guardrails] The generated response was found to "
+                    "violate our safety policies. Please rephrase your question."
+                ),
+                citations=[],
+                retrieval_paths_used=[],
+                model_used="guardrail",
+                query_type=QueryType.PATIENT_FAQ,
+                disclaimer="This response was blocked for safety reasons.",
+            )
 
         # Persist conversation turn
         session.messages.append(
@@ -270,7 +287,7 @@ async def chat_stream(
         ) as trace:
             # ── Step 0: Input Safety Check ──────────────────────────────────
             guard = await _get_guard()
-            input_safety = await guard.check_input(body.message)
+            input_safety = await guard.check_input(body.message, history=session.messages)
             if not input_safety.is_safe:
                 yield _sse({
                     "type": "error", 
@@ -303,7 +320,7 @@ async def chat_stream(
             # ── Step 2: Prepare Prompts ─────────────────────────────────────
             from medgraphia.generation.llm_router import LLMRouter
             from medgraphia.llm.gateway import CompletionRequest
-            from medgraphia.generation.prompts import get_no_info_message
+            from medgraphia.prompts import get_no_info_message
 
             context_str = build_numbered_context(items)
             
@@ -361,7 +378,7 @@ async def chat_stream(
 
             # ── Step 4: Finalise (Citations & History) ──────────────────────
             # ── Step 4a: Output Safety Check ────────────────────────────────
-            output_safety = await guard.check_output(body.message, full_text)
+            output_safety = await guard.check_output(body.message, full_text, history=session.messages)
             if not output_safety.is_safe:
                 yield _sse({
                     "type": "moderated",

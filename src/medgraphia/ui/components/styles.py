@@ -192,7 +192,7 @@ header {{ background: transparent !important; }}
 .mg-section {{
     font-size: 0.65rem; font-weight: 700; letter-spacing: 1.8px;
     text-transform: uppercase; color: {TEXT_MUTED};
-    margin: 1.5rem 1.4rem 0.6rem;
+    margin: 0.75rem 1.4rem 0.6rem;
 }}
 
 /* ── Custom Cards ── */

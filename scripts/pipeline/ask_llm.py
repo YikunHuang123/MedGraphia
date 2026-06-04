@@ -42,7 +42,7 @@ async def ask_medgraphia(query: str):
     context_str = build_numbered_context(ret_result.items)
 
     # We can peek at the system prompt by calling the internal helper
-    from medgraphia.generation.prompts import _get_system_prompt
+    from medgraphia.prompts import get_system_prompt as _get_system_prompt
     sys_prompt = _get_system_prompt(ret_result.query_type, lang)
 
     print("\n" + "-" * 30 + " LLM INPUT DEBUG " + "-" * 30)
