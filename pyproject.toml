@@ -69,6 +69,9 @@ dependencies = [
 
     # Evaluation
     "ragas>=0.1.10",
+    "rapidfuzz>=3.0.0",
+    "langchain-openai>=0.1.0",
+    "langchain-google-vertexai>=2.0.0", # Required by RAGAS 0.4.3 internal imports
 
     # Pipeline orchestration
     "prefect>=3.0.0",
