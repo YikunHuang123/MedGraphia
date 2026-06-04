@@ -65,6 +65,9 @@ def load_documents(data_dir: str, limit: int = 5) -> list[Document]:
     processed_path = Path(data_dir)
     docs = []
     
+    # Sections to skip because they often confuse the LLM or aren't useful for medical QA
+    SKIP_KEYWORDS = ["HOW SUPPLIED", "DESCRIPTION", "PACKAGE LABEL", "STORAGE AND HANDLING"]
+    
     json_files = list(processed_path.glob("*.json"))
     logger.info("loading_files", count=len(json_files), limit=limit)
     
@@ -76,8 +79,13 @@ def load_documents(data_dir: str, limit: int = 5) -> list[Document]:
                 
                 if "sections" in data and data["sections"]:
                     for section in data["sections"]:
+                        title = section.get("title", "").upper()
+                        # Skip physical description sections that cause JSON parsing errors
+                        if any(k in title for k in SKIP_KEYWORDS):
+                            continue
+                            
                         content = section.get("content", "").strip()
-                        if len(content) > 50: 
+                        if len(content) > 100: # Slightly longer minimum length
                             docs.append(Document(
                                 page_content=content,
                                 metadata={
@@ -87,6 +95,7 @@ def load_documents(data_dir: str, limit: int = 5) -> list[Document]:
                                 }
                             ))
                 else:
+                    # Fallback for simple files
                     full_text = data.get("full_text", "").strip()
                     if full_text:
                         docs.append(Document(
@@ -123,18 +132,25 @@ def main(data_dir: str, test_size: int, output: str, docs_limit: int) -> None:
     # 2. Initialize Generator (Ragas 0.4.3 style)
     click.echo(f"Initializing RAGAS TestsetGenerator for {test_size} questions...")
     
-    # We must explicitly provide LLM and Embeddings in 0.4.3
+    # Use gpt-4o-mini: faster, cheaper, and better at following JSON schema for extraction
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    embeddings = OpenAIEmbeddings()
+
     generator = TestsetGenerator.from_langchain(
-        llm=ChatOpenAI(model="gpt-4o"),
-        embedding_model=OpenAIEmbeddings()
+        llm=llm,
+        embedding_model=embeddings
     )
 
-    # 3. Generate
+    # 3. Generate with RunConfig for robustness
+    from ragas.run_config import RunConfig
+    run_config = RunConfig(timeout=120, max_retries=3, max_wait=60)
+
     click.echo("Generating questions (this may take a few minutes)...")
     try:
         testset = generator.generate_with_langchain_docs(
             documents,
-            testset_size=test_size
+            testset_size=test_size,
+            run_config=run_config
         )
         
         # 4. Save and Report
