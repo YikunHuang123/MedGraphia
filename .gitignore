@@ -9,3 +9,6 @@ __pycache__/
 medgraphia.egg-info/
 
 /data/
+
+./eval_output.log
+./eval_results.csv
