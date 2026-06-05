@@ -1,15 +1,14 @@
 version: "3.9"
 
 # ============================================================================
-# MedGraphia — Enterprise Stack
+# MedGraphia — Full Stack
 # Usage:  docker compose up --build
-# Recommended RAM: 32 GB+
 # ============================================================================
 
 services:
 
   # --------------------------------------------------------------------------
-  # Neo4j 5.x — production settings
+  # Neo4j 5.x
   # --------------------------------------------------------------------------
   neo4j:
     image: neo4j:5.20-community
@@ -20,9 +19,9 @@ services:
       - "7687:7687"
     environment:
       NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:-neo4j}"
-      NEO4J_server_memory_pagecache_size: "${NEO4J_PAGE_CACHE:-4G}"
-      NEO4J_server_memory_heap_initial__size: "${NEO4J_HEAP_INITIAL:-1G}"
-      NEO4J_server_memory_heap_max__size: "${NEO4J_HEAP_MAX:-4G}"
+      NEO4J_server_memory_pagecache_size: "${NEO4J_PAGE_CACHE:-1G}"
+      NEO4J_server_memory_heap_initial__size: "${NEO4J_HEAP_INITIAL:-512M}"
+      NEO4J_server_memory_heap_max__size: "${NEO4J_HEAP_MAX:-1G}"
       NEO4J_PLUGINS: '["apoc"]'
     volumes:
       - neo4j_data:/data
@@ -55,29 +54,25 @@ services:
       retries: 5
 
   # --------------------------------------------------------------------------
-  # MinIO — object storage for raw docs and parse artifacts
+  # Redis 7 — NER result cache + Arq task-queue broker
   # --------------------------------------------------------------------------
-  minio:
-    image: minio/minio:RELEASE.2024-05-01T01-11-10Z
-    container_name: medgraphia_minio
+  redis:
+    image: redis:7-alpine
+    container_name: medgraphia_redis
     restart: unless-stopped
-    command: server /data --console-address ":9001"
     ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      MINIO_ROOT_USER: "${MINIO_ACCESS_KEY:-minioadmin}"
-      MINIO_ROOT_PASSWORD: "${MINIO_SECRET_KEY:-minioadmin}"
+      - "6379:6379"
     volumes:
-      - minio_data:/data
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9000/minio/health/live || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # --------------------------------------------------------------------------
-  # API — FastAPI
+  # API — FastAPI application
   # --------------------------------------------------------------------------
   api:
     build:
@@ -91,11 +86,13 @@ services:
     environment:
       NEO4J_URI: "bolt://neo4j:7687"
       QDRANT_URL: "http://qdrant:6333"
-      MINIO_ENDPOINT: "minio:9000"
+      REDIS_URL: "redis://redis:6379/0"
     depends_on:
       neo4j:
         condition: service_healthy
       qdrant:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8058/health/live || exit 1"]
@@ -104,7 +101,7 @@ services:
       retries: 5
 
   # --------------------------------------------------------------------------
-  # Worker — Prefect pipeline agent
+  # Worker — Arq pipeline worker (Redis-backed task queue)
   # --------------------------------------------------------------------------
   worker:
     build:
@@ -116,11 +113,13 @@ services:
     environment:
       NEO4J_URI: "bolt://neo4j:7687"
       QDRANT_URL: "http://qdrant:6333"
-      MINIO_ENDPOINT: "minio:9000"
+      REDIS_URL: "redis://redis:6379/0"
     depends_on:
       neo4j:
         condition: service_healthy
       qdrant:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   # --------------------------------------------------------------------------
@@ -145,4 +144,4 @@ volumes:
   neo4j_data:
   neo4j_logs:
   qdrant_data:
-  minio_data:
+  redis_data:

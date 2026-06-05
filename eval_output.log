@@ -1,0 +1,84 @@
+/Users/mac/Documents/code/MedGraphia/scripts/evaluation/eval_rag_metrics.py:57: DeprecationWarning: Importing answer_relevancy from 'ragas.metrics' is deprecated and will be removed in v1.0. Please use 'ragas.metrics.collections' instead. Example: from ragas.metrics.collections import answer_relevancy
+  from ragas.metrics import (
+/Users/mac/Documents/code/MedGraphia/scripts/evaluation/eval_rag_metrics.py:57: DeprecationWarning: Importing context_precision from 'ragas.metrics' is deprecated and will be removed in v1.0. Please use 'ragas.metrics.collections' instead. Example: from ragas.metrics.collections import context_precision
+  from ragas.metrics import (
+/Users/mac/Documents/code/MedGraphia/scripts/evaluation/eval_rag_metrics.py:57: DeprecationWarning: Importing context_recall from 'ragas.metrics' is deprecated and will be removed in v1.0. Please use 'ragas.metrics.collections' instead. Example: from ragas.metrics.collections import context_recall
+  from ragas.metrics import (
+/Users/mac/Documents/code/MedGraphia/scripts/evaluation/eval_rag_metrics.py:57: DeprecationWarning: Importing faithfulness from 'ragas.metrics' is deprecated and will be removed in v1.0. Please use 'ragas.metrics.collections' instead. Example: from ragas.metrics.collections import faithfulness
+  from ragas.metrics import (
+
+============================================================
+  MedGraphia — RAGAS Quality Evaluation
+============================================================
+
+Using hardcoded EVAL_SAMPLES.
+{"small": "deepseek/deepseek-chat", "medium": "deepseek/deepseek-chat", "large": "deepseek/deepseek-chat", "event": "llm_router_init", "level": "info", "logger": "medgraphia.generation.llm_router", "timestamp": "2026-06-04T16:09:50.138048Z"}
+{"count": 2, "user_id": "eval_user", "event": "eval_starting", "level": "info", "logger": "__main__", "timestamp": "2026-06-04T16:09:50.138190Z"}
+{"q": "What are the common side effects of Metformin?", "event": "eval_processing_1/2", "level": "info", "logger": "__main__", "timestamp": "2026-06-04T16:09:50.138239Z"}
+{"query_len": 46, "has_history": false, "user_id": "eval_user", "event": "retrieval_pipeline_started", "level": "info", "logger": "medgraphia.retrieval.pipeline", "timestamp": "2026-06-04T16:09:50.138282Z"}
+{"event": "query_ner_pipeline_loaded", "level": "info", "logger": "medgraphia.retrieval.query_ner", "timestamp": "2026-06-04T16:09:52.271584Z"}
+{"concepts": 30764, "event": "mesh_loaded", "level": "info", "logger": "medgraphia.data.mesh", "timestamp": "2026-06-04T16:09:52.999429Z"}
+{"concepts": 30764, "event": "el_mesh_loaded", "level": "info", "logger": "medgraphia.ingestion.entity_linker", "timestamp": "2026-06-04T16:09:53.003504Z"}
+{"concepts": 30764, "event": "el_building_index", "level": "info", "logger": "medgraphia.ingestion.entity_linker", "timestamp": "2026-06-04T16:09:53.003578Z"}
+{"terms": 30764, "event": "el_bm25_built", "level": "info", "logger": "medgraphia.ingestion.entity_linker", "timestamp": "2026-06-04T16:09:53.784215Z"}
+{"event": "query_el_loaded", "level": "info", "logger": "medgraphia.retrieval.query_ner", "timestamp": "2026-06-04T16:09:53.784967Z"}
+{"model": "urchade/gliner_mediumv2.1", "event": "gliner_loading", "level": "info", "logger": "medgraphia.ingestion.ner.gliner_ner", "timestamp": "2026-06-04T16:09:53.785327Z"}
+Fetching 5 files:   0%|          | 0/5 [00:00<?, ?it/s]/Users/mac/anaconda3/envs/medgrahia/lib/python3.12/site-packages/huggingface_hub/file_download.py:949: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+Fetching 5 files: 100%|██████████| 5/5 [00:00<00:00, 5220.69it/s]
+{"event": "Loading the following GLiNER type: <class 'gliner.model.UniEncoderSpanGLiNER'>...", "level": "info", "logger": "gliner.model", "timestamp": "2026-06-04T16:09:54.144866Z"}
+/Users/mac/anaconda3/envs/medgrahia/lib/python3.12/site-packages/transformers/convert_slow_tokenizer.py:566: UserWarning: The sentencepiece tokenizer that you are converting to a fast tokenizer uses the byte fallback option which is not implemented in the fast tokenizers. In practice this means that the fast version of the tokenizer can produce unknown tokens whereas the sentencepiece version would have converted these unknown tokens into a sequence of byte tokens matching the original piece of text.
+  warnings.warn(
+{"model": "urchade/gliner_mediumv2.1", "event": "gliner_loaded", "level": "info", "logger": "medgraphia.ingestion.ner.gliner_ner", "timestamp": "2026-06-04T16:10:01.922959Z"}
+Asking to truncate to max_length but no maximum length is provided and the model has no predefined maximum length. Default to no truncation.
+{"lang": "en", "model": "d4data/biomedical-ner-all", "event": "bert_ner_loading", "level": "info", "logger": "medgraphia.ingestion.ner.bert_ner", "timestamp": "2026-06-04T16:10:02.057311Z"}
+Device set to use mps
+{"lang": "en", "model": "d4data/biomedical-ner-all", "event": "bert_ner_loaded", "level": "info", "logger": "medgraphia.ingestion.ner.bert_ner", "timestamp": "2026-06-04T16:10:03.416043Z"}
+{"chunk_id": "8537442d-e8ed-4131-a3bf-86928450fc7a", "lang": "en", "entities": 2, "event": "ner_chunk_done", "level": "info", "logger": "medgraphia.ingestion.ner.pipeline", "timestamp": "2026-06-04T16:10:04.544770Z"}
+{"model": "cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR", "event": "el_sapbert_loading", "level": "info", "logger": "medgraphia.ingestion.entity_linker", "timestamp": "2026-06-04T16:10:04.605357Z"}
+{"event": "No device provided, using mps", "level": "info", "logger": "sentence_transformers.base.model", "timestamp": "2026-06-04T16:10:04.608688Z"}
+{"event": "No modules.json found for cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR, initializing a new SentenceTransformer model.", "level": "info", "logger": "sentence_transformers.base.model", "timestamp": "2026-06-04T16:10:04.742264Z"}
+{"event": "el_sapbert_loaded", "level": "info", "logger": "medgraphia.ingestion.entity_linker", "timestamp": "2026-06-04T16:10:10.692165Z"}
+{"query_len": 46, "lang": "en", "entities": 2, "linked": 1, "event": "query_ner_done", "level": "info", "logger": "medgraphia.retrieval.query_ner", "timestamp": "2026-06-04T16:10:11.010638Z"}
+{"query_type": "patient_faq", "use_graph": true, "use_vector": true, "use_community": false, "linked_cuis": 1, "event": "router_routed", "level": "info", "logger": "medgraphia.retrieval.router", "timestamp": "2026-06-04T16:10:11.015299Z"}
+{"model": "BAAI/bge-m3", "event": "vector_retriever_loading_model", "level": "info", "logger": "medgraphia.retrieval.vector_retriever", "timestamp": "2026-06-04T16:10:11.015651Z"}
+Fetching 30 files:   0%|          | 0/30 [00:00<?, ?it/s]Fetching 30 files: 100%|██████████| 30/30 [00:00<00:00, 22437.43it/s]
+{"event": "loading existing colbert_linear and sparse_linear---------", "level": "info", "logger": "FlagEmbedding.finetune.embedder.encoder_only.m3.runner", "timestamp": "2026-06-04T16:10:21.752452Z"}
+{"event": "vector_retriever_model_loaded", "level": "info", "logger": "medgraphia.retrieval.vector_retriever", "timestamp": "2026-06-04T16:10:21.764154Z"}
+pre tokenize:   0%|          | 0/1 [00:00<?, ?it/s]pre tokenize: 100%|██████████| 1/1 [00:00<00:00, 695.00it/s]
+You're using a XLMRobertaTokenizerFast tokenizer. Please note that with a fast tokenizer, using the `__call__` method is faster than using a method to encode the text followed by a call to the `pad` method to get a padded encoding.
+Inference Embeddings:   0%|          | 0/1 [00:00<?, ?it/s]Inference Embeddings: 100%|██████████| 1/1 [00:00<00:00, 26.55it/s]
+{"uri": "bolt://localhost:7687", "event": "neo4j_driver_created", "level": "info", "logger": "medgraphia.graph.client", "timestamp": "2026-06-04T16:10:22.919016Z"}
+{"query_len": 46, "hits": 10, "event": "vector_retriever_done", "level": "info", "logger": "medgraphia.retrieval.vector_retriever", "timestamp": "2026-06-04T16:10:23.009113Z"}
+{"seeds": 1, "hops": 1, "triples": 30, "event": "graph_retriever_done", "level": "info", "logger": "medgraphia.retrieval.graph_retriever", "timestamp": "2026-06-04T16:10:23.232969Z"}
+{"sources": 2, "merged": 32, "event": "rrf_done", "level": "info", "logger": "medgraphia.retrieval.fusion", "timestamp": "2026-06-04T16:10:23.233298Z"}
+{"device": "mps", "event": "reranker_device_selected", "level": "info", "logger": "medgraphia.retrieval.reranker", "timestamp": "2026-06-04T16:10:23.233375Z"}
+{"model": "BAAI/bge-reranker-v2-m3", "backend": "FlagEmbedding", "device": "mps", "event": "reranker_loading", "level": "info", "logger": "medgraphia.retrieval.reranker", "timestamp": "2026-06-04T16:10:23.233427Z"}
+{"backend": "FlagEmbedding", "event": "reranker_loaded", "level": "info", "logger": "medgraphia.retrieval.reranker", "timestamp": "2026-06-04T16:10:24.430534Z"}
+You're using a XLMRobertaTokenizerFast tokenizer. Please note that with a fast tokenizer, using the `__call__` method is faster than using a method to encode the text followed by a call to the `pad` method to get a padded encoding.
+{"input": 20, "output": 5, "top_score": "0.9974", "threshold": 0.1, "event": "reranker_done", "level": "info", "logger": "medgraphia.retrieval.reranker", "timestamp": "2026-06-04T16:10:40.314010Z"}
+{"query_type": "patient_faq", "final_items": 5, "event": "retrieval_pipeline_completed", "level": "info", "logger": "medgraphia.retrieval.pipeline", "timestamp": "2026-06-04T16:10:40.317154Z"}
+{"provider": "deepseek", "model": "deepseek-chat", "tier": "small", "query_type": "patient_faq", "language": "en", "event": "llm_routed", "level": "info", "logger": "medgraphia.generation.llm_router", "timestamp": "2026-06-04T16:10:40.317912Z"}
+{"task": "default", "model": "deepseek/deepseek-chat", "has_custom_base": false, "event": "dspy_lm_initialized", "level": "info", "logger": "medgraphia.llm.dspy_setup", "timestamp": "2026-06-04T16:10:40.332765Z"}
+{"name": "generator", "path": "data/dspy/generator_compiled.json", "event": "dspy_program_loaded_compiled", "level": "info", "logger": "medgraphia.llm.dspy_setup", "timestamp": "2026-06-04T16:10:40.380006Z"}
+{"q": "Can I take aspirin with warfarin? Explain the risk", "event": "eval_processing_2/2", "level": "info", "logger": "__main__", "timestamp": "2026-06-04T16:10:45.411453Z"}
+{"query_len": 52, "has_history": false, "user_id": "eval_user", "event": "retrieval_pipeline_started", "level": "info", "logger": "medgraphia.retrieval.pipeline", "timestamp": "2026-06-04T16:10:45.411855Z"}
+{"chunk_id": "3e31b832-f7af-4964-b834-06e89f140e87", "lang": "en", "entities": 2, "event": "ner_chunk_done", "level": "info", "logger": "medgraphia.ingestion.ner.pipeline", "timestamp": "2026-06-04T16:10:57.370516Z"}
+{"query_len": 52, "lang": "en", "entities": 2, "linked": 2, "event": "query_ner_done", "level": "info", "logger": "medgraphia.retrieval.query_ner", "timestamp": "2026-06-04T16:11:01.909647Z"}
+{"query_type": "patient_faq", "use_graph": true, "use_vector": true, "use_community": false, "linked_cuis": 2, "event": "router_routed", "level": "info", "logger": "medgraphia.retrieval.router", "timestamp": "2026-06-04T16:11:01.921775Z"}
+pre tokenize:   0%|          | 0/1 [00:00<?, ?it/s]pre tokenize: 100%|██████████| 1/1 [00:00<00:00, 29.63it/s]
+Inference Embeddings:   0%|          | 0/1 [00:00<?, ?it/s]Inference Embeddings: 100%|██████████| 1/1 [00:00<00:00,  3.41it/s]Inference Embeddings: 100%|██████████| 1/1 [00:00<00:00,  3.41it/s]
+{"query_len": 52, "hits": 10, "event": "vector_retriever_done", "level": "info", "logger": "medgraphia.retrieval.vector_retriever", "timestamp": "2026-06-04T16:11:08.647450Z"}
+{"seeds": 2, "hops": 1, "triples": 40, "event": "graph_retriever_done", "level": "info", "logger": "medgraphia.retrieval.graph_retriever", "timestamp": "2026-06-04T16:11:09.203324Z"}
+{"sources": 2, "merged": 39, "event": "rrf_done", "level": "info", "logger": "medgraphia.retrieval.fusion", "timestamp": "2026-06-04T16:11:09.205828Z"}
+{"input": 20, "output": 3, "top_score": "0.3202", "threshold": 0.1, "event": "reranker_done", "level": "info", "logger": "medgraphia.retrieval.reranker", "timestamp": "2026-06-04T16:11:24.315458Z"}
+{"query_type": "patient_faq", "final_items": 3, "event": "retrieval_pipeline_completed", "level": "info", "logger": "medgraphia.retrieval.pipeline", "timestamp": "2026-06-04T16:11:24.317284Z"}
+{"provider": "deepseek", "model": "deepseek-chat", "tier": "small", "query_type": "patient_faq", "language": "en", "event": "llm_routed", "level": "info", "logger": "medgraphia.generation.llm_router", "timestamp": "2026-06-04T16:11:24.321439Z"}
+{"rows": 2, "event": "ragas_scoring_started", "level": "info", "logger": "__main__", "timestamp": "2026-06-04T16:11:29.785929Z"}
+Evaluating:   0%|          | 0/8 [00:00<?, ?it/s]Evaluating:  12%|█▎        | 1/8 [02:14<15:42, 134.63s/it]Evaluating:  25%|██▌       | 2/8 [04:19<12:52, 128.77s/it]Evaluating:  38%|███▊      | 3/8 [09:29<17:39, 211.84s/it]Evaluating:  50%|█████     | 4/8 [10:32<10:12, 153.06s/it]Evaluating:  62%|██████▎   | 5/8 [12:20<06:49, 136.63s/it]Evaluating:  75%|███████▌  | 6/8 [12:22<03:01, 90.97s/it] Evaluating:  88%|████████▊ | 7/8 [12:28<01:03, 63.19s/it]Evaluating: 100%|██████████| 8/8 [12:31<00:00, 43.97s/it]Evaluating: 100%|██████████| 8/8 [12:31<00:00, 93.95s/it]
+
+-------------------- RAGAS SCORES --------------------
+{'faithfulness': 0.9500, 'answer_relevancy': 0.5000, 'context_precision': 0.9167, 'context_recall': 0.5000}
+------------------------------------------------------
+
+Detailed results saved to eval_results.csv

@@ -414,3 +414,43 @@ class QueryRouter:
         entities = self._ner_linker.analyze(query, language=lang)
         qtype = _classify_by_rules(query, entities)
         return _plan_from_type(qtype, query, lang, entities)
+
+    async def route_async(self, query: str, language: Language | None = None) -> RetrievalPlan:
+        """
+        Async version of route() with Redis-backed NER result caching.
+
+        Cache hit  — skips BERT/SapBERT inference entirely; runs only the
+                     fast rule-based classifier on the cached QueryEntities.
+                     Typical latency: ~3 ms (Redis) vs 300–500 ms (full NER).
+
+        Cache miss — runs the synchronous pipeline inside asyncio.to_thread()
+                     so the event loop is never blocked, then persists the
+                     NER result for subsequent identical queries.
+
+        Redis unavailable — silently falls back to the synchronous route()
+                            path with no change in behaviour.
+        """
+        import asyncio
+
+        from medgraphia.cache.ner_cache import ner_cache_get, ner_cache_set
+
+        lang = language or Language.EN
+
+        cached = await ner_cache_get(query, lang)
+        if cached is not None:
+            qtype = _classify_by_rules(query, cached)
+            plan = _plan_from_type(qtype, query, lang, cached)
+            logger.info(
+                "router_routed_cached",
+                query_type=plan.query_type.value,
+                linked_cuis=len(plan.linked_cuis),
+            )
+            return plan
+
+        # Cache miss: run blocking NER pipeline off the event loop
+        plan = await asyncio.to_thread(self.route, query, language)
+
+        # Persist NER result so the next identical query skips inference
+        await ner_cache_set(query, lang, plan.query_entities)
+
+        return plan

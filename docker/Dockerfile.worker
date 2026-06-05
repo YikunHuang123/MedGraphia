@@ -23,5 +23,5 @@ ENV PYTHONPATH=/app/src
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Default: start Prefect worker; override for one-off pipeline runs
-CMD ["prefect", "worker", "start", "--pool", "default-agent-pool"]
+# Default: start Arq worker consuming the medgraphia task queue
+CMD ["arq", "medgraphia.worker.WorkerSettings"]

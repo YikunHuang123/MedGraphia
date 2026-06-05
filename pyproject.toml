@@ -76,6 +76,10 @@ dependencies = [
     # Pipeline orchestration
     "prefect>=3.0.0",
 
+    # Async task queue + Redis cache
+    "arq>=0.25.0",
+    "redis>=5.0.0",
+
     # Utilities
     "tqdm>=4.66.0",
     "rich>=13.7.0",
@@ -96,14 +100,6 @@ dev = [
     "black>=24.4.0",
     "mypy>=1.10.0",
     "types-lxml>=2024.4.14",
-]
-lite = [
-    # Lighter alternatives for 16 GB laptop
-    "chromadb>=0.5.0",
-]
-enterprise = [
-    "minio>=7.2.0",
-    "pyarrow>=16.0.0",
 ]
 generation = [
     # DSPy Predictor support

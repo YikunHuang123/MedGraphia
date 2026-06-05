@@ -9,6 +9,14 @@ GET  /admin/keys              — List all active API key prefixes (redacted)
 DELETE /admin/keys/{prefix}   — Revoke a key by its 8-char prefix
 
 All endpoints are protected by `require_admin` (role == "admin").
+
+Pipeline execution strategy
+────────────────────────────
+• Redis available (REDIS_URL set): job is enqueued via Arq and executed by
+  the dedicated worker process.  The response includes a ``job_id`` that can
+  be used with arq's native job-result API.
+• No Redis (REDIS_URL unset): falls back to asyncio.create_task running in
+  the FastAPI process — identical behaviour, lower durability.
 """
 from __future__ import annotations
 
@@ -37,7 +45,7 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-# Holds the asyncio task handle (local to this process)
+# Asyncio task handle — only used in no-Redis fallback mode
 _pipeline_task: asyncio.Task | None = None
 
 
@@ -85,15 +93,39 @@ async def trigger_pipeline(
     }
     await upsert_pipeline_status(body.domain, init_status)
 
-    # Launch background task
+    # ── Execution strategy ────────────────────────────────────────────────
+    # Prefer Arq (durable, isolated worker process) when Redis is available;
+    # otherwise fall back to asyncio.create_task (no-Redis mode).
+    from medgraphia.worker.arq_client import get_arq_pool
+
+    arq_pool = await get_arq_pool()
+    if arq_pool is not None:
+        job = await arq_pool.enqueue_job(
+            "task_build_pipeline",
+            domain=body.domain,
+            pubmed_query=body.pubmed_query or "",
+            pubmed_limit=body.pubmed_limit,
+            include_drugbank=body.include_drugbank,
+            include_ema_smpc=body.include_ema_smpc,
+        )
+        logger.info("pipeline_enqueued", job_id=job.job_id, domain=body.domain)
+        return {
+            "status": "accepted",
+            "job_id": job.job_id,
+            "message": f"Pipeline queued for domain '{body.domain}'.",
+        }
+
+    # Lite / no-Redis fallback
+    global _pipeline_task
     _pipeline_task = asyncio.create_task(
         _run_pipeline_background(body),
         name=f"pipeline_{body.domain}",
     )
-
+    logger.info("pipeline_task_created", domain=body.domain, mode="in_process_no_redis")
     return {
         "status": "accepted",
-        "message": f"Pipeline started for domain '{body.domain}'.",
+        "job_id": None,
+        "message": f"Pipeline started for domain '{body.domain}' (in-process mode).",
     }
 
 

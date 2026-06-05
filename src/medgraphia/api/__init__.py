@@ -8,12 +8,16 @@ Startup sequence
 3. Connect to Neo4j and apply the graph schema (idempotent DDL)
 4. Verify Qdrant connectivity
 5. Initialise the Langfuse tracing client (no-op when disabled)
-6. Register all routers
+6. Initialise Redis client (no-op when REDIS_URL is not set)
+7. Initialise Arq task-queue pool (no-op when REDIS_URL is not set)
+8. Background warm-up of ML models
 
 Shutdown sequence
 ─────────────────
 1. Flush any pending Langfuse events
-2. Close the Neo4j driver connection pool
+2. Close Arq connection pool
+3. Close Redis connection pool
+4. Close the Neo4j driver connection pool
 """
 from __future__ import annotations
 
@@ -61,7 +65,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         tracing=cfg.tracing_enabled,
     )
 
-    # 5. Background Warm-up: eagerly load ML models and prime GPU kernels
+    # 6. Redis: optional cache layer (gracefully skipped when REDIS_URL is unset)
+    from medgraphia.cache.redis_client import get_redis, close_redis
+    await get_redis()  # triggers lazy init + connectivity check
+
+    # 7. Arq: optional task-queue pool for durable pipeline execution
+    from medgraphia.worker.arq_client import get_arq_pool, close_arq_pool
+    arq_pool = await get_arq_pool()
+    logger.info(
+        "task_queue_ready",
+        arq_enabled=arq_pool is not None,
+    )
+
+    # 8. Background Warm-up: eagerly load ML models and prime GPU kernels
     from medgraphia.api.health import _warm_up_models
     import asyncio
     asyncio.create_task(_warm_up_models())
@@ -69,9 +85,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("medgraphia_ready", port=cfg.api_port)
     yield  # ─── application running ─────────────────────────────────────────
 
-    # Shutdown: flush Langfuse buffer then close Neo4j driver
+    # Shutdown: flush Langfuse, close Arq + Redis, close Neo4j driver
     lf.flush()
 
+    await close_arq_pool()
+    await close_redis()
     await close_driver()
     logger.info("medgraphia_stopped")
 

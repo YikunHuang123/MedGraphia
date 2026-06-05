@@ -99,4 +99,4 @@ async def _warm_up_models() -> None:
     except Exception as exc:
         logger.error("warmup_failed", error=str(exc))
         # Note: we don't set _IS_WARM=True here, so readiness will continue to fail.
-        # This is the correct behaviour for enterprise high-availability.
+        # Readiness continues to fail until warmup succeeds on retry.

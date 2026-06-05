@@ -132,7 +132,7 @@ class RetrievalPipeline:
         # ---------------------------------------------------------
         # Step 1: Route & Plan (using the rewritten query)
         # ---------------------------------------------------------
-        plan: RetrievalPlan = self.router.route(search_query, language=language)
+        plan: RetrievalPlan = await self.router.route_async(search_query, language=language)
 
         # ---------------------------------------------------------
         # Step 2: Concurrent Retrieval

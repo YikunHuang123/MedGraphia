@@ -4,8 +4,8 @@ MedGraphia — Streamlit frontend entrypoint.
 Run locally:
     streamlit run src/medgraphia/ui/streamlit_app.py
 
-In Docker (lite stack):
-    docker compose -f docker-compose.lite.yml up
+In Docker:
+    docker compose up --build
     Browse to http://localhost:8501
 """
 from __future__ import annotations

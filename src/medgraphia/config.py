@@ -191,6 +191,15 @@ class Settings(BaseSettings):
     mesh_dir: str = "data/mesh"         # path to MeSH d2024.bin
 
     # ------------------------------------------------------------------
+    # Redis — optional cache + task-queue broker
+    # ------------------------------------------------------------------
+    # Leave unset (or empty) to run without Redis.
+    # When set, enables:
+    #   • NER result caching (300–500 ms BERT inference → <5 ms Redis read)
+    #   • Arq task queue for durable build-pipeline execution
+    redis_url: str | None = None
+
+    # ------------------------------------------------------------------
     # Privacy / compliance
     # ------------------------------------------------------------------
     pii_deidentify: bool = False
