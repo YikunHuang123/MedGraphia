@@ -90,13 +90,13 @@ class Settings(BaseSettings):
 
     # Synthetic data generation (Teacher model)
     synthetic_data_llm_provider: str = "deepseek"
-    synthetic_data_llm_model: str = "deepseek-chat"
+    synthetic_data_llm_model: str = "deepseek-v4-pro"
     synthetic_data_llm_api_key: SecretStr = SecretStr("")
     synthetic_data_llm_base_url: str = ""
 
     # Judge LLM (used for evaluations, metrics, and quality control)
     judge_llm_provider: str = "deepseek"
-    judge_llm_model: str = "deepseek-chat"
+    judge_llm_model: str = "deepseek-v4-pro"
     judge_llm_api_key: SecretStr = SecretStr("")
     judge_llm_base_url: str = ""
 

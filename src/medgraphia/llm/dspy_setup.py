@@ -21,6 +21,7 @@ def get_lm(
     task: Literal["default", "rewriter", "extractor", "summarizer", "judge"] = "default",
     provider_override: str | None = None,
     model_override: str | None = None,
+    temperature: float | None = None,
 ) -> dspy.LM:
     """
     Get a dspy.LM instance for a specific task based on configuration.
@@ -46,7 +47,7 @@ def get_lm(
             provider = cfg.judge_llm_provider
             model = cfg.judge_llm_model
 
-    cache_key = f"{provider}/{model}/{task}"
+    cache_key = f"{provider}/{model}/{task}/{temperature}"
     if cache_key in _LM_CACHE:
         return _LM_CACHE[cache_key]
 
@@ -90,6 +91,8 @@ def get_lm(
         kwargs = {"api_key": api_key}
         if api_base:
             kwargs["api_base"] = api_base
+        if temperature is not None:
+            kwargs["temperature"] = temperature
 
         lm = dspy.LM(model=model_id, **kwargs)
         _LM_CACHE[cache_key] = lm

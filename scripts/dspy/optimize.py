@@ -6,23 +6,27 @@ Run this script to compile and optimize the MedGraphia DSPy signatures.
 from __future__ import annotations
 
 import json
+import random
 import re
 from pathlib import Path
 
 import dspy
-from dspy.teleprompt import BootstrapFewShot
+from dspy.teleprompt import BootstrapFewShot, MIPROv2
 
 from medgraphia.domain.base import Language
 from medgraphia.llm.dspy_setup import get_lm
 from medgraphia.prompts.query_rewriting import RewritingJudge
 
 # Initialize LMs
-# - default_lm: used for the modules being optimized (the 'student')
-# - judge_lm: used for the metrics and evaluation (the 'teacher')
-default_lm = get_lm(task="default")
-judge_lm = get_lm(task="judge")
+# - student_lm: used for the modules being optimized (the 'student')
+# - eval_lm: deterministic judge (temp=0.0) used for scoring metrics
+# - proposal_lm: creative judge (temp=0.7) used by MIPROv2 to brainstorm instructions
+student_lm = get_lm(task="rewriter")
+eval_lm = get_lm(task="judge", temperature=0.0)
+proposal_lm = get_lm(task="judge", temperature=0.7)
 
-dspy.settings.configure(lm=default_lm)
+# Set the student as the default for module execution during optimization
+dspy.settings.configure(lm=student_lm)
 
 
 # Shared cross-language note appended to every system_instruction so the LLM
@@ -270,28 +274,34 @@ ANSWER_DATA = [
 
 def rewrite_metric(example: dspy.Example, pred: dspy.Prediction, trace=None) -> float:
     """
-    Evaluate both coreference resolution quality and complexity tier accuracy.
+    Evaluate coreference resolution quality and complexity tier accuracy.
 
     RewriterModule.forward() returns a flat dspy.Prediction with fields:
       rewritten_query, complexity_tier, complexity_reasoning, is_standalone, tier
     (no nested .result — that was the old RewriteMedicalQuery signature).
 
-    Scoring:
-      0.7 — rewriting quality (LLM judge, threshold 0.6)
-      0.3 — tier classification (exact string match after normalisation)
-    Returns 1.0 only when both components pass; 0.0 otherwise.
+    Design rationale:
+      rewrite_score — continuous 0.0-1.0 from LLM judge.
+                      Hard-thresholding a noisy LLM score (0.59 → 0, 0.61 → 1) injects
+                      artificial binary noise that misleads Bayesian search.
+      tier_gate     — multiplicative: 1.0 if tier correct, 0.3 if wrong.
+                      Caps the total at ~0.3 when tier fails, preventing the optimiser
+                      from finding rewriting-only shortcuts, while still preserving a
+                      partial gradient signal so the search keeps its direction.
+      reasoning     — soft score proportional to trace length; rewards models that show
+                      E+I work rather than guessing the tier.
+    Final: tier_gate × (0.85 × rewrite_score + 0.15 × reasoning_score)
     """
     expected_query = example.result["rewritten_query"]
     predicted_query = pred.rewritten_query  # flat field, NOT pred.result.rewritten_query
 
-    # --- Rewriting quality (0.7 weight) ---
-    rewrite_ok = False
+    # --- Rewriting quality — continuous, no hard threshold ---
     if expected_query.strip().lower() == predicted_query.strip().lower():
-        rewrite_ok = True
+        rewrite_score = 1.0
     else:
         judge = dspy.Predict(RewritingJudge)
         try:
-            with dspy.context(lm=judge_lm):
+            with dspy.context(lm=eval_lm):
                 result = judge(
                     history=example.history,
                     latest_message=example.latest_message,
@@ -299,22 +309,26 @@ def rewrite_metric(example: dspy.Example, pred: dspy.Prediction, trace=None) -> 
                     predicted=predicted_query,
                 )
             match = re.search(r"[01]\.\d+|\b[01]\b", str(result.score))
-            score = float(match.group(0)) if match else float(result.score)
-            score = max(0.0, min(1.0, score))
-            rewrite_ok = score > 0.6
+            rewrite_score = float(match.group(0)) if match else float(result.score)
+            rewrite_score = max(0.0, min(1.0, rewrite_score))
         except Exception as e:
             print(f"[Warning] LLM Judge failed: {e}")
-            rewrite_ok = False
+            rewrite_score = 0.0
 
-    # --- Tier accuracy (0.3 weight) ---
-    # If the example has no expected_tier label, skip this component (give full credit).
+    # --- Tier accuracy — multiplicative gate ---
+    # Tier wrong multiplies the total by 0.3, capping the max achievable score at ~0.3.
     expected_tier = getattr(example, "expected_tier", None)
     if expected_tier is None:
-        tier_ok = True
+        tier_gate = 1.0  # no label → skip this component
     else:
         tier_ok = pred.complexity_tier.strip().upper() == expected_tier.strip().upper()
+        tier_gate = 1.0 if tier_ok else 0.3
 
-    return 1.0 if (rewrite_ok and tier_ok) else 0.0
+    # --- Reasoning trace — soft score, full credit at ≥ 80 chars ---
+    # 80 chars ≈ "E=2 (metformin + CKD), I=3 (contraindication) → Total=5 → LARGE"
+    reasoning_score = min(1.0, len(pred.complexity_reasoning.strip()) / 80)
+
+    return tier_gate * (0.85 * rewrite_score + 0.15 * reasoning_score)
 
 
 def answer_metric(example: dspy.Example, pred: dspy.Prediction, trace=None) -> float:
@@ -365,12 +379,28 @@ def answer_metric(example: dspy.Example, pred: dspy.Prediction, trace=None) -> f
 # ---------------------------------------------------------
 
 
+def _eval_to_float(result) -> float:
+    """
+    Normalise dspy.Evaluate() return value to a 0-1 float.
+    """
+    if isinstance(result, (int, float)):
+        return float(result)
+    score = getattr(result, "score", None)
+    if score is not None:
+        val = float(score)
+        return val / 100.0 if val > 1.0 else val
+    # Parse "(52.9%)" from the string representation as a last resort
+    m = re.search(r"\((\d+\.?\d*)%\)", str(result))
+    if m:
+        return float(m.group(1)) / 100.0
+    raise ValueError(f"Cannot extract numeric score from {type(result)}: {result}")
+
+
 def compile_rewriter():
-    print("\n--- Compiling Query Rewriter ---")
+    print("\n--- Compiling Query Rewriter (MIPROv2) ---")
     from medgraphia.llm.dspy_setup import get_lm
     from medgraphia.programs.rewriter import RewriterModule
 
-    # Explicitly use the rewriter-specific LM (e.g., Qwen) as the 'student'
     student_lm = get_lm("rewriter")
 
     module = RewriterModule()
@@ -378,20 +408,64 @@ def compile_rewriter():
     # Merge handcrafted + synthetic examples.  Handcrafted come first so they
     # are prioritised as labeled demos; synthetic examples expand the bootstrap pool.
     synthetic = load_synthetic_rewriter_data()
-    trainset = REWRITE_DATA + synthetic
+    full_set = REWRITE_DATA + synthetic
     print(
-        f"  Trainset: {len(REWRITE_DATA)} handcrafted + {len(synthetic)} synthetic = {len(trainset)} total"
+        f"  Full set: {len(REWRITE_DATA)} handcrafted + {len(synthetic)} synthetic = {len(full_set)} total"
     )
 
-    teleprompter = BootstrapFewShot(
-        metric=rewrite_metric,
-        max_bootstrapped_demos=7,
-        max_labeled_demos=5,
-    )
+    # Hold out 20 % of the synthetic examples as a valset so that MIPROv2's
+    # Bayesian search evaluates against unseen data.  Handcrafted examples are
+    # never placed in valset — they are too valuable as labeled demos.
+    random.seed(42)
+    shuffled_synthetic = synthetic.copy()
+    random.shuffle(shuffled_synthetic)
+    val_size = max(1, len(shuffled_synthetic) // 5)
+    valset = shuffled_synthetic[:val_size]
+    trainset = REWRITE_DATA + shuffled_synthetic[val_size:]
+    print(f"  Split → train: {len(trainset)}, val: {len(valset)}")
 
-    # Run compilation within the context of the student LM
+    # Baseline: measure uncompiled module before optimisation so we can
+    # quantify the improvement MIPROv2 actually delivers.
+    print("  Evaluating baseline (uncompiled)…")
     with dspy.context(lm=student_lm):
-        compiled_rewriter = teleprompter.compile(module, trainset=trainset)
+        baseline_eval = dspy.Evaluate(
+            devset=valset,
+            metric=rewrite_metric,
+            num_threads=4,
+            display_progress=True,
+        )
+        baseline_score = _eval_to_float(baseline_eval(module))
+    print(f"  Baseline score: {baseline_score:.3f}")
+
+    # MIPROv2: proposal_lm (DeepSeek temp 0.7) proposes instruction variants via Bayesian search;
+    # student_lm (Qwen) is the task model that gets evaluated under each candidate.
+    # auto="medium" runs ~20-30 trials — sufficient for a 2-objective rewriting+tier task.
+    teleprompter = MIPROv2(
+        metric=rewrite_metric,
+        prompt_model=proposal_lm,
+        task_model=student_lm,
+        auto="medium",
+        num_threads=4,
+    )
+
+    compiled_rewriter = teleprompter.compile(
+        module,
+        trainset=trainset,
+        valset=valset,
+        requires_permission_to_run=False,
+    )
+
+    # Report improvement over baseline before persisting.
+    print("  Evaluating compiled module…")
+    with dspy.context(lm=student_lm):
+        compiled_eval = dspy.Evaluate(
+            devset=valset,
+            metric=rewrite_metric,
+            num_threads=4,
+            display_progress=True,
+        )
+        compiled_score = _eval_to_float(compiled_eval(compiled_rewriter))
+    print(f"  Compiled score: {compiled_score:.3f}  (Δ {compiled_score - baseline_score:+.3f})")
 
     # Save the compiled module
 
@@ -437,7 +511,7 @@ def compile_generator():
     compiled_generator.save(str(out_path))
     print(f"Compiled generator saved to {out_path}")
 
-    dspy.inspect_history(n=10)
+    # dspy.inspect_history(n=10)
 
 
 # ---------------------------------------------------------
@@ -532,11 +606,15 @@ def load_synthetic_rewriter_data() -> list[dspy.Example]:
         raw = json.load(f)
 
     for d in raw:
+        # Access the nested 'rewritten_query' inside 'result' to match JSON structure
+        res = d.get("result", {})
+        rewritten = res.get("rewritten_query") or d.get("expected_rewritten_query")
+        
         examples.append(
             dspy.Example(
                 history=d["history"],
                 latest_message=d["latest_message"],
-                result={"is_standalone": False, "rewritten_query": d["expected_rewritten_query"]},
+                result={"is_standalone": False, "rewritten_query": rewritten},
                 expected_tier=d["expected_tier"],
             ).with_inputs("history", "latest_message")
         )

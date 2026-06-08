@@ -72,8 +72,13 @@ MedGraphia manages context through a dual-layer memory architecture:
 
 #### **3. DSPy-driven Logic Self-Evolution**
 Instead of static prompts, MedGraphia uses **DSPy programs** that evolve through automated data-driven compilation:
-*   **Synthetic Data Factory:** Using a high-capability Teacher model (e.g., DeepSeek-V3), the system reverse-engineers high-quality, multilingual QA pairs from grounded graph chunks. This "Reverse-RAG" approach ensures that training examples are anchored in real database evidence. 
-*   **Automated Knowledge Distillation:** Using `BootstrapFewShot`, the system distills reasoning logic into a Student model (e.g., Qwen-2.5). The optimization pipeline iterates through the synthetic dataset to find valid reasoning traces (**Rationales**), injecting the best-performing ones (e.g., **7 bootstrapped + 5 labeled demos** for Rewriter) into the compiled JSON signatures. This ensures that the model's logic for citation and clinical reasoning is grounded in "gold-standard" traces.
+*   **Synthetic Data Factory:** Using a high-capability Teacher model, the system reverse-engineers high-quality, multilingual QA pairs from grounded graph chunks. This "Reverse-RAG" approach ensures that training examples are anchored in real database evidence. 
+*   **Teacher-Guided Bayesian Optimization (MIPROv2):** For complex modules like the Query Rewriter (which handles both semantic resolution and routing difficulty scoring) for the small model, MedGraphia employs the advanced **MIPROv2** algorithm. 
+    *   **The Teacher model (large)** analyzes the training set and brainstorms multiple variations of instructional prompts.
+    *   **The Student model (small)** executes these variations on a validation set.
+    *   **The Optimizer** uses a Bayesian search algorithm (Tree-structured Parzen Estimator) driven by a **Continuous Multiplicative Metric** (which penalizes routing errors but softly rewards reasoning traces). Over multiple trials, it discovers the exact linguistic instructions and few-shot examples that maximize the small local model's clinical accuracy, effectively bridging the capability gap between a 7B model and flagship LLMs.
+    *   **The Metric** — Performance is judged by a three-part composite score: 85% rewrite quality (continuous 0–1 score from an LLM judge), 15% reasoning trace completeness, and a multiplicative routing gate that caps the total at 30% when the clinical complexity tier is misclassified. This design prevents gaming any single dimension while preserving a stable gradient signal across all Bayesian trials.
+    *   **The Result** — Starting from a baseline of **60%** on the held-out validation set, MIPROv2 converged to **76.7%** after 18 trials — demonstrating that a compact local model can match the routing precision of a flagship LLM when given the right few-shot demonstrations and instructions.
 
 #### **4. Hierarchical Multi-Model Routing**
 To optimize for latency and cost, the system employs a tiered routing logic orchestrated via **Pydantic-AI**:

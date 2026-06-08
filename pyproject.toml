@@ -87,7 +87,8 @@ dependencies = [
     "orjson>=3.10.0",
     "structlog>=24.2.0",
     "fast-langdetect>=1.0.1",
-    "dspy-ai>=2.5.0",
+    "dspy-ai[optuna]>=2.5.0",
+    "optuna>=3.6.1",
 ]
 
 [project.optional-dependencies]

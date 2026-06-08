@@ -225,7 +225,8 @@ async def generate_dataset(
         f"{provider}/{model_id}",
         api_key=api_key_val,
         api_base=api_base or None,
-        max_tokens=1200,
+        max_tokens=8000,
+        # cache=False,
         temperature=0.7,
     )
     dspy.configure(lm=teacher_lm)
