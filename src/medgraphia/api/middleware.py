@@ -1,9 +1,7 @@
 """
 Request-level middleware (Pure ASGI).
 
-AuditMiddleware
-───────────────
-For every incoming HTTP request:
+AuditMiddleware - For every incoming HTTP request:
 
   1. Generate a UUID4 request_id and attach it to:
      - structlog context vars  → all log lines during the request carry it
@@ -16,16 +14,8 @@ For every incoming HTTP request:
 
   3. Emit a structured access log on completion with method, path,
      status code, and elapsed milliseconds.
-
-Why Pure ASGI?
-──────────────
-Starlette's `BaseHTTPMiddleware` uses an internal asyncio.Queue to bridge the
-high-level `dispatch` method with the low-level ASGI interface. This breaks
-backpressure on `StreamingResponse` (like our SSE chat), potentially causing
-unbounded memory growth if the client is slow.
-
-This Pure ASGI implementation avoids the queue and task overhead.
 """
+
 from __future__ import annotations
 
 import time
@@ -60,8 +50,7 @@ class AuditMiddleware:
         request_id = str(uuid.uuid4())
         start_time = time.perf_counter()
 
-        # ── Context Initialisation ───────────────────────────────────────────
-        # Clear previous and bind current request context
+        # Context Initialisation
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(
             request_id=request_id,
@@ -69,8 +58,7 @@ class AuditMiddleware:
             path=scope["path"],
         )
 
-        # ── Request State ───────────────────────────────────────────────────
-        # Starlette/FastAPI Request objects look at scope["state"]
+        #  Request State
         if "state" not in scope:
             scope["state"] = {}
         scope["state"]["request_id"] = request_id
@@ -80,17 +68,12 @@ class AuditMiddleware:
                 # Inject X-Request-ID into response headers
                 headers = MutableHeaders(scope=message)
                 headers.append("X-Request-ID", request_id)
-            
+
             await send(message)
 
             if message["type"] == "http.response.body" and not message.get("more_body", False):
-                # Request is finished (last chunk of body sent)
-                # We can't easily get the status code here without wrapping 'send' 
-                # to catch http.response.start, but we'll log based on what we have.
-                # Actually, status is in http.response.start.
                 pass
 
-        # We need to capture the status code from http.response.start
         status_code = [200]  # mutable container to capture value from closure
 
         async def logging_send(message: Message) -> None:
@@ -98,7 +81,7 @@ class AuditMiddleware:
                 status_code[0] = message["status"]
                 headers = MutableHeaders(scope=message)
                 headers.append("X-Request-ID", request_id)
-            
+
             await send(message)
 
             if message["type"] == "http.response.body" and not message.get("more_body", False):

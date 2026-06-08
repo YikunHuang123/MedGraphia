@@ -1,6 +1,7 @@
 """
 Query-side NER + Entity Linking.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -22,6 +23,7 @@ _QUERY_SOURCE = SourceMeta(
 @dataclass
 class QueryEntities:
     """Result of query-side NER + entity linking."""
+
     query: str
     language: Language
     entities: list[Entity] = field(default_factory=list)
@@ -63,7 +65,7 @@ class QueryNERLinker:
         self._initialized = False
 
     @classmethod
-    def from_settings(cls) -> "QueryNERLinker":
+    def from_settings(cls) -> QueryNERLinker:
         """Build from global settings; models are loaded lazily on first call."""
         return cls()
 
@@ -123,6 +125,7 @@ class QueryNERLinker:
         if self._ner_pipeline is None:
             try:
                 from medgraphia.ingestion.ner.pipeline import build_pipeline_from_settings
+
                 self._ner_pipeline = build_pipeline_from_settings()
                 logger.info("query_ner_pipeline_loaded")
             except Exception as exc:
@@ -132,6 +135,7 @@ class QueryNERLinker:
         if self._entity_linker is None:
             try:
                 from medgraphia.ingestion.entity_linker import EntityLinker
+
                 self._entity_linker = EntityLinker.from_settings()
                 self._entity_linker.build_index()
                 logger.info("query_el_loaded")
@@ -145,6 +149,7 @@ class QueryNERLinker:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _query_to_chunk(text: str, language: Language) -> Chunk:
     """Wrap a raw query string into a minimal Chunk for the NER pipeline."""
@@ -182,13 +187,16 @@ def _detect_language(text: str) -> Language | None:
 
 class _NoopNER:
     """Fallback NER that returns the chunk unchanged."""
+
     def extract(self, chunk: Chunk) -> Chunk:
         return chunk
 
 
 class _NoopLinker:
     """Fallback entity linker that returns the chunk unchanged."""
+
     def link_chunk(self, chunk: Chunk) -> Chunk:
         return chunk
+
     def build_index(self) -> None:
         pass

@@ -10,14 +10,14 @@ DELETE /admin/keys/{prefix}   — Revoke a key by its 8-char prefix
 
 All endpoints are protected by `require_admin` (role == "admin").
 
-Pipeline execution strategy
-────────────────────────────
+Pipeline execution strategy:
 • Redis available (REDIS_URL set): job is enqueued via Arq and executed by
   the dedicated worker process.  The response includes a ``job_id`` that can
   be used with arq's native job-result API.
 • No Redis (REDIS_URL unset): falls back to asyncio.create_task running in
   the FastAPI process — identical behaviour, lower durability.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -28,16 +28,14 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 
 from medgraphia.api.auth import generate_api_key, register_key, require_admin
 from medgraphia.api.schemas import (
-    GraphStatsResponse,
-    PipelineStatusResponse,
     PipelineTriggerRequest,
 )
 from medgraphia.graph.queries import (
-    get_graph_stats,
-    list_api_keys,
     delete_api_keys_by_prefix,
+    get_graph_stats,
+    get_pipeline_status,
+    list_api_keys,
     upsert_pipeline_status,
-    get_pipeline_status
 )
 from medgraphia.logger import get_logger
 
@@ -52,6 +50,7 @@ _pipeline_task: asyncio.Task | None = None
 # ---------------------------------------------------------------------------
 # POST /admin/pipeline/trigger
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/pipeline/trigger",
@@ -72,7 +71,7 @@ async def trigger_pipeline(
     # Check the database to see if a run is already active anywhere
     current = await get_pipeline_status(body.domain)
     if current and current.get("stage") == "running":
-         raise HTTPException(
+        raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"A pipeline run for domain '{body.domain}' is already in progress.",
         )
@@ -133,6 +132,7 @@ async def trigger_pipeline(
 # GET /admin/pipeline/status
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/pipeline/status",
     summary="Current pipeline run status",
@@ -152,6 +152,7 @@ async def pipeline_status(
 # GET /admin/graph/stats
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/graph/stats",
     summary="Knowledge-graph node and relationship counts",
@@ -165,6 +166,7 @@ async def admin_graph_stats(
 # ---------------------------------------------------------------------------
 # POST /admin/keys — generate a new API key
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/keys",
@@ -190,6 +192,7 @@ async def create_api_key(
 # GET /admin/keys — list active keys
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/keys",
     summary="List active API key prefixes",
@@ -204,6 +207,7 @@ async def list_api_keys_endpoint(
 # ---------------------------------------------------------------------------
 # DELETE /admin/keys/{prefix} — revoke a key
 # ---------------------------------------------------------------------------
+
 
 @router.delete(
     "/keys/{prefix}",
@@ -223,9 +227,10 @@ async def delete_api_key(
 # Background pipeline runner
 # ---------------------------------------------------------------------------
 
+
 async def _run_pipeline_background(body: PipelineTriggerRequest) -> None:
     """Execute the build pipeline and update persistent status."""
-    
+
     async def _update_db(**kwargs: Any) -> None:
         await upsert_pipeline_status(body.domain, kwargs)
 
@@ -233,7 +238,7 @@ async def _run_pipeline_background(body: PipelineTriggerRequest) -> None:
         from medgraphia.ingestion.pipeline import BuildConfig, build_graph_flow
 
         await _update_db(stage="running", progress=0.05)
-        
+
         cfg = BuildConfig(
             domain=body.domain,
             pubmed_query=body.pubmed_query,

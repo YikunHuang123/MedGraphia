@@ -2,12 +2,13 @@
 Cypher query library.  All graph read/write operations live here so that
 the rest of the codebase never constructs Cypher strings inline.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
 
-from medgraphia.domain import Chunk, Entity, Relation, RawDocument, Session, Message
+from medgraphia.domain import Chunk, Entity, Message, RawDocument, Relation, Session
 from medgraphia.graph.client import get_session
 from medgraphia.logger import get_logger
 
@@ -17,6 +18,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 # Documents
 # ---------------------------------------------------------------------------
+
 
 async def upsert_document(doc: RawDocument) -> None:
     """Merge a Document node (update if doc_id already exists)."""
@@ -45,6 +47,7 @@ async def upsert_document(doc: RawDocument) -> None:
 # ---------------------------------------------------------------------------
 # Chunks
 # ---------------------------------------------------------------------------
+
 
 async def create_chunk(chunk: Chunk) -> None:
     """Create a Chunk node and link it to its parent Document."""
@@ -82,6 +85,7 @@ async def create_chunk(chunk: Chunk) -> None:
 # ---------------------------------------------------------------------------
 # Entities
 # ---------------------------------------------------------------------------
+
 
 async def merge_entity(entity: Entity) -> None:
     """
@@ -140,24 +144,27 @@ async def get_all_entities() -> list[dict[str, Any]]:
             result = await session.run(cypher)
             async for record in result:
                 if record["cui"] and record["label"]:
-                    entities.append({
-                        "cui": record["cui"],
-                        "label": record["label"],
-                        "entity_type": record["entity_type"] or "Unknown",
-                        "lang_zh": record["lang_zh"] or "",
-                        "lang_de": record["lang_de"] or "",
-                    })
+                    entities.append(
+                        {
+                            "cui": record["cui"],
+                            "label": record["label"],
+                            "entity_type": record["entity_type"] or "Unknown",
+                            "lang_zh": record["lang_zh"] or "",
+                            "lang_de": record["lang_de"] or "",
+                        }
+                    )
         logger.info("entity_fetch_done", count=len(entities))
     except Exception as exc:
         logger.warning("entity_fetch_failed", error=str(exc))
     return entities
+
 
 async def get_chunks_from_db(limit: int = 5000) -> list[Chunk]:
     """
     Fetch stored chunks and their associated entities from Neo4j.
     Enables resuming the pipeline at the Relation Extraction stage.
     """
-    from medgraphia.domain import SourceMeta, Language, Entity, EntityType
+    from medgraphia.domain import Entity, EntityType, Language, SourceMeta
 
     cypher = """
     MATCH (c:Chunk)
@@ -173,14 +180,16 @@ async def get_chunks_from_db(limit: int = 5000) -> list[Chunk]:
             c_node = record["c"]
             d_node = record["d"]
             e_nodes = record["entities"]
-            
+
             # Reconstruct SourceMeta
             source = SourceMeta(
                 source_id=c_node.get("source_id", "unknown"),
-                source_title=d_node.get("source_title", "Unknown Document") if d_node else "Unknown",
-                source_version=c_node.get("source_version", "1.0")
+                source_title=d_node.get("source_title", "Unknown Document")
+                if d_node
+                else "Unknown",
+                source_version=c_node.get("source_version", "1.0"),
             )
-            
+
             # Reconstruct Entity objects
             chunk_entities = []
             for e in e_nodes:
@@ -196,7 +205,7 @@ async def get_chunks_from_db(limit: int = 5000) -> list[Chunk]:
                             lang_labels={
                                 "zh": e.get("lang_zh", ""),
                                 "de": e.get("lang_de", ""),
-                            }
+                            },
                         )
                     )
 
@@ -211,10 +220,10 @@ async def get_chunks_from_db(limit: int = 5000) -> list[Chunk]:
                 page=c_node.get("page"),
                 char_offset=c_node.get("char_offset", 0),
                 source=source,
-                entities=chunk_entities
+                entities=chunk_entities,
             )
             chunks.append(chunk)
-            
+
     logger.info("chunks_fetched_from_db", count=len(chunks), with_entities=True)
     return chunks
 
@@ -222,6 +231,7 @@ async def get_chunks_from_db(limit: int = 5000) -> list[Chunk]:
 # ---------------------------------------------------------------------------
 # Relations
 # ---------------------------------------------------------------------------
+
 
 async def create_relation(relation: Relation) -> None:
     """
@@ -255,6 +265,7 @@ async def create_relation(relation: Relation) -> None:
 # Communities
 # ---------------------------------------------------------------------------
 
+
 async def upsert_community(community_id: str, summary: str, member_cuis: list[str]) -> None:
     """Create or update a Community node and link member entities."""
     cypher = """
@@ -284,6 +295,7 @@ async def upsert_community(community_id: str, summary: str, member_cuis: list[st
 # ---------------------------------------------------------------------------
 # Query-time reads
 # ---------------------------------------------------------------------------
+
 
 async def get_subgraph(cui: str, hops: int = 2) -> dict[str, Any]:
     """
@@ -368,6 +380,7 @@ async def get_graph_stats() -> dict[str, int]:
 # Chat Persistence
 # ---------------------------------------------------------------------------
 
+
 async def upsert_chat_session(session: Session) -> None:
     """Create or update a ChatSession node."""
     cypher = """
@@ -393,7 +406,6 @@ async def upsert_chat_session(session: Session) -> None:
 async def save_chat_message(message: Message) -> None:
     """
     Persist a ChatMessage and link it to its Session.
-    Citations are stored as JSON on the message for now (Phase 8 MVP).
     """
     import json
 
@@ -424,8 +436,9 @@ async def save_chat_message(message: Message) -> None:
 
 async def get_chat_session(session_id: str) -> Session | None:
     """Retrieve a full Session with all its Messages from Neo4j."""
-    from medgraphia.domain import Session, Message, Language, Citation
     import json
+
+    from medgraphia.domain import Citation, Language, Message, Session
 
     cypher = """
     MATCH (s:ChatSession {session_id: $session_id})
@@ -501,6 +514,7 @@ async def list_chat_sessions(user_id: str = "anonymous") -> list[dict[str, Any]]
 # Semantic Memory (User Interests)
 # ---------------------------------------------------------------------------
 
+
 async def update_user_interests(user_id: str, cuis: list[str], decay_factor: float = 0.9) -> None:
     """
     Update the user's interest in a list of entities.
@@ -550,6 +564,7 @@ async def get_user_top_interests(user_id: str, limit: int = 10) -> list[str]:
 # ---------------------------------------------------------------------------
 # Admin & Auth Persistence
 # ---------------------------------------------------------------------------
+
 
 async def create_api_key_node(key_hash: str, prefix: str, role: str) -> None:
     """Persist a hashed API key and its metadata."""
@@ -632,8 +647,9 @@ async def get_pipeline_status(domain: str) -> dict[str, Any] | None:
 
 def _convert_neo4j_types(data: Any) -> Any:
     """Recursively convert Neo4j-specific types (like DateTime) to standard Python types."""
-    from neo4j.time import DateTime
     from datetime import datetime
+
+    from neo4j.time import DateTime
 
     if isinstance(data, dict):
         return {k: _convert_neo4j_types(v) for k, v in data.items()}
@@ -642,8 +658,12 @@ def _convert_neo4j_types(data: Any) -> Any:
     elif isinstance(data, DateTime):
         # Neo4j DateTime -> Standard Python datetime
         return datetime(
-            data.year, data.month, data.day,
-            data.hour, data.minute, int(data.second),
-            tzinfo=data.tzinfo
+            data.year,
+            data.month,
+            data.day,
+            data.hour,
+            data.minute,
+            int(data.second),
+            tzinfo=data.tzinfo,
         )
     return data

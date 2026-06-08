@@ -14,14 +14,16 @@ LiteLLM handles:
   - Token counting per request
   - Async and sync call modes
 """
+
 from __future__ import annotations
 
 import json
 import re
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, AsyncIterator
+from typing import Any
 
 from medgraphia.logger import get_logger
 
@@ -31,6 +33,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 # Provider enum
 # ---------------------------------------------------------------------------
+
 
 class LLMProvider(str, Enum):
     OPENAI = "openai"
@@ -45,15 +48,17 @@ class LLMProvider(str, Enum):
 # Request / response dataclasses
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class CompletionRequest:
     """A single-turn completion request."""
+
     system_prompt: str
     user_prompt: str
-    model_id: str = ""          # explicit override; empty → use gateway default
+    model_id: str = ""  # explicit override; empty → use gateway default
     temperature: float = 0.1
     max_tokens: int = 2048
-    json_mode: bool = False     # request JSON object output when provider supports it
+    json_mode: bool = False  # request JSON object output when provider supports it
     stream: bool = False
     mock_response: str | None = None
 
@@ -61,6 +66,7 @@ class CompletionRequest:
 @dataclass
 class CompletionResponse:
     """Result from a single-turn completion call."""
+
     text: str
     model_used: str
     prompt_tokens: int = 0
@@ -81,6 +87,7 @@ class CompletionResponse:
 # Internal: provider → litellm model string
 # ---------------------------------------------------------------------------
 
+
 def _build_litellm_model_id(provider: LLMProvider, model_name: str) -> str:
     """
     Map (provider, model_name) → the model string litellm expects.
@@ -90,24 +97,24 @@ def _build_litellm_model_id(provider: LLMProvider, model_name: str) -> str:
     """
     if not model_name:
         return ""
-        
+
     # If the model name already contains a slash, assume it's already prefixed
     if "/" in model_name:
         return model_name
 
     match provider:
         case LLMProvider.OPENAI:
-            return model_name                       # "gpt-4o", "gpt-4o-mini", …
+            return model_name  # "gpt-4o", "gpt-4o-mini", …
         case LLMProvider.ANTHROPIC:
-            return f"anthropic/{model_name}"        # "anthropic/claude-3-5-sonnet-20241022"
+            return f"anthropic/{model_name}"  # "anthropic/claude-3-5-sonnet-20241022"
         case LLMProvider.DEEPSEEK:
-            return f"deepseek/{model_name}"         # "deepseek/deepseek-chat"
+            return f"deepseek/{model_name}"  # "deepseek/deepseek-chat"
         case LLMProvider.GEMINI:
-            return f"gemini/{model_name}"           # "gemini/gemini-1.5-pro"
+            return f"gemini/{model_name}"  # "gemini/gemini-1.5-pro"
         case LLMProvider.GROQ:
-            return f"groq/{model_name}"             # "groq/llama-3.3-70b-versatile"
+            return f"groq/{model_name}"  # "groq/llama-3.3-70b-versatile"
         case LLMProvider.OLLAMA:
-            return f"ollama/{model_name}"           # "ollama/qwen2.5:7b"
+            return f"ollama/{model_name}"  # "ollama/qwen2.5:7b"
         case _:
             return model_name
 
@@ -166,12 +173,18 @@ def _build_extra_kwargs(provider: LLMProvider, cfg: Any) -> dict[str, Any]:
 # Providers that support JSON-mode response_format
 # ---------------------------------------------------------------------------
 
-_JSON_MODE_PROVIDERS = {LLMProvider.OPENAI, LLMProvider.DEEPSEEK, LLMProvider.GEMINI, LLMProvider.GROQ}
+_JSON_MODE_PROVIDERS = {
+    LLMProvider.OPENAI,
+    LLMProvider.DEEPSEEK,
+    LLMProvider.GEMINI,
+    LLMProvider.GROQ,
+}
 
 
 # ---------------------------------------------------------------------------
 # LiteLLMGateway — public interface
 # ---------------------------------------------------------------------------
+
 
 class LiteLLMGateway:
     """
@@ -179,7 +192,7 @@ class LiteLLMGateway:
 
     Instantiate via factory methods::
 
-        # Use global config (respects llm_provider / llm_model env vars)
+        # Use global config (respects default_llm_provider / default_llm_model env vars)
         gw = LiteLLMGateway.from_settings()
 
         # Explicit provider + model
@@ -222,23 +235,24 @@ class LiteLLMGateway:
         cls,
         provider_override: str | None = None,
         model_override: str | None = None,
-    ) -> "LiteLLMGateway":
+    ) -> LiteLLMGateway:
         """
         Build a gateway from Settings (reads .env / env vars).
 
         provider_override / model_override take precedence over config values.
         """
         from medgraphia.config import get_settings
+
         cfg = get_settings()
 
-        raw_provider = provider_override or cfg.llm_provider
+        raw_provider = provider_override or cfg.default_llm_provider
         try:
             provider = LLMProvider(raw_provider)
         except ValueError:
             logger.warning("unknown_llm_provider", value=raw_provider, fallback="ollama")
             provider = LLMProvider.OLLAMA
 
-        model_name = model_override or cfg.llm_model
+        model_name = model_override or cfg.default_llm_model
         extra = _build_extra_kwargs(provider, cfg)
         return cls(provider=provider, model_name=model_name, extra_kwargs=extra)
 
@@ -247,9 +261,10 @@ class LiteLLMGateway:
         cls,
         provider: LLMProvider,
         model_name: str,
-    ) -> "LiteLLMGateway":
+    ) -> LiteLLMGateway:
         """Build a gateway for an explicit provider + model pair."""
         from medgraphia.config import get_settings
+
         cfg = get_settings()
         extra = _build_extra_kwargs(provider, cfg)
         return cls(provider=provider, model_name=model_name, extra_kwargs=extra)
@@ -409,6 +424,7 @@ class LiteLLMGateway:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _build_messages(
     system_prompt: str,

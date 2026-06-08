@@ -1,11 +1,12 @@
 """
 DSPy Predictor prompt modules.
 """
+
 from __future__ import annotations
 
 import dspy
 from pydantic import BaseModel, Field
-from medgraphia.domain.base import Language, QueryType
+
 
 class MedicalAnswer(BaseModel):
     answer: str = Field(..., description="Response text in the requested language")
@@ -17,6 +18,7 @@ class MedicalAnswer(BaseModel):
         default="",
         description="Mandatory safety disclaimer; required for clinical/drug/multihop scenarios",
     )
+
 
 class GenerateClinicalAnswer(dspy.Signature):
     """Answer the medical question in the requested language using ONLY the provided database.
@@ -32,12 +34,12 @@ class GenerateClinicalAnswer(dspy.Signature):
     administrative records, or medical conditions completely unrelated to the question).
     Never refuse simply because context is clinical rather than definitional, or because it is
     written in a different language than the question."""
-    
+
     system_instruction: str = dspy.InputField(desc="Core role and persona for the assistant")
     context: str = dspy.InputField(desc="Numbered medical context paragraphs")
     history: str = dspy.InputField(desc="Recent conversation history")
     question: str = dspy.InputField(desc="The current medical question")
     target_language: str = dspy.InputField(desc="The language to respond in")
     no_info_message: str = dspy.InputField(desc="The message to show if no info is found")
-    
+
     result: MedicalAnswer = dspy.OutputField()

@@ -1,22 +1,7 @@
 """
 Client-side conversation history for the Chat page.
-
-The backend issues one `session_id` per conversation, but the chat history
-itself is not exposed by an API endpoint yet, so we track multiple
-conversations in `st.session_state["conversations"]`. Each entry holds:
-
-    {
-        "id":         "uuid issued by backend on first reply",
-        "title":      "auto-derived from first user message",
-        "language":   "en|zh|de",
-        "messages":   [{role, content, citations, model_used, ts}, …],
-        "created_at": epoch seconds,
-        "updated_at": epoch seconds,
-    }
-
-This is intentionally lightweight — survives page navigation within the
-same browser tab; lost on full reload (acceptable for a Phase 9 MVP).
 """
+
 from __future__ import annotations
 
 import time
@@ -24,7 +9,6 @@ import uuid
 from typing import Any
 
 import streamlit as st
-
 
 _STATE_KEY = "conversations"
 _ACTIVE_KEY = "active_conv_id"
@@ -59,7 +43,7 @@ def new_conversation(language: str = "en") -> dict[str, Any]:
     now = time.time()
     conv = {
         "id": cid,
-        "backend_session_id": None,   # filled in after first reply
+        "backend_session_id": None,  # filled in after first reply
         "title": "New conversation",
         "language": language,
         "messages": [],
@@ -119,12 +103,13 @@ def sync_from_backend(client: Any) -> None:
                 title = s.get("first_message") or "Untitled Conversation"
                 if len(title) > 40:
                     title = title[:37] + "..."
-                
+
                 # Convert ISO string to epoch if needed
                 updated_at = s.get("updated_at", time.time())
                 if isinstance(updated_at, str):
                     try:
                         from datetime import datetime
+
                         updated_at = datetime.fromisoformat(updated_at).timestamp()
                     except:
                         updated_at = time.time()
@@ -134,10 +119,10 @@ def sync_from_backend(client: Any) -> None:
                     "backend_session_id": sid,
                     "title": title,
                     "language": s.get("language", "en"),
-                    "messages": [], # Messages will be lazy-loaded when active
+                    "messages": [],  # Messages will be lazy-loaded when active
                     "created_at": updated_at,
                     "updated_at": updated_at,
-                    "is_lazy": True, # Flag indicating messages need fetching
+                    "is_lazy": True,  # Flag indicating messages need fetching
                 }
         st.session_state["_history_synced"] = True
     except Exception as e:
@@ -149,19 +134,21 @@ def load_full_session(client: Any, conv_id: str) -> None:
     conv = _store().get(conv_id)
     if not conv or not conv.get("is_lazy"):
         return
-    
+
     try:
         full_data = client.get_session(conv["backend_session_id"])
         # Map backend message model to UI message dict
         messages = []
         for m in full_data.get("messages", []):
-            messages.append({
-                "role": m["role"],
-                "content": m["content"],
-                "citations": m.get("citations", []),
-                "model_used": m.get("model_used", ""),
-                "ts": m.get("created_at") or time.time(),
-            })
+            messages.append(
+                {
+                    "role": m["role"],
+                    "content": m["content"],
+                    "citations": m.get("citations", []),
+                    "model_used": m.get("model_used", ""),
+                    "ts": m.get("created_at") or time.time(),
+                }
+            )
         conv["messages"] = messages
         conv["is_lazy"] = False
     except Exception as e:

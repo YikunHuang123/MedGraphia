@@ -8,12 +8,15 @@ Model:  BAAI/bge-reranker-v2-m3
   - 568M parameters (manageable on CPU for small N)
   - FlagEmbedding integration: FlagReranker class
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
 
 from medgraphia.config import settings
+from medgraphia.domain.base import QueryType
+from medgraphia.generation.llm_router import ModelTier
 from medgraphia.logger import get_logger
 from medgraphia.retrieval.fusion import FusedItem, FusionResult
 
@@ -22,11 +25,10 @@ logger = get_logger(__name__)
 _DEFAULT_MODEL = "BAAI/bge-reranker-v2-m3"
 
 
-from medgraphia.domain.base import QueryType
-
 # ---------------------------------------------------------------------------
 # Output type
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class RerankedResult:
@@ -34,17 +36,21 @@ class RerankedResult:
     Final result after cross-encoder reranking.
 
     Attributes:
-        items         — Re-ranked FusedItem list (best first).
-        query         — Original query text.
-        reranked      — True if reranking actually ran; False if it was skipped.
-        query_type    — The intent classified by the router (useful for generation).
+        items            — Re-ranked FusedItem list (best first).
+        query            — Original query text.
+        reranked         — True if reranking actually ran; False if it was skipped.
+        query_type       — The intent classified by the router (useful for generation).
+        complexity_tier  — DSPy-assessed routing tier from the rewriter; None means
+                           the router will fall back to the static QueryType→tier table.
     """
+
     items: list[FusedItem] = field(default_factory=list)
     query: str = ""
     reranked: bool = False
     query_type: QueryType = QueryType.PATIENT_FAQ
     linked_cuis: list[str] = field(default_factory=list)
     unlinked_mentions: list[str] = field(default_factory=list)
+    complexity_tier: ModelTier | None = None
 
     def texts(self) -> list[str]:
         return [it.text for it in self.items]
@@ -56,6 +62,7 @@ class RerankedResult:
 # ---------------------------------------------------------------------------
 # Reranker
 # ---------------------------------------------------------------------------
+
 
 class Reranker:
     """
@@ -86,7 +93,7 @@ class Reranker:
         self._backend: str | None = None  # "flag" | "sentence_transformers"
 
     @classmethod
-    def from_settings(cls) -> "Reranker":
+    def from_settings(cls) -> Reranker:
         return cls(threshold=settings.reranker_threshold)
 
     # ------------------------------------------------------------------
@@ -145,10 +152,9 @@ class Reranker:
         )
 
         # Apply threshold filtering
-        filtered_ranked = [
-            (score, item) for score, item in ranked
-            if score >= self._threshold
-        ][:top_k]
+        filtered_ranked = [(score, item) for score, item in ranked if score >= self._threshold][
+            :top_k
+        ]
 
         reranked_items = []
         for score, item in filtered_ranked:
@@ -179,24 +185,24 @@ class Reranker:
 
         # ── Determine best available device ──────────────────────────────────
         import torch
+
         device = "cpu"
         if torch.backends.mps.is_available():
             device = "mps"
         elif torch.cuda.is_available():
             device = "cuda"
-        
+
         logger.info("reranker_device_selected", device=device)
 
         # Attempt 1: FlagEmbedding FlagReranker (preferred)
         try:
             from FlagEmbedding import FlagReranker  # type: ignore[import]
-            logger.info("reranker_loading", model=self._model_name, backend="FlagEmbedding", device=device)
-            # FlagReranker takes 'devices' as a string or list
-            self._model = FlagReranker(
-                self._model_name, 
-                use_fp16=self._use_fp16, 
-                devices=device
+
+            logger.info(
+                "reranker_loading", model=self._model_name, backend="FlagEmbedding", device=device
             )
+            # FlagReranker takes 'devices' as a string or list
+            self._model = FlagReranker(self._model_name, use_fp16=self._use_fp16, devices=device)
             self._backend = "flag"
             logger.info("reranker_loaded", backend="FlagEmbedding")
             return
@@ -208,7 +214,13 @@ class Reranker:
         # Attempt 2: sentence-transformers CrossEncoder
         try:
             from sentence_transformers import CrossEncoder  # type: ignore[import]
-            logger.info("reranker_loading", model=self._model_name, backend="sentence-transformers", device=device)
+
+            logger.info(
+                "reranker_loading",
+                model=self._model_name,
+                backend="sentence-transformers",
+                device=device,
+            )
             self._model = CrossEncoder(
                 self._model_name,
                 max_length=512,

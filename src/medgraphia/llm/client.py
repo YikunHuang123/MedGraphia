@@ -4,11 +4,12 @@ Unified LLM client factory for MedGraphia.
 Provides integration with pydantic-ai for structured output and
 maintains a robust JSON parser for legacy/fallback use cases.
 """
+
 from __future__ import annotations
 
 import json
 import re
-from typing import Any, Type, TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 from pydantic_ai.models import Model
@@ -26,22 +27,24 @@ from medgraphia.llm.gateway import LLMProvider
 # pydantic-ai Model Factory
 # ---------------------------------------------------------------------------
 
+
 def get_model(model_override: str | None = None, provider_override: str | None = None) -> Model:
     """
     Create a pydantic-ai Model instance based on project settings.
     Supports OpenAI, DeepSeek, Anthropic, Gemini, Groq, and Ollama.
     """
     from medgraphia.config import get_settings
+
     cfg = get_settings()
-    
+
     # Parse provider: override -> global default
-    p_str = provider_override or cfg.llm_provider
+    p_str = provider_override or cfg.default_llm_provider
     try:
         provider = LLMProvider(p_str)
     except ValueError:
         provider = LLMProvider.OLLAMA
 
-    model_name = model_override or cfg.llm_model
+    model_name = model_override or cfg.default_llm_model
     base_url = cfg.llm_base_url
 
     def get_val(attr_name: str) -> str | None:
@@ -53,6 +56,7 @@ def get_model(model_override: str | None = None, provider_override: str | None =
     # Handle Anthropic separately as pydantic-ai uses a specific class
     if provider == LLMProvider.ANTHROPIC:
         from pydantic_ai.models.anthropic import AnthropicModel
+
         key = get_val("anthropic_api_key")
         return AnthropicModel(model_name, api_key=key or "dummy")
 
@@ -68,10 +72,12 @@ def get_model(model_override: str | None = None, provider_override: str | None =
         case LLMProvider.GROQ:
             from pydantic_ai.models.groq import GroqModel
             from pydantic_ai.providers.groq import GroqProvider
+
             key = get_val("groq_api_key") or "dummy"
             return GroqModel(model_name, provider=GroqProvider(api_key=key))
         case LLMProvider.GEMINI:
             from pydantic_ai.models.gemini import GeminiModel
+
             return GeminiModel(model_name, api_key=get_val("gemini_api_key") or "dummy")
         case LLMProvider.OLLAMA:
             base_url = base_url or "http://localhost:11434/v1"
@@ -79,6 +85,7 @@ def get_model(model_override: str | None = None, provider_override: str | None =
 
     # pydantic-ai v1.104+ reads these from environment variables or explicit config
     import os
+
     if api_key:
         os.environ["OPENAI_API_KEY"] = api_key
     if base_url:
@@ -90,6 +97,7 @@ def get_model(model_override: str | None = None, provider_override: str | None =
 # ---------------------------------------------------------------------------
 # Legacy LLMClient (Updated to be more robust)
 # ---------------------------------------------------------------------------
+
 
 class LLMClient:
     """
@@ -118,16 +126,16 @@ class LLMClient:
         Asynchronous JSON completion via litellm.
         """
         import litellm
-        
+
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-        
+
         # Prepare litellm call
         prefix = "openai" if self._provider in ["openai", "deepseek", "local"] else self._provider
         model_id = f"{prefix}/{self._model_name}"
-        
+
         try:
             response = await litellm.acompletion(
                 model=model_id,
@@ -136,7 +144,9 @@ class LLMClient:
                 max_tokens=self._max_tokens,
                 api_key=self._api_key,
                 api_base=self._base_url,
-                response_format={"type": "json_object"} if self._provider in ["openai", "deepseek"] else None
+                response_format={"type": "json_object"}
+                if self._provider in ["openai", "deepseek"]
+                else None,
             )
             raw = response.choices[0].message.content or ""
             return _parse_json(raw)
@@ -145,19 +155,20 @@ class LLMClient:
             return {}
 
     @classmethod
-    def from_settings(cls, model_override: str | None = None) -> "LLMClient":
+    def from_settings(cls, model_override: str | None = None) -> LLMClient:
         from medgraphia.config import get_settings
+
         cfg = get_settings()
-        
+
         api_key = ""
-        if cfg.llm_provider == "deepseek":
+        if cfg.default_llm_provider == "deepseek":
             api_key = cfg.deepseek_api_key.get_secret_value()
-        elif cfg.llm_provider == "openai":
+        elif cfg.default_llm_provider == "openai":
             api_key = cfg.openai_api_key.get_secret_value()
-            
+
         return cls(
-            provider=cfg.llm_provider,
-            model=model_override or cfg.llm_model,
+            provider=cfg.default_llm_provider,
+            model=model_override or cfg.default_llm_model,
             api_key=api_key,
             base_url=cfg.llm_base_url,
             temperature=cfg.llm_temperature,
@@ -169,26 +180,27 @@ class LLMClient:
 # Robust JSON Extraction
 # ---------------------------------------------------------------------------
 
+
 def _parse_json(text: str) -> dict[str, Any]:
     """
     Extracts the first valid JSON object from a string.
     More robust than simple regex or bracket counting.
     """
     text = text.strip()
-    
+
     # 1. Try to find content within markdown fences
     match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
     content = match.group(1) if match else text
-    
+
     # 2. Locate the first { and last }
-    start = content.find('{')
-    end = content.rfind('}')
-    
+    start = content.find("{")
+    end = content.rfind("}")
+
     if start == -1 or end == -1:
         return {}
-        
-    json_str = content[start:end+1]
-    
+
+    json_str = content[start : end + 1]
+
     try:
         # 3. Standard parse
         return json.loads(json_str)

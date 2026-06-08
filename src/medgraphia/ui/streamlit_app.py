@@ -8,6 +8,7 @@ In Docker:
     docker compose up --build
     Browse to http://localhost:8501
 """
+
 from __future__ import annotations
 
 import os
@@ -24,16 +25,12 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from api_client import APIError, MedGraphiaClient  # noqa: E402
+from api_client import MedGraphiaClient  # noqa: E402
 from components import chat_history  # noqa: E402
 from components.styles import (  # noqa: E402
     banner,
-    connection_pill,
     inject_theme,
-    render_brand,
-    status_badge,
 )
-
 
 # ---------------------------------------------------------------------------
 # Page config — favicon uses the brand SVG via data URI
@@ -52,12 +49,13 @@ inject_theme()
 # Session-state bootstrap
 # ---------------------------------------------------------------------------
 
+
 def _init_state() -> None:
     defaults: dict[str, Any] = {
         "api_base_url": os.getenv("API_BASE_URL", "http://localhost:8058"),
-        "api_key":      os.getenv("MEDGRAPHIA_API_KEY", ""),
-        "admin_key":    os.getenv("MEDGRAPHIA_ADMIN_KEY", ""),
-        "conversations": {},        # client-side multi-conversation store
+        "api_key": os.getenv("MEDGRAPHIA_API_KEY", ""),
+        "admin_key": os.getenv("MEDGRAPHIA_ADMIN_KEY", ""),
+        "conversations": {},  # client-side multi-conversation store
         "active_conv_id": None,
         "last_subgraph": None,
         "_health_ts": 0.0,
@@ -75,11 +73,14 @@ from components.sidebar import render_common_sidebar  # noqa: E402
 # Cached resources / data
 # ---------------------------------------------------------------------------
 
+
 @st.cache_resource
 def get_client(base_url: str, api_key: str, admin_key: str) -> MedGraphiaClient:
     """Persistent HTTP client (cached by credentials triplet)."""
     return MedGraphiaClient(
-        base_url=base_url, api_key=api_key, admin_key=admin_key,
+        base_url=base_url,
+        api_key=api_key,
+        admin_key=admin_key,
     )
 
 
@@ -92,9 +93,7 @@ def current_client() -> MedGraphiaClient:
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _graph_stats_cached(
-    base_url: str, api_key: str, admin_key: str
-) -> dict[str, int]:
+def _graph_stats_cached(base_url: str, api_key: str, admin_key: str) -> dict[str, int]:
     with MedGraphiaClient(base_url=base_url, api_key=api_key, admin_key=admin_key) as client:
         return client.graph_stats()
 
@@ -128,12 +127,11 @@ try:
     )
 except Exception as exc:
     st.warning(
-        f"Could not load graph statistics — verify your API key / connection. "
-        f"Details: {exc}"
+        f"Could not load graph statistics — verify your API key / connection. Details: {exc}"
     )
 
 m1, m2, m3 = st.columns(3)
-m1.metric("Graph nodes",   f"{stats.get('nodes', 0):,}")
+m1.metric("Graph nodes", f"{stats.get('nodes', 0):,}")
 m2.metric("Relationships", f"{stats.get('relations', 0):,}")
 m3.metric(
     "Conversations",
@@ -149,22 +147,28 @@ st.markdown(
 )
 
 _TILES = [
-    ("Chat",
-     "Stream traceable answers in EN / ZH / DE with inline citations and "
-     "conversation history.",
-     "Chat"),
-    ("Graph Explorer",
-     "Search a disease, drug or gene then walk its 1–3 hop neighbourhood "
-     "with an interactive graph.",
-     "Graph_Explorer"),
-    ("Dashboard",
-     "Backend liveness, vector-store readiness, and a per-label breakdown of "
-     "the knowledge graph.",
-     "Dashboard"),
-    ("Admin",
-     "Kick off ingestion pipelines, monitor progress, and manage user / "
-     "admin API keys.",
-     "Admin"),
+    (
+        "Chat",
+        "Stream traceable answers in EN / ZH / DE with inline citations and conversation history.",
+        "Chat",
+    ),
+    (
+        "Graph Explorer",
+        "Search a disease, drug or gene then walk its 1–3 hop neighbourhood "
+        "with an interactive graph.",
+        "Graph_Explorer",
+    ),
+    (
+        "Dashboard",
+        "Backend liveness, vector-store readiness, and a per-label breakdown of "
+        "the knowledge graph.",
+        "Dashboard",
+    ),
+    (
+        "Admin",
+        "Kick off ingestion pipelines, monitor progress, and manage user / admin API keys.",
+        "Admin",
+    ),
 ]
 
 cols = st.columns(4)
@@ -182,7 +186,7 @@ for col, (title, desc, _page) in zip(cols, _TILES):
         )
 
 # ── Sync history from backend ──────────────────────────────────────────────
-if (st.session_state.get("api_key") or st.session_state.get("admin_key")):
+if st.session_state.get("api_key") or st.session_state.get("admin_key"):
     chat_history.sync_from_backend(current_client())
 
 # ── Recent conversations ───────────────────────────────────────────────────
@@ -212,10 +216,7 @@ if convs:
                 chat_history.delete_conversation(c["id"])
                 st.rerun()
 else:
-    st.info(
-        "No conversations yet. Open **Chat** in the sidebar to start your "
-        "first one."
-    )
+    st.info("No conversations yet. Open **Chat** in the sidebar to start your first one.")
 
 
 # ── Disclaimer ─────────────────────────────────────────────────────────────

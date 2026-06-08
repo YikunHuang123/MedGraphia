@@ -2,6 +2,7 @@
 Structured logging setup using structlog.
 Call configure_logging() once at application startup.
 """
+
 from __future__ import annotations
 
 import logging
@@ -37,7 +38,9 @@ def configure_logging(level: str = "INFO") -> None:
     formatter = structlog.stdlib.ProcessorFormatter(
         processors=[
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            structlog.dev.ConsoleRenderer() if sys.stderr.isatty() else structlog.processors.JSONRenderer(),
+            structlog.dev.ConsoleRenderer()
+            if sys.stderr.isatty()
+            else structlog.processors.JSONRenderer(),
         ],
         foreign_pre_chain=shared_processors,
     )

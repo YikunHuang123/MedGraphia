@@ -1,7 +1,7 @@
 """
 Multi-language medical NER pipeline.
 
-Two-stage design (mirrors architecture doc §2.3):
+Two-stage design:
   Stage 1 — GLiNER zero-shot coarse pass (fast, multilingual)
   Stage 2 — BERT domain model precision pass (optional; skipped if model unavailable)
 
@@ -12,6 +12,7 @@ Deduplication rule when spans from both stages overlap:
   • Same entity type → keep the span with the higher confidence score
   • Different entity type → keep both (ambiguity resolved downstream by EL)
 """
+
 from __future__ import annotations
 
 from medgraphia.domain import Chunk, Entity, EntityType, Language
@@ -92,7 +93,7 @@ class MedicalNERPipeline:
         bert_spans = self._bert.predict(text, language)
 
         combined = _merge_spans(gliner_spans, bert_spans)
-        
+
         # Final pass: merge adjacent fragments (handle subword splitting)
         final_merged = self._merge_adjacent_spans(combined)
 
@@ -105,12 +106,11 @@ class MedicalNERPipeline:
         # Sort by start offset
         sorted_spans = sorted(spans, key=lambda s: s.start)
         merged = []
-        
+
         current = sorted_spans[0]
         for next_span in sorted_spans[1:]:
             # If spans are of same type and very close (0 or 1 char gap)
-            if (next_span.entity_type == current.entity_type and 
-                next_span.start <= current.end + 1):
+            if next_span.entity_type == current.entity_type and next_span.start <= current.end + 1:
                 # Merge them
                 new_text = current.text + next_span.text
                 current = MentionSpan.from_text(
@@ -119,7 +119,7 @@ class MedicalNERPipeline:
                     end=next_span.end,
                     entity_type=current.entity_type,
                     confidence=max(current.confidence, next_span.confidence),
-                    source=f"{current.source}+{next_span.source}"
+                    source=f"{current.source}+{next_span.source}",
                 )
             else:
                 merged.append(current)
@@ -146,11 +146,11 @@ class MedicalNERPipeline:
 
             # Build a provisional CUI that entity_linker.py will replace
             prov_cui = f"{_MENTION_PREFIX}{span.normalized}"
-            
+
             # Ensure the entity_type matches the domain's expected string case
             # (e.g., "drug" -> "Drug")
             etype = span.entity_type
-            
+
             result.append(
                 Entity(
                     cui=prov_cui,
@@ -167,6 +167,7 @@ class MedicalNERPipeline:
 # ---------------------------------------------------------------------------
 # Span merging / deduplication helpers
 # ---------------------------------------------------------------------------
+
 
 def _merge_spans(
     primary: list[MentionSpan],
@@ -201,6 +202,7 @@ def _merge_spans(
 def build_pipeline_from_settings() -> MedicalNERPipeline:
     """Convenience factory that reads config.py settings."""
     from medgraphia.config import get_settings
+
     cfg = get_settings()
     return MedicalNERPipeline(
         gliner_model=cfg.ner_gliner_model,

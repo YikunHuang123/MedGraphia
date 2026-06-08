@@ -20,6 +20,7 @@ traceable clinical AI brain.
 ## 📋 Table of Contents
 
 - [Features](#-features)
+- [LLM Core Functional Capabilities](#-llm-core-functional-capabilities)
 - [Architecture](#-architecture)
 - [Knowledge Graph Schema](#-knowledge-graph-schema)
 - [Tech Stack](#-tech-stack)
@@ -42,7 +43,7 @@ traceable clinical AI brain.
 |-----------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 🧠 Advanced GraphRAG Engine | A deep implementation of GraphRAG principles: <br>• **Local Search**: NER-driven subgraph traversal (1-2 hops) for precise clinical triples.<br>• **Global Search**: **Leiden algorithm** community detection + LLM-generated hierarchical summaries for cross-corpus synthesis.<br>• **Hybrid RRF**: Merging graph traversal, dense/sparse vector search, and community insights via Reciprocal Rank Fusion.<br>• **Semantic Glue**: All data is anchored to MeSH CUIs, enabling the graph to act as a cross-lingual and cross-document relational bridge.                                                                                                                                |
 | 🌐 Multilingual (ZH / EN / DE) align                            | All surface forms of the same concept ("心肌梗死 / myocardial infarction / Myokardinfarkt") are aligned to a single CUI (MeSH ID) via SapBERT-XLMR for graph retrieval. At query time, **multilingual expansion** (Step 0.5) translates the query into all three corpus languages via `QueryTranslator` and runs parallel per-language Qdrant searches with quota-based merging                                                                                                                                                                                                                                                                                                                |
-| 🔬️ DSPy-driven Prompt Optimization                    | Use **DSPy** to manage and optimize prompt. Optimization strategies include:<br>• **Adversarial Few-Shot Bootstrapping**: Tuning via high-quality ambiguous/negative samples.<br>• **Explicit Reasoning Chain (CoT) Optimization**: Hardcoding medical logic into reasoning traces to forbid speculative answering.<br>• **Minimalist Response Enforcement**: Training the model to avoid summarizing irrelevant context noise.<br>• **Semantic Mismatch Detection**: Fine-tuning the boundary between grounded knowledge and retrieval noise.<br>• **Cross-Language Synthesis Training**: Few-shot demos explicitly teach the LLM to translate and synthesize foreign-language context paragraphs. |
+| 🔬️ DSPy-driven Prompt Optimization                    | Use **DSPy** to manage and optimize prompts. Optimization strategies include:<br>• **Automated Prompt Compilation**: Using `BootstrapFewShot` and `MIPROv2` to automatically select and inject the best reasoning traces (CoT) into the prompt.<br>• **Synthetic Data Factory**: Built-in pipeline to reverse-engineer high-quality, multilingual QA pairs from grounded graph chunks.<br>• **Adversarial Tuning**: Defending against false pronouns and hallucinated knowledge via explicitly negative training examples.<br>• **Clinical Tiering**: The Rewriter is trained to simultaneously condense queries and classify their clinical complexity (SMALL/MEDIUM/LARGE) for the LLM Router. |
 | ⏳ Long-Short Term Memory System                                 | • **Short-Term:** LLM-based Contextual Query Rewriting resolves pronouns across recent chat turns into standalone queries. <br>• **Long-Term:** Async Neo4j updates build cross-session user profiles with an **exponential time-decay algorithm** graph edge, enabling language-agnostic personalization.                                                                                                                                                                                                                                                                                                                                                                                 |
 | 🏥 Two-Stage Cascade NER & Entity Linking                       | GLiNER zero-shot multilingual coarse pass + language-specific BERT precision pass (biomedical-ner-all EN, DE / bert-base-chinese-medical-ner ZH) → SapBERT-XLMR linking to CUI (MeSH ID)                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ⚡ Schema-Constrained LLM Relation Extraction                    | LLM relation extraction limited to a closed medical schema (TREATS, CAUSES, INTERACTS_WITH, DOSAGE_FOR…) — no hallucinated relationship types                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -54,6 +55,52 @@ traceable clinical AI brain.
 | 📊 RAGAS Evaluation                                             | Standardized evaluation framework using RAGAS; support for automated synthetic medical testset generation with reasoning evolution; offline evaluation of RAG pipeline metrics (Faithfulness, Relevance, Precision, Recall)                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ⚡ Redis-Backed NER Result Cache                                | Query-side NER + Entity Linking results (GLiNER → SapBERT-XLMR → MeSH CUI) are persisted in Redis. Repeated or concurrently-identical queries skip BERT inference entirely, cutting routing latency from **300–500 ms → 5 ms**.  |
 | 🔄 Arq Pipeline Task Queue                                      | The offline build pipeline is dispatched as a durable **Arq** task (Redis-backed) executed by a dedicated worker process. |
+
+---
+
+### 🚀 Technical Deep Dives
+
+#### **1. Cross-Lingual Ontology Alignment**
+The system achieves deep cross-lingual alignment (ZH, EN, DE) through a unified MeSH ontology and a parallel multi-language retrieval mechanism:
+*   **Offline Entity Unification:** During ingestion, a two-stage Cascade NER pipeline (GLiNER + language-specific BERT) extracts medical entities. The `EntityLinker` then utilizes **SapBERT-XLMR** to map diverse surface forms (e.g., *"心肌梗死"*, *"myocardial infarction"*, *"Myokardinfarkt"*) to a single, globally unique **MeSH CUI** (Concept Unique Identifier). The Neo4j Knowledge Graph stores edges based on these language-agnostic CUIs, allowing relations extracted from German or English documents to be directly connected to Chinese nodes.
+*   **Online Parallel Retrieval:** During the query phase, the `QueryTranslator` asynchronously translates the user's input into all supported corpus languages. The pipeline then executes parallel hybrid vector searches (dense + sparse via BGE-M3) on Qdrant, enforcing a per-language retrieval quota. This ensures that sparse vector matching (which relies on exact token overlap) functions correctly across language boundaries before merging the candidates via RRF.
+
+#### **2. Long-Short Term Memory System**
+MedGraphia manages context through a dual-layer memory architecture:
+*   **Short-Term Memory:** A dedicated `Rewriter` module (DSPy-optimized) resolves coreference and ellipsis from a **5-message sliding window** (approx. 2.5 conversation turns). This ensures that history is condensed into a standalone search query to maintain high retrieval precision without overwhelming the LLM with raw transcripts.
+*   **Long-Term Memory:** User-entity interactions are persisted in Neo4j via `INTERESTED_IN` relationships. The system implements a **Recurrent Interaction Decay** logic: every time a user interacts with a clinical entity, the existing interest weight is discounted by a factor (default **0.9**) before adding a unit increment ($W_{new} = W_{old} \times 0.9 + 1.0$). During retrieval, this allows the system to prioritize a user's long-term chronic history (which accumulates weight over time) while naturally deprioritizing transient symptoms.
+
+#### **3. DSPy-driven Logic Self-Evolution**
+Instead of static prompts, MedGraphia uses **DSPy programs** that evolve through automated data-driven compilation:
+*   **Synthetic Data Factory:** Using a high-capability Teacher model (e.g., DeepSeek-V3), the system reverse-engineers high-quality, multilingual QA pairs from grounded graph chunks. This "Reverse-RAG" approach ensures that training examples are anchored in real database evidence. 
+*   **Automated Knowledge Distillation:** Using `BootstrapFewShot`, the system distills reasoning logic into a Student model (e.g., Qwen-2.5). The optimization pipeline iterates through the synthetic dataset to find valid reasoning traces (**Rationales**), injecting the best-performing ones (e.g., **7 bootstrapped + 5 labeled demos** for Rewriter) into the compiled JSON signatures. This ensures that the model's logic for citation and clinical reasoning is grounded in "gold-standard" traces.
+
+#### **4. Hierarchical Multi-Model Routing**
+To optimize for latency and cost, the system employs a tiered routing logic orchestrated via **Pydantic-AI**:
+*   **Complexity Rubric (E+I Score):** During the rewriting phase, the `Rewriter` calculates a **Complexity Score** by summing two dimensions: **Entities** (E, 1-3 based on count) and **Intent** (I, 1-3 based on depth/ambiguity). 
+*   **Tiered Dispatch:** Queries are routed based on the total score: **SMALL** (≤3), **MEDIUM** (4), or **LARGE** (≥5). Simple administrative or single-entity questions are handled by local, low-latency models, while complex multi-hop clinical decisions are dispatched to flagship cloud models, ensuring safety and precision only where needed.
+
+#### **5. Hybrid Global-Local Retrieval**
+The system fuses three distinct retrieval strategies to ensure comprehensive coverage:
+*   **Local Graph Traversal:** 1-2 hop expansion from query CUIs in Neo4j to find structured clinical facts (TREATS, CAUSES, etc.).
+*   **Global Community Summarization:** Semantic search over **Leiden-detected entity communities** in Neo4j to answer broad, cross-corpus overview questions.
+*   **Hybrid Vector Search:** Parallel BGE-M3 dense and sparse indexing on Qdrant. Results are merged via **Reciprocal Rank Fusion (RRF)** and prioritized by a cross-encoder reranker, ensuring both semantic depth and lexical precision (e.g., drug dosages).
+
+---
+
+## 🤖 LLM Core Functional Capabilities
+
+MedGraphia leverages Large Language Models across the entire data lifecycle, from offline knowledge construction to real-time clinical reasoning.
+
+| Capability                     | Module | Tech Stack | Prompt Management |
+|:-------------------------------|:---|:---|:---|
+| **Contextual Query Rewriting** | `Rewriter` | `dspy.Predict` | **DSPy Optimized**: Resolves coreference and ellipsis (e.g., "What are its side effects?") into standalone queries using conversation history. |
+| **Clinical Answer Generation** | `Generator` | `dspy.ChainOfThought` | **DSPy Optimized**: Synthesizes multilingual context into evidence-based answers with mandatory inline [N] citations and medical disclaimers. |
+| **Relation Extraction**        | `Extractor` | `dspy.Predict` | **DSPy Optimized**: Extracts high-fidelity medical triples (Disease → TREATS → Drug) from raw text, constrained to a closed ontology schema. |
+| **Community Summarization**    | `Summarizer` | `dspy.Predict` | **DSPy Optimized**: Generates hierarchical summaries for Leiden-detected entity clusters to support global, cross-corpus thematic queries. |
+| **Multilingual Translation**   | `Translator` | `dspy.Predict` | **DSPy Optimized**: Parallel translation of queries into ZH, EN, and DE to eliminate lexical bias in sparse/hybrid retrieval paths. |
+| **Intelligent Intent Routing** | `Router` | `pydantic-ai` | **Typed Agent**: Classifies queries into 5 intent tiers (e.g., FAQ vs. Multi-hop) and generates a structured retrieval plan. |
+| **Proactive Safety Guarding**  | `Guard` | `Llama-Guard 3` | **Direct Inference**: Performs two-stage (input/output) safety filtering against S1-S14 hazard categories. |
 
 ---
 
@@ -324,7 +371,7 @@ Provisional mentions are resolved to global **MeSH CUIs**:
 
 **Stage 6 — Relation Extraction**
 
-A **DSPy-powered extractor** identifies relationships between linked entities using the `LLM_MODEL`. Extraction is strictly constrained to the system's `RelationType` schema:
+A **DSPy-powered extractor** identifies relationships between linked entities using the `DEFAULT_LLM_MODEL`. Extraction is strictly constrained to the system's `RelationType` schema:
 - `TREATS`, `CAUSES`, `INTERACTS_WITH`, `SYMPTOM_OF`, `COMPLICATION_OF`, `CONTRAINDICATED_IN`, `DOSAGE_FOR`, `CODED_AS`.
 - Every relation includes `evidence_text` and `confidence` score.
 
@@ -429,7 +476,7 @@ EMBEDDING_MODEL=BAAI/bge-m3
 EMBEDDING_BASE_URL=http://embedding:8080
 
 # LLM (pick a provider)
-LLM_PROVIDER=deepseek          # deepseek | openai | anthropic | local
+DEFAULT_LLM_PROVIDER=deepseek          # deepseek | openai | anthropic | local
 DEEPSEEK_API_KEY=sk-...
 
 # Safety guardrails
@@ -492,8 +539,8 @@ Key differences from enterprise `.env`:
 
 ```bash
 # Use Ollama for local LLM inference (zero API cost after setup)
-LLM_PROVIDER=ollama
-LLM_MODEL=qwen2.5:7b            # 4-bit GGUF, ~4 GB VRAM
+DEFAULT_LLM_PROVIDER=ollama
+DEFAULT_LLM_MODEL=qwen2.5:7b            # 4-bit GGUF, ~4 GB VRAM
 LLM_BASE_URL=http://host.docker.internal:11434
 
 EMBEDDING_PROVIDER=ollama
@@ -663,6 +710,30 @@ curl "http://localhost:8058/graph/entity?name=metformin&lang=en&hops=2" \
 }
 ```
 
+### 🧬 DSPy Prompt Optimization (Self-Improvement)
+
+MedGraphia allows you to continuously improve the clinical reasoning of the system by generating synthetic training data and compiling prompts via DSPy.
+
+**Step 1: Generate Synthetic Data**
+
+Use the Teacher model (e.g., DeepSeek) to reverse-engineer high-quality, multilingual QA pairs from your grounded graph chunks.
+
+```bash
+# Generate 50 multilingual grounded QA pairs
+python scripts/dspy/generate_synthetic_data.py 50
+```
+
+**Step 2: Compile & Optimize Signatures**
+
+Run the DSPy Teleprompter to evaluate the synthetic data and bootstrap the best Chain-of-Thought (CoT) reasoning traces into compiled JSON files.
+
+```bash
+# Compiles Rewriter and Generator modules using BootstrapFewShot / MIPROv2
+python scripts/dspy/optimize.py
+```
+
+*Note: The compiled JSON files are automatically saved to `data/dspy/` and injected into the pipeline at runtime to guide the Student model's clinical reasoning.*
+
 ---
 
 ## 📊 Evaluation
@@ -717,7 +788,7 @@ All settings are loaded from `.env` via Pydantic Settings. Key variables:
 | **Vector Store** | | |
 | `VECTOR_STORE` | `qdrant` | Only `qdrant` is supported |
 | **LLM & Embedding** | | |
-| `LLM_PROVIDER` | `groq` | `openai` \| `anthropic` \| `deepseek` \| `gemini` \| `groq` \| `ollama` \| `local` |
+| `DEFAULT_LLM_PROVIDER` | `groq` | `openai` \| `anthropic` \| `deepseek` \| `gemini` \| `groq` \| `ollama` \| `local` |
 | `EMBEDDING_PROVIDER`| `ollama` | `huggingface` \| `openai` \| `ollama` |
 | **Observability** | | |
 | `TRACING_ENABLED` | `false` | Enable Langfuse tracing |
@@ -832,7 +903,14 @@ MedGraphia/
     ├── llm/                        # LLM client layer
     │   ├── gateway.py              # LiteLLMGateway: unified multi-provider interface
     │   ├── client.py               # pydantic-ai model factory for structured LLM output
-    │   └── dspy_setup.py           # DSPy configuration and program loader
+    │   └── dspy_setup.py           # DSPy infrastructure: LM configuration & task routing
+    │
+    ├── programs/                   # DSPy Programs: Encapsulated business logic
+    │   ├── rewriter.py             # Context-aware query rewrite module
+    │   ├── generator.py            # Clinical answer generation module (CoT)
+    │   ├── extractor.py            # Relation extraction module
+    │   ├── summarizer.py           # Community summarization module
+    │   └── translator.py           # Medical terminology translation module
     │
     ├── retrieval/                  # Online query pipeline (three-path hybrid)
     │   ├── pipeline.py             # RetrievalPipeline: orchestrates all retrieval steps

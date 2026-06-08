@@ -1,4 +1,5 @@
 """Offline build pipeline: parsing, chunking, NER, linking, relation extraction, community detection, embedding."""
+
 from medgraphia.ingestion.chunker import MedicalChunker
 from medgraphia.ingestion.community_builder import CommunityBuilder
 from medgraphia.ingestion.embedder import EntityEmbedder, MedicalEmbedder

@@ -12,6 +12,7 @@ Language → default model:
 Degradation: if `transformers` is unavailable or model fails to load,
 predict() returns [] and the pipeline falls back to GLiNER-only results.
 """
+
 from __future__ import annotations
 
 from medgraphia.domain import EntityType, Language
@@ -22,6 +23,7 @@ logger = get_logger(__name__)
 
 try:
     from transformers import pipeline as _hf_pipeline  # type: ignore[import]
+
     _TRANSFORMERS_AVAILABLE = True
 except ImportError:
     _TRANSFORMERS_AVAILABLE = False
@@ -60,7 +62,7 @@ _LABEL_TO_TYPE: dict[str, EntityType] = {
     "药物": EntityType.DRUG,
     "药品": EntityType.DRUG,
     "dru": EntityType.DRUG,
-    "m": EntityType.DRUG, # iioSnail often outputs 'M' for all medical entities
+    "m": EntityType.DRUG,  # iioSnail often outputs 'M' for all medical entities
     # Symptom / sign
     "symptom": EntityType.SYMPTOM,
     "sign": EntityType.SYMPTOM,
@@ -78,7 +80,7 @@ _LABEL_TO_TYPE: dict[str, EntityType] = {
     "cell_type": EntityType.GENE,
     "基因": EntityType.GENE,
     "蛋白质": EntityType.GENE,
-    "biological_structure": EntityType.GENE, # From debug logs, approximate mapping
+    "biological_structure": EntityType.GENE,  # From debug logs, approximate mapping
     # Procedure
     "procedure": EntityType.PROCEDURE,
     "therapy": EntityType.PROCEDURE,
@@ -90,8 +92,8 @@ _LABEL_TO_TYPE: dict[str, EntityType] = {
     "pro": EntityType.PROCEDURE,
     "ite": EntityType.PROCEDURE,  # item/test
     # Generic mappings for Chinese fallback (shibing624 models)
-    "org": EntityType.DRUG,    # Medical companies or drugs often misclassified as ORG
-    "misc": EntityType.DISEASE, # Symptoms/Diseases often misclassified as MISC
+    "org": EntityType.DRUG,  # Medical companies or drugs often misclassified as ORG
+    "misc": EntityType.DISEASE,  # Symptoms/Diseases often misclassified as MISC
 }
 
 
@@ -102,7 +104,7 @@ def _resolve_label(raw: str) -> EntityType | None:
         return None
     for pfx in _BIO_PREFIX:
         if raw.startswith(pfx):
-            raw = raw[len(pfx):]
+            raw = raw[len(pfx) :]
             break
     return _LABEL_TO_TYPE.get(raw.lower())
 
@@ -110,6 +112,7 @@ def _resolve_label(raw: str) -> EntityType | None:
 # ---------------------------------------------------------------------------
 # BertNER
 # ---------------------------------------------------------------------------
+
 
 class BertNER:
     """
@@ -133,16 +136,17 @@ class BertNER:
             Language.ZH: zh_model,
             Language.DE: de_model,
         }
-        
+
         # ── Device Auto-detection ────────────────────────────────────────────
         if device is None:
             import torch
+
             if torch.backends.mps.is_available():
                 self._device = "mps"
             elif torch.cuda.is_available():
-                self._device = 0 # CUDA index
+                self._device = 0  # CUDA index
             else:
-                self._device = -1 # CPU
+                self._device = -1  # CPU
         else:
             self._device = device
 
@@ -185,17 +189,22 @@ class BertNER:
             entity_type = _resolve_label(label_key)
             if entity_type is None:
                 # DEBUG INJECTION: Log the rejected label to understand why it failed
-                logger.debug("bert_ner_rejected", lang=language.value, label=label_key, word=ent.get("word", ""))
+                logger.debug(
+                    "bert_ner_rejected",
+                    lang=language.value,
+                    label=label_key,
+                    word=ent.get("word", ""),
+                )
                 continue
-            
+
             word = ent.get("word", "")
             # Clean up BERT subword fragments (e.g., "##pirin" -> "pirin")
             word = word.replace("##", "").strip()
-            
+
             # Chinese space-cleanup: some tokenizers insert spaces between characters
             if language == Language.ZH:
                 word = word.replace(" ", "")
-                
+
             if not word:
                 continue
 

@@ -7,6 +7,7 @@ Endpoints used:
   GET /spls.json?drug_name=<name>     — search by drug name → list of SPL set IDs
   GET /spls/<setid>.xml               — download the full SPL XML for a set ID
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -35,7 +36,7 @@ class FDADailyMedConnector:
         self._output_dir.mkdir(parents=True, exist_ok=True)
         self._session: aiohttp.ClientSession | None = None
 
-    async def __aenter__(self) -> "FDADailyMedConnector":
+    async def __aenter__(self) -> FDADailyMedConnector:
         self._session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=60),
             headers={"User-Agent": "MedGraphia/0.1 (academic research)"},
@@ -125,13 +126,17 @@ def _parse_spl_xml(xml_bytes: bytes, set_id: str, drug_name: str) -> RawDocument
     main_title = (title_el.text or drug_name).strip() if title_el is not None else drug_name
 
     parsed_sections: list[ParsedSection] = []
-    
+
     # Iterate through all sections that contain a text block
     for section_el in root.findall(f".//{{{ns}}}section"):
         # 1. Extract section title (e.g., "CONTRAINDICATIONS")
         title_node = section_el.find(f"./{{{ns}}}title")
-        section_title = (title_node.text.strip() if title_node is not None and title_node.text else "Untitled Section")
-        
+        section_title = (
+            title_node.text.strip()
+            if title_node is not None and title_node.text
+            else "Untitled Section"
+        )
+
         # 2. Extract plain text content from the section
         text_node = section_el.find(f"./{{{ns}}}text")
         if text_node is not None:
@@ -139,11 +144,7 @@ def _parse_spl_xml(xml_bytes: bytes, set_id: str, drug_name: str) -> RawDocument
             content = "".join(text_node.itertext()).strip()
             if content:
                 parsed_sections.append(
-                    ParsedSection(
-                        section_path=section_title,
-                        title=section_title,
-                        content=content
-                    )
+                    ParsedSection(section_path=section_title, title=section_title, content=content)
                 )
 
     full_text = "\n\n".join(s.content for s in parsed_sections)

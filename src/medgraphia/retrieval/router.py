@@ -1,27 +1,18 @@
 """
-LangGraph-based query router (Phase 6).
+LangGraph-based query router.
 
 Classifies an incoming query into one of 5 QueryType categories and builds
 a RetrievalPlan that downstream retrievers consume.
 
-QueryType categories (from domain/base.py):
-  CLINICAL_DECISION    — single-patient clinical reasoning, diagnosis, dosing
-  DRUG_INTERACTION     — drug-drug / drug-food interactions, contraindications
-  LITERATURE_MULTIHOP  — multi-hop reasoning across literature / trial evidence
-  CROSS_CORPUS         — global, cross-document summaries ("overview of...")
-  PATIENT_FAQ          — lay-language patient education questions
-
 Routing strategy: rule-based keyword matching (fast, deterministic).
 This can be swapped for an LLM classifier by replacing _classify_by_rules()
 without touching the rest of the graph.
-
-LangGraph is used to make the routing stateful and observable; the actual
-classification logic is intentionally a pure function so it remains testable.
 """
+
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, TypedDict
 
 from medgraphia.domain import Language, QueryType
@@ -35,24 +26,24 @@ logger = get_logger(__name__)
 # State and plan types
 # ---------------------------------------------------------------------------
 
+
 class RouterState(TypedDict, total=False):
     """LangGraph state dict flowing through the routing graph."""
+
     query: str
     language: Language
     query_entities: QueryEntities
     query_type: QueryType
-    retrieval_plan: "RetrievalPlan"
+    retrieval_plan: RetrievalPlan
     error: str
 
 
 @dataclass
 class RetrievalPlan:
     """
-    Routing decision: which retrievers to activate and with what parameters.
-
-    downstream retrievers check .use_graph, .use_vector, .use_community to
-    decide whether to execute and read .graph_hops / .vector_limit / etc.
+    Routing decision
     """
+
     query_type: QueryType
     query: str
     language: Language
@@ -94,7 +85,7 @@ _RULES: list[tuple[QueryType, list[str], int]] = [
             r"\bpolypharmac\w*\b",
             r"\bco.?administr\w*\b",
             r"\bdrug.{0,10}drug\b",
-            r"\b相互作用\b",          # ZH
+            r"\b相互作用\b",  # ZH
             r"\bWechselwirkung\w*\b",  # DE
         ],
         1,
@@ -111,9 +102,9 @@ _RULES: list[tuple[QueryType, list[str], int]] = [
             r"\bprevalence\b",
             r"\bepidemiolog\w*\b",
             r"\bcommon\b.{0,30}\b(comorbid|condition|disease)\w*\b",
-            r"\b综述\b",             # ZH: review/survey
-            r"\b概述\b",             # ZH: overview
-            r"\bÜbersicht\b",        # DE: overview
+            r"\b综述\b",  # ZH: review/survey
+            r"\b概述\b",  # ZH: overview
+            r"\bÜbersicht\b",  # DE: overview
         ],
         1,
     ),
@@ -130,8 +121,8 @@ _RULES: list[tuple[QueryType, list[str], int]] = [
             r"\bresearch\b.{0,20}\b(show|suggest|find|report)\w*\b",
             r"\brandomized\b",
             r"\bcohort\b",
-            r"\b文献\b",             # ZH: literature
-            r"\bStudie\b",           # DE: study
+            r"\b文献\b",  # ZH: literature
+            r"\bStudie\b",  # DE: study
         ],
         1,
     ),
@@ -148,9 +139,9 @@ _RULES: list[tuple[QueryType, list[str], int]] = [
             r"\bsymptom\b",
             r"\bprognosis\b",
             r"\bcomorbid\w*\b",
-            r"\b诊断\b",            # ZH: diagnosis
-            r"\b治疗\b",            # ZH: treatment
-            r"\bBehandlung\b",       # DE: treatment
+            r"\b诊断\b",  # ZH: diagnosis
+            r"\b治疗\b",  # ZH: treatment
+            r"\bBehandlung\b",  # DE: treatment
         ],
         1,
     ),
@@ -168,9 +159,9 @@ _RULES: list[tuple[QueryType, list[str], int]] = [
             r"\bsimple\b",
             r"\blay\b.{0,10}\bterm\b",
             r"\bpatient\b",
-            r"\b什么是\b",           # ZH: what is
-            r"\b如何\b",             # ZH: how to
-            r"\bwas\s+ist\b",        # DE: what is
+            r"\b什么是\b",  # ZH: what is
+            r"\b如何\b",  # ZH: how to
+            r"\bwas\s+ist\b",  # DE: what is
         ],
         1,
     ),
@@ -194,10 +185,7 @@ def _classify_by_rules(query: str, entities: QueryEntities) -> QueryType:
     scores: dict[QueryType, int] = {}
 
     for qtype, patterns, _min_matches in _RULES:
-        count = sum(
-            1 for p in patterns
-            if re.search(p, query_lower, re.IGNORECASE)
-        )
+        count = sum(1 for p in patterns if re.search(p, query_lower, re.IGNORECASE))
         scores[qtype] = count
 
     # Check rules in priority order
@@ -223,7 +211,7 @@ def _plan_from_type(
     """
     Map a QueryType to a RetrievalPlan with appropriate retriever settings.
 
-    Routing logic (architecture doc §4.2):
+    Routing logic:
       DRUG_INTERACTION     → graph (1 hop, focused on entity edges) + vector
       CLINICAL_DECISION    → graph (2 hops) + vector
       LITERATURE_MULTIHOP  → graph (2 hops) + vector (more results)
@@ -306,6 +294,7 @@ def _plan_from_type(
 # LangGraph routing graph
 # ---------------------------------------------------------------------------
 
+
 def _build_routing_graph(ner_linker: QueryNERLinker) -> Any:
     """
     Build and compile a LangGraph StateGraph for query routing.
@@ -315,7 +304,7 @@ def _build_routing_graph(ner_linker: QueryNERLinker) -> Any:
     between classify_node and plan_node without changing theinterface.
     """
     try:
-        from langgraph.graph import StateGraph, END  # type: ignore[import]
+        from langgraph.graph import END, StateGraph  # type: ignore[import]
     except ImportError:
         logger.warning("langgraph_not_installed", msg="pip install langgraph")
         return None
@@ -363,6 +352,7 @@ def _build_routing_graph(ner_linker: QueryNERLinker) -> Any:
 # Public router class
 # ---------------------------------------------------------------------------
 
+
 class QueryRouter:
     """
     Stateless query router.  Wraps the LangGraph routing graph and provides
@@ -382,7 +372,7 @@ class QueryRouter:
         self._graph = _build_routing_graph(self._ner_linker)
 
     @classmethod
-    def from_settings(cls) -> "QueryRouter":
+    def from_settings(cls) -> QueryRouter:
         return cls()
 
     def route(self, query: str, language: Language | None = None) -> RetrievalPlan:
@@ -393,9 +383,7 @@ class QueryRouter:
 
         if self._graph is not None:
             try:
-                final_state: RouterState = self._graph.invoke(
-                    {"query": query, "language": lang}
-                )
+                final_state: RouterState = self._graph.invoke({"query": query, "language": lang})
                 plan = final_state.get("retrieval_plan")
                 if plan is not None:
                     logger.info(

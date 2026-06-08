@@ -7,11 +7,13 @@ Wraps the Langfuse SDK with:
   - Structlog context binding so every log line inside a trace carries trace_id
   - Module-level singleton accessed via get_langfuse_client()
 """
+
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Generator
 from dataclasses import dataclass, field
-from typing import Any, Generator
+from typing import Any
 
 import structlog
 
@@ -24,6 +26,7 @@ logger = get_logger(__name__)
 # SpanContext — wraps a single Langfuse span
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SpanContext:
     """
@@ -35,6 +38,7 @@ class SpanContext:
             items = await retrieve(query)
             span.end(output=f"{len(items)} items")
     """
+
     _span: Any = field(default=None, repr=False)
 
     def end(self, output: Any = None, metadata: dict | None = None) -> None:
@@ -49,7 +53,7 @@ class SpanContext:
         except Exception as exc:
             logger.debug("langfuse_span_end_failed", error=str(exc))
 
-    def __enter__(self) -> "SpanContext":
+    def __enter__(self) -> SpanContext:
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
@@ -68,6 +72,7 @@ class SpanContext:
 # TraceContext — wraps a single Langfuse trace
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class TraceContext:
     """
@@ -79,6 +84,7 @@ class TraceContext:
     When Langfuse is disabled (not installed / missing keys), all methods are
     no-ops and the object still satisfies the interface.
     """
+
     trace_id: str = ""
     _trace: Any = field(default=None, repr=False)
     _langfuse: Any = field(default=None, repr=False)
@@ -175,6 +181,7 @@ class TraceContext:
 # LangfuseClient — the public facade
 # ---------------------------------------------------------------------------
 
+
 class LangfuseClient:
     """
     Singleton-style Langfuse client.
@@ -202,7 +209,7 @@ class LangfuseClient:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_settings(cls) -> "LangfuseClient":
+    def from_settings(cls) -> LangfuseClient:
         """
         Build from MedGraphia Settings.
 
@@ -212,6 +219,7 @@ class LangfuseClient:
           - LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY are empty
         """
         from medgraphia.config import get_settings
+
         cfg = get_settings()
 
         if not cfg.tracing_enabled:
@@ -364,6 +372,7 @@ def reset_langfuse_client() -> None:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _truncate(value: Any, max_len: int) -> str | None:
     """Stringify and truncate a value to avoid Langfuse payload limits."""

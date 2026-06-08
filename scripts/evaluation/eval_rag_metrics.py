@@ -23,6 +23,7 @@ from uuid import uuid4
 
 # ── Load .env before anything else ──────────────────────────────────────────
 from dotenv import load_dotenv
+
 load_dotenv(dotenv_path=Path(__file__).parent.parent.parent / ".env", override=True)
 
 # Clear non-official OpenAI proxy so the RAGAS judge always hits api.openai.com.
@@ -36,6 +37,7 @@ if "OPENAI_BASE_URL" in os.environ:
 # RAGAS 0.4.3 references langchain_community sub-modules moved to separate packages.
 try:
     import langchain_google_vertexai
+
     sys.modules["langchain_community.chat_models.vertexai"] = langchain_google_vertexai
 except ImportError:
     _vertex_mock = types.ModuleType("vertexai")
@@ -44,6 +46,7 @@ except ImportError:
 
 try:
     import langchain_aws
+
     sys.modules["langchain_community.chat_models.bedrock"] = langchain_aws
 except ImportError:
     _bedrock_mock = types.ModuleType("bedrock")
@@ -55,6 +58,7 @@ try:
 except ImportError:
     try:
         from mistralai.client import Mistral as _Mistral
+
         _mistral_mod = types.ModuleType("mistralai")
         _mistral_mod.Mistral = _Mistral
         sys.modules["mistralai"] = _mistral_mod
@@ -77,7 +81,6 @@ from ragas.run_config import RunConfig
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from medgraphia.config import get_settings  # noqa: E402
 from medgraphia.domain import Language  # noqa: E402
 from medgraphia.generation.pipeline import GenerationPipeline  # noqa: E402
 from medgraphia.logger import configure_logging, get_logger  # noqa: E402
@@ -130,6 +133,7 @@ EVAL_SAMPLES: list[dict[str, Any]] = [
 # Pipeline execution
 # ---------------------------------------------------------------------------
 
+
 async def run_evaluation(
     samples: list[dict[str, Any]],
     user_id: str | None = "eval_user",
@@ -162,6 +166,7 @@ async def run_evaluation(
                     language=language,
                 )
                 from medgraphia.domain.chat import Message, Role
+
                 session_id = str(uuid4())
                 history = [
                     Message(session_id=session_id, role=Role.USER, content=question),
@@ -201,13 +206,15 @@ async def run_evaluation(
             if isinstance(gt, list):
                 gt = " ".join(gt)
 
-            results.append({
-                "question": question,
-                "answer": gen_result.answer,
-                "contexts": contexts,
-                "ground_truth": gt,
-                "category": sample.get("category", "general"),
-            })
+            results.append(
+                {
+                    "question": question,
+                    "answer": gen_result.answer,
+                    "contexts": contexts,
+                    "ground_truth": gt,
+                    "category": sample.get("category", "general"),
+                }
+            )
 
         except Exception as exc:
             logger.error("eval_sample_failed", q=question, error=str(exc), sample=sample_idx + 1)
@@ -218,6 +225,7 @@ async def run_evaluation(
 # ---------------------------------------------------------------------------
 # RAGAS scoring
 # ---------------------------------------------------------------------------
+
 
 def run_ragas_scoring(df: pd.DataFrame, judge_model: str = "gpt-4o-mini") -> Any:
     """Score the collected results with RAGAS metrics."""
@@ -249,11 +257,14 @@ def run_ragas_scoring(df: pd.DataFrame, judge_model: str = "gpt-4o-mini") -> Any
 # CLI
 # ---------------------------------------------------------------------------
 
+
 @click.command()
 @click.option("--input-file", default=None, help="Input CSV with test samples")
 @click.option("--limit", default=None, type=int, help="Limit number of samples evaluated")
 @click.option("--output", default="eval_results.csv", show_default=True, help="Output CSV path")
-@click.option("--user-id", default="eval_user", show_default=True, help="User ID for memory/decay testing")
+@click.option(
+    "--user-id", default="eval_user", show_default=True, help="User ID for memory/decay testing"
+)
 @click.option(
     "--judge-model",
     default="gpt-4o-mini",
@@ -325,7 +336,8 @@ def main(
             # Only select numeric columns — RAGAS to_pandas() also returns string
             # columns (user_input, response, etc.) that cannot be aggregated with mean().
             metric_cols = [
-                c for c in scores_df.columns
+                c
+                for c in scores_df.columns
                 if c != "category" and pd.api.types.is_numeric_dtype(scores_df[c])
             ]
             grouped = scores_df.groupby("category")[metric_cols].mean()

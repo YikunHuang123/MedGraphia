@@ -105,7 +105,7 @@ generation = [
     # DSPy Predictor support
 ]
 ui = [
-    # Streamlit frontend (Phase 9). Installs the UI process dependencies
+    # Streamlit frontend. Installs the UI process dependencies
     # without pulling the heavy ML stack.
     "streamlit>=1.35.0",
     "pyvis>=0.3.2",

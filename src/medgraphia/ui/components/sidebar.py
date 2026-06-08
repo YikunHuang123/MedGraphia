@@ -1,6 +1,7 @@
 """
 Shared sidebar components for MedGraphia.
 """
+
 from __future__ import annotations
 
 import os
@@ -9,17 +10,15 @@ from typing import Any
 
 import httpx
 import streamlit as st
+from api_client import MedGraphiaClient
 from components.styles import (
     connection_pill,
     render_brand,
 )
-from api_client import MedGraphiaClient
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def _check_health_cached(
-    base_url: str, api_key: str, admin_key: str
-) -> dict[str, Any]:
+def _check_health_cached(base_url: str, api_key: str, admin_key: str) -> dict[str, Any]:
     with MedGraphiaClient(base_url=base_url, api_key=api_key, admin_key=admin_key) as client:
         return client.health_ready()
 
@@ -29,15 +28,15 @@ def render_common_sidebar() -> None:
     # Ensure core state exists (required for all pages)
     defaults = {
         "api_base_url": os.getenv("API_BASE_URL", "http://localhost:8058"),
-        "api_key":      os.getenv("MEDGRAPHIA_API_KEY", ""),
-        "admin_key":    os.getenv("MEDGRAPHIA_ADMIN_KEY", ""),
+        "api_key": os.getenv("MEDGRAPHIA_API_KEY", ""),
+        "admin_key": os.getenv("MEDGRAPHIA_ADMIN_KEY", ""),
         "conversations": {},
         "active_conv_id": None,
         "last_subgraph": None,
         "_health_ts": 0.0,
         "_health_cached": None,
         "_health_data": {},
-        "_last_health_check": 0
+        "_last_health_check": 0,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -50,7 +49,7 @@ def render_common_sidebar() -> None:
             with MedGraphiaClient(
                 base_url=st.session_state["api_base_url"],
                 api_key=st.session_state["api_key"],
-                admin_key=st.session_state["admin_key"]
+                admin_key=st.session_state["admin_key"],
             ) as client:
                 client.client.timeout = httpx.Timeout(2.0)
                 st.session_state["_health_data"] = client.health_ready()
@@ -74,15 +73,19 @@ def render_common_sidebar() -> None:
     # 3. Warming Alert
     if is_warming:
         st.warning("⚙️ **System Warming Up**")
-        st.caption("Eagerly loading medical AI models (GLiNER, BGE-M3, SapBERT). Chat will be available in ~30s.")
+        st.caption(
+            "Eagerly loading medical AI models (GLiNER, BGE-M3, SapBERT). Chat will be available in ~30s."
+        )
     elif not ready:
-         st.caption("⏳ Checking connectivity...")
+        st.caption("⏳ Checking connectivity...")
 
     # 4. Navigation
     st.markdown('<div class="mg-section">Workspaces</div>', unsafe_allow_html=True)
     st.page_link("streamlit_app.py", label="Home", icon=":material/home:")
     st.page_link("pages/1_Chat.py", label="Clinical Chat", icon=":material/chat:")
-    st.page_link("pages/2_Graph_Explorer.py", label="Graph Explorer", icon=":material/account_tree:")
+    st.page_link(
+        "pages/2_Graph_Explorer.py", label="Graph Explorer", icon=":material/account_tree:"
+    )
     st.page_link("pages/4_Admin.py", label="Admin Console", icon=":material/admin_panel_settings:")
 
     # 5. Account
@@ -94,17 +97,17 @@ def render_common_sidebar() -> None:
             type="password",
             placeholder="Paste User API Key...",
             help="Required for clinical Q&A and graph search.",
-            key="sidebar_user_key"
+            key="sidebar_user_key",
         )
         st.session_state["api_key"] = st.session_state["sidebar_user_key"]
-        
+
         st.session_state["admin_key"] = st.text_input(
             "Admin API Key",
             value=st.session_state["admin_key"],
             type="password",
             placeholder="Paste Admin Key...",
             help="Optional. Required for pipeline management and stats.",
-            key="sidebar_admin_key"
+            key="sidebar_admin_key",
         )
         st.session_state["admin_key"] = st.session_state["sidebar_admin_key"]
 

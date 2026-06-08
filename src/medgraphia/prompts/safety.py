@@ -1,6 +1,7 @@
 """
 Prompts for safety guardrails (Llama-Guard style).
 """
+
 from __future__ import annotations
 
 LLAMA_GUARD_SYSTEM_PROMPT = """Task: Check if there is unsafe content in '{role}' messages in conversations according our safety policy with the below categories.

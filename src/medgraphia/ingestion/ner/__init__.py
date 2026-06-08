@@ -1,7 +1,7 @@
 """
 Multi-language medical NER package.
 
-Two-stage pipeline (architecture doc §2.3):
+Two-stage pipeline:
   1. GLiNER zero-shot coarse pass  — gliner_ner.py
   2. Domain BERT precision pass    — bert_ner.py  (optional)
 
@@ -11,6 +11,7 @@ Public surface::
     pipeline = build_pipeline_from_settings()
     chunk_with_entities = pipeline.extract(chunk)
 """
+
 from medgraphia.ingestion.ner.pipeline import MedicalNERPipeline, build_pipeline_from_settings
 
 __all__ = ["MedicalNERPipeline", "build_pipeline_from_settings"]

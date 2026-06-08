@@ -14,6 +14,7 @@ Or programmatically (useful for tests)::
 The worker is optional: when REDIS_URL is not configured the FastAPI
 process falls back to asyncio.create_task for pipeline execution.
 """
+
 from __future__ import annotations
 
 from medgraphia.worker.tasks import task_build_pipeline
@@ -23,10 +24,10 @@ __all__ = ["WorkerSettings", "task_build_pipeline"]
 
 async def _on_startup(ctx: dict) -> None:
     """Initialise shared resources once per worker process."""
+    from medgraphia.config import get_settings
     from medgraphia.graph.client import get_driver
     from medgraphia.graph.schema import apply_schema
     from medgraphia.logger import configure_logging
-    from medgraphia.config import get_settings
 
     cfg = get_settings()
     configure_logging(cfg.log_level)
@@ -53,6 +54,7 @@ def _make_worker_settings():  # type: ignore[return]
         return None
 
     from medgraphia.config import get_settings
+
     cfg = get_settings()
 
     redis_url = cfg.redis_url or "redis://localhost:6379/0"

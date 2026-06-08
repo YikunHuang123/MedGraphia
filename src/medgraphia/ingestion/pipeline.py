@@ -1,5 +1,5 @@
 """
-Prefect-based offline knowledge-graph build pipeline (architecture doc §2).
+Prefect-based offline knowledge-graph build pipeline.
 
 Orchestrates all ingestion stages in sequence:
   fetch → parse → chunk → ner → link → extract → embed → community
@@ -17,6 +17,7 @@ Usage (Prefect UI)::
     prefect deployment build medgraphia/ingestion/pipeline.py:build_graph_flow \
         --name medgraphia-build --apply
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -34,6 +35,7 @@ logger = get_logger(__name__)
 try:
     from prefect import flow, task  # type: ignore[import]
     from prefect.logging import get_run_logger  # type: ignore[import]
+
     _PREFECT_AVAILABLE = True
 except ImportError:
     _PREFECT_AVAILABLE = False
@@ -59,12 +61,14 @@ except ImportError:
 # Pipeline configuration
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class BuildConfig:
     """
     Configuration for a single pipeline run.  Mirrors build_graph.py CLI args
     but is usable programmatically.
     """
+
     domain: str = "t2dm"
     pubmed_query: str | None = None
     pubmed_limit: int = 200
@@ -91,11 +95,12 @@ class BuildConfig:
 # Individual stage tasks
 # ---------------------------------------------------------------------------
 
+
 @task(name="fetch", retries=2, retry_delay_seconds=30)
 async def fetch_task(cfg: BuildConfig) -> list[Any]:
     """Download data from PubMed / FDA DailyMed / EMA SmPC / DrugBank."""
     from medgraphia.data.pubmed import PubMedConnector, PubMedFetchConfig
-    from medgraphia.knowledge_base import DOMAIN_QUERIES, DOMAIN_DRUGS
+    from medgraphia.knowledge_base import DOMAIN_DRUGS, DOMAIN_QUERIES
 
     docs: list[Any] = []
 
@@ -110,7 +115,7 @@ async def fetch_task(cfg: BuildConfig) -> list[Any]:
     if cfg.drug_limit > 0:
         from medgraphia.data.fda_dailymed import FDADailyMedConnector
 
-        drug_names = DOMAIN_DRUGS.get(cfg.domain, [])[:cfg.drug_limit]
+        drug_names = DOMAIN_DRUGS.get(cfg.domain, [])[: cfg.drug_limit]
         async with FDADailyMedConnector() as fda:
             for drug_name in drug_names:
                 fda_docs = await fda.fetch_by_drug_name(drug_name, limit=2)
@@ -127,10 +132,11 @@ async def fetch_task(cfg: BuildConfig) -> list[Any]:
 
     # 3. EMA SmPC (Local PDFs)
     if cfg.include_ema_smpc:
-        from pathlib import Path
         from datetime import datetime
-        from medgraphia.domain import SourceMeta, Language, RawDocument
-        
+        from pathlib import Path
+
+        from medgraphia.domain import Language, RawDocument, SourceMeta
+
         ema_dir = Path("data/raw/ema_smpc")
         if ema_dir.exists():
             ema_pdfs = list(ema_dir.glob("*.pdf"))
@@ -139,7 +145,7 @@ async def fetch_task(cfg: BuildConfig) -> list[Any]:
                     source_id=f"ema_local:{pdf_path.stem}",
                     source_title=pdf_path.stem.replace("_", " "),
                     retrieved_at=datetime.fromtimestamp(pdf_path.stat().st_mtime),
-                    language=Language.EN
+                    language=Language.EN,
                 )
                 docs.append(RawDocument(source=source, file_path=str(pdf_path), format="pdf"))
             logger.info("fetch_ema_local_done", count=len(ema_pdfs))
@@ -159,7 +165,9 @@ def parse_task(raw_docs: list[Any]) -> list[Any]:
             parsed.append(doc)
         elif doc.format == "pdf" and doc.file_path:
             try:
-                parsed.append(parser.parse(doc.file_path, source_meta=doc.source, language=doc.language))
+                parsed.append(
+                    parser.parse(doc.file_path, source_meta=doc.source, language=doc.language)
+                )
             except Exception as exc:
                 logger.warning("parse_pdf_failed", title=doc.title[:40], error=str(exc))
                 parsed.append(doc)
@@ -240,9 +248,7 @@ async def link_task(chunks: list[Any]) -> list[Any]:
             logger.warning("link_chunk_failed", chunk_id=chunk.chunk_id[:8], error=str(exc))
             result.append(chunk)
 
-    linked_count = sum(
-        1 for c in result for e in c.entities if not e.cui.startswith("MENTION:")
-    )
+    linked_count = sum(1 for c in result for e in c.entities if not e.cui.startswith("MENTION:"))
     logger.info("link_done", linked=linked_count)
     return result
 
@@ -295,10 +301,7 @@ async def community_task(
 
     # Build entity_map for richer prompts
     entity_map = {
-        e.cui: e
-        for chunk in chunks
-        for e in chunk.entities
-        if not e.cui.startswith("MENTION:")
+        e.cui: e for chunk in chunks for e in chunk.entities if not e.cui.startswith("MENTION:")
     }
 
     builder = CommunityBuilder.from_settings()
@@ -311,6 +314,7 @@ async def community_task(
 # ---------------------------------------------------------------------------
 # Main orchestration flow
 # ---------------------------------------------------------------------------
+
 
 @flow(name="MedGraphia Build Pipeline", log_prints=True)
 async def build_graph_flow(cfg: BuildConfig) -> dict[str, Any]:
@@ -340,8 +344,15 @@ async def build_graph_flow(cfg: BuildConfig) -> dict[str, Any]:
     summary["chunks"] = len(chunks)
 
     # RECOVERY: If chunks is empty but needed for downstream, load from DB
-    if not chunks and not (cfg.skip_ner and cfg.skip_link and cfg.skip_extract and cfg.skip_embed and cfg.skip_community):
+    if not chunks and not (
+        cfg.skip_ner
+        and cfg.skip_link
+        and cfg.skip_extract
+        and cfg.skip_embed
+        and cfg.skip_community
+    ):
         from medgraphia.graph.queries import get_chunks_from_db
+
         chunks = await get_chunks_from_db(limit=5000)
         logger.info("pipeline_recovered_from_db", count=len(chunks))
 
@@ -380,6 +391,7 @@ async def build_graph_flow(cfg: BuildConfig) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # CLI entrypoint (wraps build_graph_flow for direct invocation)
 # ---------------------------------------------------------------------------
+
 
 def run_pipeline(cfg: BuildConfig) -> dict[str, Any]:
     """Synchronous wrapper — useful for scripts and testing."""

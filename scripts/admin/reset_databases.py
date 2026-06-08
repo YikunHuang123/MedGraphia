@@ -3,6 +3,7 @@
 Admin utility: wipe all data from Neo4j and Qdrant to start from a clean slate.
 DANGER: This will delete everything in the configured databases.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -33,16 +34,16 @@ async def reset_neo4j() -> None:
 async def reset_qdrant() -> None:
     cfg = get_settings()
     store = QdrantStore()
-    
+
     click.echo("  → Wiping Qdrant collections…")
     # We list potential collections from config
     collections = [cfg.qdrant_collection_chunks, cfg.qdrant_collection_entities]
-    
+
     for coll in collections:
         try:
             await store._client.delete_collection(coll)
             click.echo(f"  ✓ Deleted collection: {coll}")
-        except Exception as exc:
+        except Exception:
             # It's fine if it doesn't exist
             click.echo(f"  - Collection {coll} skipped (may not exist).")
 

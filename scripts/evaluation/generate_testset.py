@@ -22,6 +22,7 @@ from pathlib import Path
 # split into separate packages in newer LangChain releases.
 try:
     import langchain_google_vertexai
+
     sys.modules["langchain_community.chat_models.vertexai"] = langchain_google_vertexai
 except ImportError:
     _vertex_mock = types.ModuleType("vertexai")
@@ -30,6 +31,7 @@ except ImportError:
 
 try:
     import langchain_aws
+
     sys.modules["langchain_community.chat_models.bedrock"] = langchain_aws
 except ImportError:
     _bedrock_mock = types.ModuleType("bedrock")
@@ -41,6 +43,7 @@ try:
 except ImportError:
     try:
         from mistralai.client import Mistral as _Mistral
+
         _mistral_mod = types.ModuleType("mistralai")
         _mistral_mod.Mistral = _Mistral
         sys.modules["mistralai"] = _mistral_mod
@@ -66,18 +69,19 @@ from ragas.testset.transforms.relationship_builders import (
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from medgraphia.config import get_settings  # noqa: E402
 from medgraphia.logger import configure_logging, get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
 # Sections that confuse the LLM or carry no diagnostic value for medical QA
-_SKIP_SECTION_KEYWORDS = frozenset([
-    "HOW SUPPLIED",
-    "DESCRIPTION",
-    "PACKAGE LABEL",
-    "STORAGE AND HANDLING",
-])
+_SKIP_SECTION_KEYWORDS = frozenset(
+    [
+        "HOW SUPPLIED",
+        "DESCRIPTION",
+        "PACKAGE LABEL",
+        "STORAGE AND HANDLING",
+    ]
+)
 
 # Medical personas injected into the RAGAS generator
 _MEDICAL_PERSONAS = [
@@ -96,6 +100,7 @@ _MEDICAL_PERSONAS = [
 # Document loading
 # ---------------------------------------------------------------------------
 
+
 def _truncate_at_sentence(text: str, max_chars: int = 3000, min_chars: int = 2000) -> str:
     """Truncate *text* near *max_chars* without splitting mid-sentence."""
     if len(text) <= max_chars:
@@ -103,7 +108,7 @@ def _truncate_at_sentence(text: str, max_chars: int = 3000, min_chars: int = 200
     chunk = text[:max_chars]
     last_break = max(chunk.rfind(". "), chunk.rfind("\n"))
     if last_break > min_chars:
-        return chunk[:last_break + 1]
+        return chunk[: last_break + 1]
     return chunk
 
 
@@ -124,21 +129,25 @@ def _load_single_file(json_file: Path) -> list[Document]:
                     continue
                 content = section.get("content", "").strip()
                 if len(content) > 100:
-                    docs.append(Document(
-                        page_content=content,
-                        metadata={
-                            "source": source_id,
-                            "title": doc_title,
-                            "section": section.get("title", ""),
-                        },
-                    ))
+                    docs.append(
+                        Document(
+                            page_content=content,
+                            metadata={
+                                "source": source_id,
+                                "title": doc_title,
+                                "section": section.get("title", ""),
+                            },
+                        )
+                    )
         else:
             full_text = data.get("full_text", "").strip()
             if full_text:
-                docs.append(Document(
-                    page_content=_truncate_at_sentence(full_text),
-                    metadata={"source": source_id, "title": doc_title},
-                ))
+                docs.append(
+                    Document(
+                        page_content=_truncate_at_sentence(full_text),
+                        metadata={"source": source_id, "title": doc_title},
+                    )
+                )
     except Exception as exc:
         logger.warning("load_file_failed", file=json_file.name, error=str(exc))
     return docs
@@ -164,21 +173,40 @@ def load_documents(data_dir: str, limit: int = 5) -> list[Document]:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 @click.command()
-@click.option("--data-dir", default="data/processed", show_default=True,
-              help="Directory containing processed JSON files")
-@click.option("--test-size", default=10, show_default=True,
-              help="Number of QA pairs to generate")
-@click.option("--output", default="data/evaluation/synthetic_testset.csv", show_default=True,
-              help="Output CSV path")
-@click.option("--docs-limit", default=2, show_default=True,
-              help="Number of source documents to load")
-@click.option("--append", is_flag=True,
-              help="Append new rows to an existing output file instead of overwriting")
-@click.option("--no-dedup", is_flag=True,
-              help="Skip deduplication when appending (default: deduplicate by question text)")
-@click.option("--max-workers", default=4, show_default=True,
-              help="RAGAS parallel workers — lower to avoid OpenAI rate limits")
+@click.option(
+    "--data-dir",
+    default="data/processed",
+    show_default=True,
+    help="Directory containing processed JSON files",
+)
+@click.option("--test-size", default=10, show_default=True, help="Number of QA pairs to generate")
+@click.option(
+    "--output",
+    default="data/evaluation/synthetic_testset.csv",
+    show_default=True,
+    help="Output CSV path",
+)
+@click.option(
+    "--docs-limit", default=2, show_default=True, help="Number of source documents to load"
+)
+@click.option(
+    "--append",
+    is_flag=True,
+    help="Append new rows to an existing output file instead of overwriting",
+)
+@click.option(
+    "--no-dedup",
+    is_flag=True,
+    help="Skip deduplication when appending (default: deduplicate by question text)",
+)
+@click.option(
+    "--max-workers",
+    default=4,
+    show_default=True,
+    help="RAGAS parallel workers — lower to avoid OpenAI rate limits",
+)
 def main(
     data_dir: str,
     test_size: int,
@@ -275,7 +303,7 @@ def main(
         raise click.ClickException(f"Generation failed: {exc}")
 
     # 6. Convert to DataFrame and normalize column names for downstream compatibility
-    #    RAGAS 0.4.x outputs: user_input / reference / reference_contexts
+    #    RAGAS outputs: user_input / reference / reference_contexts
     #    Downstream scripts expect: question / ground_truth / contexts
     df = testset.to_pandas()
     column_map = {
@@ -305,7 +333,9 @@ def main(
         missing_cols = set(existing_df.columns) - set(df.columns)
         if missing_cols:
             logger.warning("append_schema_mismatch", missing_columns=sorted(missing_cols))
-            click.echo(f"WARNING: Schema mismatch — existing file has extra columns: {sorted(missing_cols)}")
+            click.echo(
+                f"WARNING: Schema mismatch — existing file has extra columns: {sorted(missing_cols)}"
+            )
         final_df = pd.concat([existing_df, df], ignore_index=True)
         if not no_dedup and "question" in final_df.columns:
             before = len(final_df)

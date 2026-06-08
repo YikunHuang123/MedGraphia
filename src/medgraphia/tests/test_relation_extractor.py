@@ -5,24 +5,32 @@ All tests are pure-Python unit tests:
   - LLM calls are mocked at the pydantic-ai Agent level.
   - No litellm, no Neo4j, no GPU required.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pydantic_ai import Agent
 
-from medgraphia.domain import Chunk, Entity, EntityType, Language, Relation, RelationType, SourceMeta
+from medgraphia.domain import (
+    Chunk,
+    Entity,
+    EntityType,
+    Language,
+    Relation,
+    RelationType,
+    SourceMeta,
+)
 from medgraphia.ingestion.relation_extractor import (
     ExtractedRelation,
     RelationExtractionResult,
     RelationExtractor,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _source() -> SourceMeta:
     return SourceMeta(source_id="test:re", source_title="RE Test")
@@ -60,6 +68,7 @@ def _entity(
 # RelationExtractor Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 class TestExtractChunk:
     async def test_single_entity_returns_empty(self):
@@ -70,8 +79,9 @@ class TestExtractChunk:
     async def test_no_linked_entities_returns_empty(self):
         extractor = RelationExtractor(model=MagicMock())
         # Entities with MENTION: prefix are not yet linked
-        mention = Entity(cui="MENTION:metformin", label="Metformin",
-                         entity_type=EntityType.DRUG, confidence=0.9)
+        mention = Entity(
+            cui="MENTION:metformin", label="Metformin", entity_type=EntityType.DRUG, confidence=0.9
+        )
         chunk = _make_chunk("text", [mention])
         assert await extractor.extract_chunk(chunk) == []
 
@@ -88,7 +98,7 @@ class TestExtractChunk:
                 )
             ]
         )
-        
+
         mock_agent_run = AsyncMock()
         mock_agent_run.return_value = MagicMock(data=mock_data)
 
@@ -114,10 +124,20 @@ class TestExtractChunk:
     async def test_multiple_relations(self):
         mock_data = RelationExtractionResult(
             relations=[
-                ExtractedRelation(source_cui="C0025598", target_cui="C0011860",
-                                  relation_type=RelationType.TREATS, evidence_text="ev1", confidence=0.9),
-                ExtractedRelation(source_cui="C0004057", target_cui="C0025598",
-                                  relation_type=RelationType.INTERACTS_WITH, evidence_text="ev2", confidence=0.8),
+                ExtractedRelation(
+                    source_cui="C0025598",
+                    target_cui="C0011860",
+                    relation_type=RelationType.TREATS,
+                    evidence_text="ev1",
+                    confidence=0.9,
+                ),
+                ExtractedRelation(
+                    source_cui="C0004057",
+                    target_cui="C0025598",
+                    relation_type=RelationType.INTERACTS_WITH,
+                    evidence_text="ev2",
+                    confidence=0.8,
+                ),
             ]
         )
         mock_agent_run = AsyncMock(return_value=MagicMock(data=mock_data))
@@ -136,8 +156,13 @@ class TestExtractChunk:
     async def test_low_confidence_filtered(self):
         mock_data = RelationExtractionResult(
             relations=[
-                ExtractedRelation(source_cui="C001", target_cui="C002",
-                                  relation_type=RelationType.TREATS, evidence_text="ev", confidence=0.3),
+                ExtractedRelation(
+                    source_cui="C001",
+                    target_cui="C002",
+                    relation_type=RelationType.TREATS,
+                    evidence_text="ev",
+                    confidence=0.3,
+                ),
             ]
         )
         mock_agent_run = AsyncMock(return_value=MagicMock(data=mock_data))
@@ -154,8 +179,13 @@ class TestExtractBatch:
     async def test_batch_aggregates_all_relations(self):
         mock_data = RelationExtractionResult(
             relations=[
-                ExtractedRelation(source_cui="C001", target_cui="C002",
-                                  relation_type=RelationType.TREATS, evidence_text="ev", confidence=0.9),
+                ExtractedRelation(
+                    source_cui="C001",
+                    target_cui="C002",
+                    relation_type=RelationType.TREATS,
+                    evidence_text="ev",
+                    confidence=0.9,
+                ),
             ]
         )
         mock_agent_run = AsyncMock(return_value=MagicMock(data=mock_data))
@@ -171,10 +201,19 @@ class TestExtractBatch:
         mock_agent_run = AsyncMock()
         mock_agent_run.side_effect = [
             RuntimeError("Agent failed"),
-            MagicMock(data=RelationExtractionResult(relations=[
-                ExtractedRelation(source_cui="C001", target_cui="C002",
-                                  relation_type=RelationType.TREATS, evidence_text="ev", confidence=0.9)
-            ]))
+            MagicMock(
+                data=RelationExtractionResult(
+                    relations=[
+                        ExtractedRelation(
+                            source_cui="C001",
+                            target_cui="C002",
+                            relation_type=RelationType.TREATS,
+                            evidence_text="ev",
+                            confidence=0.9,
+                        )
+                    ]
+                )
+            ),
         ]
         extractor = RelationExtractor(model=MagicMock())
         extractor._agent.run = mock_agent_run
@@ -199,5 +238,7 @@ class TestNeo4jWrite:
             relation_type=RelationType.TREATS,
             chunk_id="ck1",
         )
-        with patch("medgraphia.graph.queries.create_relation", side_effect=ConnectionError("neo4j down")):
+        with patch(
+            "medgraphia.graph.queries.create_relation", side_effect=ConnectionError("neo4j down")
+        ):
             await extractor.write_relations_to_neo4j([rel])

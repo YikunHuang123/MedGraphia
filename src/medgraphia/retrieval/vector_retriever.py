@@ -5,6 +5,7 @@ Encodes the query with BGE-M3 and runs a hybrid (dense + sparse) search
 against the Qdrant chunk collection.  Falls back to dense-only search if
 the sparse vector is empty.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -21,9 +22,11 @@ logger = get_logger(__name__)
 # Output types
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class VectorHit:
     """A single chunk result from the vector retriever."""
+
     chunk_id: str
     score: float
     text: str
@@ -36,7 +39,7 @@ class VectorHit:
     page: int | None = None
 
     @classmethod
-    def from_qdrant_payload(cls, chunk_id: str, score: float, payload: dict[str, Any]) -> "VectorHit":
+    def from_qdrant_payload(cls, chunk_id: str, score: float, payload: dict[str, Any]) -> VectorHit:
         return cls(
             chunk_id=chunk_id,
             score=score,
@@ -54,6 +57,7 @@ class VectorHit:
 @dataclass
 class VectorRetrievalResult:
     """Aggregated result from vector retrieval."""
+
     hits: list[VectorHit] = field(default_factory=list)
     query: str = ""
 
@@ -69,6 +73,7 @@ class VectorRetrievalResult:
 # ---------------------------------------------------------------------------
 # VectorRetriever
 # ---------------------------------------------------------------------------
+
 
 class VectorRetriever:
     """
@@ -97,8 +102,9 @@ class VectorRetriever:
         self._store: Any = None  # lazy-loaded QdrantStore
 
     @classmethod
-    def from_settings(cls) -> "VectorRetriever":
+    def from_settings(cls) -> VectorRetriever:
         from medgraphia.config import get_settings
+
         cfg = get_settings()
         return cls(
             collection_name=cfg.qdrant_collection_chunks,
@@ -227,9 +233,7 @@ class VectorRetriever:
 
         for label, result in zip(task_labels, results):
             if isinstance(result, Exception):
-                logger.warning(
-                    "multilingual_lane_failed", label=label, error=str(result)
-                )
+                logger.warning("multilingual_lane_failed", label=label, error=str(result))
                 continue
             for hit in result.hits:
                 cid = hit.chunk_id or ""
@@ -270,6 +274,7 @@ class VectorRetriever:
         )
         dense: list[float] = output["dense_vecs"][0].tolist()
         from medgraphia.ingestion.embedder import _sparse_to_int_keys
+
         sparse: dict[int, float] = _sparse_to_int_keys(output["lexical_weights"][0])
         return dense, sparse
 
@@ -289,6 +294,7 @@ class VectorRetriever:
     def _get_store(self) -> Any:
         if self._store is None:
             from medgraphia.vector.qdrant_store import QdrantStore
+
             self._store = QdrantStore()
         return self._store
 
@@ -296,4 +302,5 @@ class VectorRetriever:
         if self._collection_name:
             return self._collection_name
         from medgraphia.config import get_settings
+
         return get_settings().qdrant_collection_chunks

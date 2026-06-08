@@ -18,6 +18,7 @@ This module reads from Neo4j directly to avoid a separate embedding pipeline dep
 if the Qdrant entity collection happens to contain community vectors in future, a
 subclass can override _fetch_communities() to use hybrid search instead.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -31,9 +32,11 @@ logger = get_logger(__name__)
 # Output types
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class CommunityHit:
     """A single community result."""
+
     community_id: str
     summary: str
     size: int = 0
@@ -44,6 +47,7 @@ class CommunityHit:
 @dataclass
 class CommunityRetrievalResult:
     """Aggregated result from community retrieval."""
+
     hits: list[CommunityHit] = field(default_factory=list)
     query: str = ""
 
@@ -82,6 +86,7 @@ LIMIT $limit
 # CommunityRetriever
 # ---------------------------------------------------------------------------
 
+
 class CommunityRetriever:
     """
     Retrieves the most relevant Community summaries for a given query.
@@ -117,7 +122,7 @@ class CommunityRetriever:
         self._model: Any = None
 
     @classmethod
-    def from_settings(cls) -> "CommunityRetriever":
+    def from_settings(cls) -> CommunityRetriever:
         return cls()
 
     # ------------------------------------------------------------------
@@ -166,18 +171,21 @@ class CommunityRetriever:
         communities: list[dict[str, Any]] = []
         try:
             from medgraphia.graph.client import get_session
+
             async with get_session() as session:
                 result = await session.run(
                     _CYPHER_FETCH_COMMUNITIES,
                     limit=self._max_communities,
                 )
                 async for record in result:
-                    communities.append({
-                        "community_id": record["community_id"] or "",
-                        "summary": record["summary"] or "",
-                        "size": int(record["size"] or 0),
-                        "member_cuis": list(record["member_cuis"] or []),
-                    })
+                    communities.append(
+                        {
+                            "community_id": record["community_id"] or "",
+                            "summary": record["summary"] or "",
+                            "size": int(record["size"] or 0),
+                            "member_cuis": list(record["member_cuis"] or []),
+                        }
+                    )
         except Exception as exc:
             logger.warning("community_fetch_failed", error=str(exc))
         return communities

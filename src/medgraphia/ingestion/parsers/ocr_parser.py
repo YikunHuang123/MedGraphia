@@ -5,10 +5,10 @@ Used when Docling or MinerU fail or when the PDF is image-only (no text layer).
 Tesseract is auto-selected based on detected language.
 PaddleOCR is used for Chinese documents (better ZH accuracy than Tesseract).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from medgraphia.domain import Language, ParsedSection, RawDocument, SourceMeta
 from medgraphia.logger import get_logger
@@ -120,6 +120,7 @@ class OCRParser:
 
         for page_num, img in enumerate(images, start=1):
             import numpy as np
+
             img_array = np.array(img)
             result = ocr_engine.ocr(img_array, cls=True)
             if not result or not result[0]:
@@ -145,9 +146,11 @@ class OCRParser:
 # Helper
 # ---------------------------------------------------------------------------
 
+
 def _paddle_available() -> bool:
     try:
         import paddleocr  # noqa: F401
+
         return True
     except ImportError:
         return False

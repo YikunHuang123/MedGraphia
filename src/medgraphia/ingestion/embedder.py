@@ -17,6 +17,7 @@ Typical usage (entity embedding)::
     entity_embedder = EntityEmbedder.from_settings()
     count = await entity_embedder.embed_and_store()
 """
+
 from __future__ import annotations
 
 import uuid
@@ -35,6 +36,7 @@ logger = get_logger(__name__)
 
 try:
     from FlagEmbedding import BGEM3FlagModel
+
     _FLAG_AVAILABLE = True
 except ImportError:
     _FLAG_AVAILABLE = False
@@ -45,6 +47,7 @@ except ImportError:
 
 try:
     from sentence_transformers import SentenceTransformer as _ST  # type: ignore[import]
+
     _ST_AVAILABLE = True
 except ImportError:
     _ST_AVAILABLE = False
@@ -53,13 +56,14 @@ except ImportError:
         msg="pip install sentence-transformers for SapBERT entity embedding",
     )
 
-_BGE_M3_DIM: int = 1024   # BGE-M3 dense output dimension
-_SAPBERT_DIM: int = 768   # SapBERT dense output dimension
+_BGE_M3_DIM: int = 1024  # BGE-M3 dense output dimension
+_SAPBERT_DIM: int = 768  # SapBERT dense output dimension
 
 
 # ---------------------------------------------------------------------------
 # BGE-M3 chunk embedder
 # ---------------------------------------------------------------------------
+
 
 class MedicalEmbedder:
     """
@@ -89,9 +93,10 @@ class MedicalEmbedder:
         self._model: Any = None  # lazy-loaded on first encode call
 
     @classmethod
-    def from_settings(cls) -> "MedicalEmbedder":
+    def from_settings(cls) -> MedicalEmbedder:
         """Build embedder from global Settings (uses embedding_batch_size)."""
         from medgraphia.config import get_settings
+
         cfg = get_settings()
         return cls(batch_size=cfg.embedding_batch_size)
 
@@ -104,9 +109,7 @@ class MedicalEmbedder:
         if self._model is not None:
             return
         if not _FLAG_AVAILABLE:
-            raise RuntimeError(
-                "FlagEmbedding is not installed. Run: pip install FlagEmbedding"
-            )
+            raise RuntimeError("FlagEmbedding is not installed. Run: pip install FlagEmbedding")
         logger.info("embedder_loading", model=self._model_name)
         kwargs: dict[str, Any] = {"use_fp16": True}
         if self._device:
@@ -173,6 +176,7 @@ class MedicalEmbedder:
 # SapBERT entity embedder
 # ---------------------------------------------------------------------------
 
+
 class EntityEmbedder:
     """
     SapBERT entity embedder.
@@ -196,9 +200,10 @@ class EntityEmbedder:
         self._model: Any = None
 
     @classmethod
-    def from_settings(cls) -> "EntityEmbedder":
+    def from_settings(cls) -> EntityEmbedder:
         """Build entity embedder from global Settings."""
         from medgraphia.config import get_settings
+
         cfg = get_settings()
         return cls(
             model_name=cfg.el_sapbert_model,
@@ -214,8 +219,7 @@ class EntityEmbedder:
             return
         if not _ST_AVAILABLE:
             raise RuntimeError(
-                "sentence-transformers is not installed. "
-                "Run: pip install sentence-transformers"
+                "sentence-transformers is not installed. Run: pip install sentence-transformers"
             )
         logger.info("entity_embedder_loading", model=self._model_name)
         self._model = _ST(self._model_name)
@@ -240,7 +244,9 @@ class EntityEmbedder:
 
         entities = await get_all_entities()
         if not entities:
-            logger.warning("entity_embed_none", msg="No entity nodes found in Neo4j — nothing to embed")
+            logger.warning(
+                "entity_embed_none", msg="No entity nodes found in Neo4j — nothing to embed"
+            )
             return 0
 
         store = QdrantStore()
@@ -265,9 +271,7 @@ class EntityEmbedder:
                 labels = [e["label"] for e in batch]
 
                 embeddings = self._model.encode(
-                    labels,
-                    normalize_embeddings=True,
-                    show_progress_bar=False
+                    labels, normalize_embeddings=True, show_progress_bar=False
                 )
 
                 entity_points = [
@@ -294,6 +298,7 @@ class EntityEmbedder:
 # Module-level helpers
 # ---------------------------------------------------------------------------
 
+
 def _sparse_to_int_keys(lexical_weights: dict) -> dict[int, float]:
     """
     Convert BGE-M3 lexical_weights to Qdrant-compatible {int token_id: weight}.
@@ -305,7 +310,7 @@ def _sparse_to_int_keys(lexical_weights: dict) -> dict[int, float]:
         w = float(weight)
         if w <= 0:
             continue
-        token_id = token if isinstance(token, int) else abs(hash(str(token))) % (2 ** 31)
+        token_id = token if isinstance(token, int) else abs(hash(str(token))) % (2**31)
         if token_id not in result or result[token_id] < w:
             result[token_id] = w
     return result

@@ -9,12 +9,11 @@ EPAR XML download:       https://www.ema.europa.eu/sites/default/files/Medicines
 
 For each product we download the SmPC PDF / XML from the EMA product page.
 """
+
 from __future__ import annotations
 
-import asyncio
 import io
 import re
-import zipfile
 from pathlib import Path
 
 import aiohttp
@@ -27,7 +26,9 @@ from medgraphia.logger import get_logger
 logger = get_logger(__name__)
 
 # EMA EPAR index (publicly available, no auth required)
-_EPAR_INDEX_URL = "https://www.ema.europa.eu/en/documents/other/medicines-output-medicines-report_en.xlsx"
+_EPAR_INDEX_URL = (
+    "https://www.ema.europa.eu/en/documents/other/medicines-output-medicines-report_en.xlsx"
+)
 _EMA_PRODUCT_BASE = "https://www.ema.europa.eu"
 
 
@@ -43,7 +44,7 @@ class EMASmPCConnector:
         self._output_dir.mkdir(parents=True, exist_ok=True)
         self._session: aiohttp.ClientSession | None = None
 
-    async def __aenter__(self) -> "EMASmPCConnector":
+    async def __aenter__(self) -> EMASmPCConnector:
         self._session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=120),
             headers={
@@ -99,7 +100,7 @@ class EMASmPCConnector:
 
         wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True)
         ws = wb.active
-        
+
         # 3. Dynamically find the header row (EMA index has preambles)
         header_row_idx = 1
         headers = []
@@ -108,16 +109,13 @@ class EMASmPCConnector:
                 header_row_idx = i + 1
                 headers = [str(c).strip() if c else "" for c in row]
                 break
-        
+
         if not headers:
             raise RuntimeError("Could not find a valid header row in EMA Excel index.")
 
         # Map current EMA column names to our internal keys
         # 2026 names: 'Name of medicine', 'Active substance', 'Medicine URL'
-        col_map = {
-            "Name of medicine": "Medicine name",
-            "Medicine URL": "URL"
-        }
+        col_map = {"Name of medicine": "Medicine name", "Medicine URL": "URL"}
 
         products = []
         for row in ws.iter_rows(min_row=header_row_idx + 1, values_only=True):  # type: ignore[call-arg]
@@ -128,7 +126,7 @@ class EMASmPCConnector:
                     # Normalize header name if it's in our map
                     key = col_map.get(header_name, header_name)
                     entry[key] = str(val or "").strip()
-            
+
             if entry.get("Medicine name"):
                 products.append(entry)
 
@@ -194,12 +192,12 @@ class EMASmPCConnector:
             html = await resp.text()
 
         soup = BeautifulSoup(html, "lxml")
-        
+
         # EMA site uses specific patterns for Product Information (which contains SmPC)
         for link in soup.find_all("a", href=True):
             href: str = link["href"]
             text: str = link.get_text(strip=True).lower()
-            
+
             # Pattern 1: Language-specific Product Info
             # E.g. "English (EN)" link pointing to "/product-information/..."
             if "english (en)" in text and "/product-information/" in href.lower():
@@ -212,7 +210,7 @@ class EMASmPCConnector:
             # Pattern 3: Fallback to any PDF containing product-information in URL
             if "/product-information/" in href.lower() and href.lower().endswith(".pdf"):
                 return href if href.startswith("http") else _EMA_PRODUCT_BASE + href
-                
+
         return None
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=30))

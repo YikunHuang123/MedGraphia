@@ -9,6 +9,7 @@ Exports:
     connection_pill()    — animated connection status
     LOGO_SVG_INLINE      — raw SVG used as the favicon
 """
+
 from __future__ import annotations
 
 import streamlit as st
@@ -16,8 +17,8 @@ import streamlit as st
 # Palette — deep clinical navy with vibrant accents
 PRIMARY = "#0B3D91"
 PRIMARY_LIGHT = "#1E5BBF"
-ACCENT = "#0FB3A1"      # healing teal
-ACCENT_VIBRANT = "#10B981" # emerald
+ACCENT = "#0FB3A1"  # healing teal
+ACCENT_VIBRANT = "#10B981"  # emerald
 SURFACE = "#F8FAFC"
 CARD = "#FFFFFF"
 BORDER = "#E2E8F0"
@@ -397,12 +398,8 @@ def status_badge(label: str, kind: str = "info") -> str:
     return f'<span class="mg-badge mg-badge-{kind}">{label}</span>'
 
 
-def connection_pill(online: bool, label_ok: str = "Connected",
-                    label_off: str = "Offline") -> str:
+def connection_pill(online: bool, label_ok: str = "Connected", label_off: str = "Offline") -> str:
     """Return HTML for an animated connection pill (sidebar)."""
     cls = "mg-online" if online else "mg-offline"
     txt = label_ok if online else label_off
-    return (
-        f'<span class="mg-pill {cls}">'
-        f'<span class="mg-pill-dot"></span>{txt}</span>'
-    )
+    return f'<span class="mg-pill {cls}"><span class="mg-pill-dot"></span>{txt}</span>'

@@ -2,8 +2,9 @@
 Phase 3 tests: NER pipeline — MentionSpan, GLiNERNER, BertNER, MedicalNERPipeline.
 
 All tests are pure-Python unit tests: no GPU, no network, no Neo4j required.
-GLiNER and transformers are optional; tests gracefully skip when not installed.
+GLiNER and transformers are optional; tests skip when not installed.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -15,6 +16,7 @@ from medgraphia.ingestion.ner.pipeline import MedicalNERPipeline, _merge_spans
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_source() -> SourceMeta:
     return SourceMeta(source_id="test:ner", source_title="NER Test")
@@ -39,14 +41,19 @@ def _span(
     source: str = "test",
 ) -> MentionSpan:
     return MentionSpan.from_text(
-        text=text, start=start, end=end,
-        entity_type=entity_type, confidence=confidence, source=source,
+        text=text,
+        start=start,
+        end=end,
+        entity_type=entity_type,
+        confidence=confidence,
+        source=source,
     )
 
 
 # ===========================================================================
 # MentionSpan
 # ===========================================================================
+
 
 class TestMentionSpan:
     def test_normalized_is_lowercased(self):
@@ -87,6 +94,7 @@ class TestMentionSpan:
 # _merge_spans (pipeline deduplication logic)
 # ===========================================================================
 
+
 class TestMergeSpans:
     def test_non_overlapping_spans_all_kept(self):
         a = _span("drug", 0, 4, EntityType.DRUG, confidence=0.9)
@@ -95,7 +103,7 @@ class TestMergeSpans:
         assert len(result) == 2
 
     def test_same_type_overlap_keeps_higher_confidence(self):
-        low  = _span("diabetes", 0, 8, EntityType.DISEASE, confidence=0.6, source="bert")
+        low = _span("diabetes", 0, 8, EntityType.DISEASE, confidence=0.6, source="bert")
         high = _span("type 2 diabetes", 0, 15, EntityType.DISEASE, confidence=0.9, source="gliner")
         result = _merge_spans([high], [low])
         # high-confidence span should survive; low should be dominated
@@ -106,7 +114,7 @@ class TestMergeSpans:
 
     def test_different_type_overlap_both_kept(self):
         # Same text region, different type → keep both (ambiguity)
-        drug_span    = _span("insulin", 0, 7, EntityType.DRUG,    confidence=0.85)
+        drug_span = _span("insulin", 0, 7, EntityType.DRUG, confidence=0.85)
         symptom_span = _span("insulin", 0, 7, EntityType.SYMPTOM, confidence=0.75)
         result = _merge_spans([drug_span], [symptom_span])
         types = {s.entity_type for s in result}
@@ -128,6 +136,7 @@ class TestMergeSpans:
 # MedicalNERPipeline (no model required — tests that it runs without crashing)
 # ===========================================================================
 
+
 class TestNERPipelineStructure:
     """
     Tests the pipeline interface without triggering model downloads.
@@ -146,14 +155,17 @@ class TestNERPipelineStructure:
     def patched_pipeline(self, pipeline):
         """Pipeline whose underlying NER models are replaced with no-op stubs."""
         from unittest.mock import patch
-        with patch.object(pipeline._gliner, "predict", return_value=[]) as _g, \
-             patch.object(pipeline._bert,   "predict", return_value=[]) as _b:
+
+        with (
+            patch.object(pipeline._gliner, "predict", return_value=[]) as _g,
+            patch.object(pipeline._bert, "predict", return_value=[]) as _b,
+        ):
             yield pipeline
 
     def test_extract_returns_chunk(self, patched_pipeline):
         chunk = _make_chunk("Metformin treats type 2 diabetes.")
         result = patched_pipeline.extract(chunk)
-        assert result is not chunk          # new object
+        assert result is not chunk  # new object
         assert result.chunk_id == chunk.chunk_id
         assert result.doc_id == chunk.doc_id
 
@@ -181,12 +193,15 @@ class TestNERPipelineStructure:
     def test_entities_from_gliner_have_mention_prefix(self, pipeline):
         """Directly inject GLiNER spans and verify Entity CUI prefix."""
         from unittest.mock import patch
+
         fake_spans = [
             MentionSpan.from_text("Metformin", 0, 9, EntityType.DRUG, 0.9, "gliner"),
             MentionSpan.from_text("type 2 diabetes", 10, 25, EntityType.DISEASE, 0.85, "gliner"),
         ]
-        with patch.object(pipeline._gliner, "predict", return_value=fake_spans), \
-             patch.object(pipeline._bert,   "predict", return_value=[]):
+        with (
+            patch.object(pipeline._gliner, "predict", return_value=fake_spans),
+            patch.object(pipeline._bert, "predict", return_value=[]),
+        ):
             chunk = _make_chunk("Metformin treats type 2 diabetes.")
             result = pipeline.extract(chunk)
             for entity in result.entities:
@@ -213,6 +228,7 @@ class TestNERPipelineStructure:
 # Entity deduplication in pipeline._spans_to_entities
 # ===========================================================================
 
+
 class TestSpanToEntityDeduplication:
     def test_same_mention_same_type_deduplicated(self):
         pipeline = MedicalNERPipeline(min_confidence=0.0)
@@ -220,8 +236,12 @@ class TestSpanToEntityDeduplication:
         from medgraphia.ingestion.ner._types import MentionSpan
 
         spans = [
-            MentionSpan.from_text("Metformin", 0, 9, EntityType.DRUG, confidence=0.9, source="gliner"),
-            MentionSpan.from_text("metformin", 10, 19, EntityType.DRUG, confidence=0.7, source="bert"),
+            MentionSpan.from_text(
+                "Metformin", 0, 9, EntityType.DRUG, confidence=0.9, source="gliner"
+            ),
+            MentionSpan.from_text(
+                "metformin", 10, 19, EntityType.DRUG, confidence=0.7, source="bert"
+            ),
         ]
         chunk = _make_chunk("Metformin and metformin")
         entities = pipeline._spans_to_entities(spans, chunk)
@@ -234,8 +254,10 @@ class TestSpanToEntityDeduplication:
     def test_same_mention_different_type_kept(self):
         pipeline = MedicalNERPipeline(min_confidence=0.0)
         spans = [
-            MentionSpan.from_text("insulin", 0, 7, EntityType.DRUG,    confidence=0.85, source="gliner"),
-            MentionSpan.from_text("insulin", 0, 7, EntityType.GENE,    confidence=0.60, source="bert"),
+            MentionSpan.from_text(
+                "insulin", 0, 7, EntityType.DRUG, confidence=0.85, source="gliner"
+            ),
+            MentionSpan.from_text("insulin", 0, 7, EntityType.GENE, confidence=0.60, source="bert"),
         ]
         chunk = _make_chunk("insulin")
         entities = pipeline._spans_to_entities(spans, chunk)
@@ -265,25 +287,30 @@ class TestSpanToEntityDeduplication:
 # GLiNER availability probe (does not fail if not installed)
 # ===========================================================================
 
+
 class TestGLiNERAvailability:
     def test_gliner_availability_flag_is_bool(self):
         from medgraphia.ingestion.ner.gliner_ner import _GLINER_AVAILABLE
+
         assert isinstance(_GLINER_AVAILABLE, bool)
 
     def test_gliner_predict_returns_list(self):
         from unittest.mock import patch
+
         from medgraphia.ingestion.ner.gliner_ner import GLiNERNER
+
         ner = GLiNERNER()
         # Patch _load_model to return a fake model that returns empty list
-        fake_model = type("FakeGLiNER", (), {
-            "predict_entities": lambda self, text, labels, threshold=0.5: []
-        })()
+        fake_model = type(
+            "FakeGLiNER", (), {"predict_entities": lambda self, text, labels, threshold=0.5: []}
+        )()
         with patch.object(ner, "_load_model", return_value=fake_model):
             result = ner.predict("Metformin treats type 2 diabetes.", Language.EN)
         assert isinstance(result, list)
 
     def test_gliner_predict_empty_text(self):
         from medgraphia.ingestion.ner.gliner_ner import GLiNERNER
+
         ner = GLiNERNER()
         assert ner.predict("", Language.EN) == []
 
@@ -292,18 +319,22 @@ class TestGLiNERAvailability:
 # BERT NER availability probe
 # ===========================================================================
 
+
 class TestBertNERAvailability:
     def test_bert_availability_flag_is_bool(self):
         from medgraphia.ingestion.ner.bert_ner import _TRANSFORMERS_AVAILABLE
+
         assert isinstance(_TRANSFORMERS_AVAILABLE, bool)
 
     def test_bert_predict_empty_text(self):
         from medgraphia.ingestion.ner.bert_ner import BertNER
+
         ner = BertNER()
         assert ner.predict("", Language.EN) == []
 
     def test_bert_predict_no_model_name_returns_empty(self):
         from medgraphia.ingestion.ner.bert_ner import BertNER
+
         ner = BertNER(en_model="")
         result = ner.predict("Insulin is a hormone.", Language.EN)
         assert result == []

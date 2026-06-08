@@ -6,11 +6,12 @@ Download from: https://go.drugbank.com/releases/latest (requires free registrati
 This module parses the downloaded XML file — it does NOT attempt to scrape or
 access DrugBank without a valid license.
 """
+
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from medgraphia.domain import Language, ParsedSection, RawDocument, SourceMeta
 from medgraphia.logger import get_logger
@@ -69,6 +70,7 @@ class DrugBankConnector:
 # Parsing helpers
 # ---------------------------------------------------------------------------
 
+
 def _text(elem: ET.Element, path: str) -> str:
     found = elem.find(path, _NS)
     return (found.text or "").strip() if found is not None else ""
@@ -77,7 +79,7 @@ def _text(elem: ET.Element, path: str) -> str:
 def _parse_drug_element(drug: ET.Element) -> RawDocument:
     drugbank_id = _text(drug, "db:drugbank-id[@primary='true']") or _text(drug, "db:drugbank-id")
     name = _text(drug, "db:name")
-    
+
     # Extract structural fields
     fields = [
         ("Description", "db:description"),
@@ -88,18 +90,12 @@ def _parse_drug_element(drug: ET.Element) -> RawDocument:
         ("Metabolism", "db:metabolism"),
         ("Absorption", "db:absorption"),
     ]
-    
+
     parsed_sections: list[ParsedSection] = []
     for label, path in fields:
         content = _text(drug, path)
         if content:
-            parsed_sections.append(
-                ParsedSection(
-                    section_path=label,
-                    title=label,
-                    content=content
-                )
-            )
+            parsed_sections.append(ParsedSection(section_path=label, title=label, content=content))
 
     full_text = "\n\n".join(f"{s.title}: {s.content}" for s in parsed_sections)
 

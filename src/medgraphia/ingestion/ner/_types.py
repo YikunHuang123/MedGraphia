@@ -2,6 +2,7 @@
 Internal NER span type.  Intermediate representation between raw model output
 and the domain Entity — lives only inside the ingestion pipeline.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,13 +14,13 @@ from medgraphia.domain import EntityType
 class MentionSpan:
     """An entity mention span extracted from text by an NER model."""
 
-    text: str         # Surface form (exact text from source)
-    normalized: str   # Lower-stripped form used for deduplication / BM25 query
-    start: int        # Inclusive char offset in source text
-    end: int          # Exclusive char offset
+    text: str  # Surface form (exact text from source)
+    normalized: str  # Lower-stripped form used for deduplication / BM25 query
+    start: int  # Inclusive char offset in source text
+    end: int  # Exclusive char offset
     entity_type: EntityType
     confidence: float = 1.0
-    source: str = "unknown"   # "gliner" | "bert" | "regex"
+    source: str = "unknown"  # "gliner" | "bert" | "regex"
 
     # ------------------------------------------------------------------
     # Factories
@@ -34,7 +35,7 @@ class MentionSpan:
         entity_type: EntityType,
         confidence: float = 1.0,
         source: str = "unknown",
-    ) -> "MentionSpan":
+    ) -> MentionSpan:
         return cls(
             text=text,
             normalized=text.strip().lower(),
@@ -49,6 +50,6 @@ class MentionSpan:
     # Helpers
     # ------------------------------------------------------------------
 
-    def overlaps(self, other: "MentionSpan") -> bool:
+    def overlaps(self, other: MentionSpan) -> bool:
         """Return True when this span's character range overlaps with other."""
         return self.start < other.end and other.start < self.end

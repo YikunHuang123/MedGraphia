@@ -1,7 +1,7 @@
 """
 Abstract interface for vector store backends.
-Rest of the codebase uses this interface for Qdrant storage.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

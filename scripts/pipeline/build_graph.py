@@ -1,9 +1,7 @@
 """
 Master pipeline script: orchestrates the full offline knowledge-graph build.
-Runs Phases 1–8 in sequence for a given domain.
 
-All business logic resides in src/medgraphia/ingestion/pipeline.py.
-This script is a thin CLI wrapper.
+All logic resides in src/medgraphia/ingestion/pipeline.py.
 """
 
 # python scripts/pipeline/build_graph.py --domain t2dm --pubmed-limit 5
@@ -11,7 +9,6 @@ This script is a thin CLI wrapper.
 # python scripts/pipeline/build_graph.py --skip-fetch --skip-parse --skip-chunk --skip-ner --skip-link --skip-extract --skip-community
 
 # python scripts/pipeline/build_graph.py --skip-fetch --skip-parse --skip-chunk --skip-ner --skip-link --include-drugbank
-
 
 from __future__ import annotations
 
@@ -24,8 +21,8 @@ import click
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from medgraphia.config import get_settings
+from medgraphia.ingestion.pipeline import BuildConfig, run_pipeline
 from medgraphia.logger import configure_logging
-from medgraphia.ingestion.pipeline import run_pipeline, BuildConfig
 
 
 @click.command()
@@ -48,33 +45,34 @@ def main(**kwargs: object) -> None:
     """Run the knowledge graph build pipeline."""
     cfg = get_settings()
     configure_logging(cfg.log_level)
-    
+
     # 1. Map CLI arguments to BuildConfig
     # We strip 'domain' if it's None to use the default from settings
     if kwargs.get("domain") is None:
         kwargs["domain"] = cfg.default_domain
-        
+
     build_cfg = BuildConfig(**kwargs)  # type: ignore[arg-type]
 
-    click.echo(f"\n{'='*60}")
-    click.echo(f"  MedGraphia — Build Graph Pipeline")
+    click.echo(f"\n{'=' * 60}")
+    click.echo("  MedGraphia — Build Graph Pipeline")
     click.echo(f"  Domain:  {build_cfg.domain}")
-    click.echo(f"{'='*60}\n")
+    click.echo(f"{'=' * 60}\n")
 
     # 2. Delegate to business layer
     try:
         summary = run_pipeline(build_cfg)
-        
-        click.echo("\n" + "="*60)
+
+        click.echo("\n" + "=" * 60)
         click.echo("  Pipeline Results Summary")
         click.echo("-" * 60)
         for key, value in summary.items():
             click.echo(f"  {key:20}: {value}")
-        click.echo("="*60)
+        click.echo("=" * 60)
         click.echo("\n✓ Pipeline complete.\n")
-        
+
     except Exception as exc:
         import traceback
+
         click.echo(f"\n❌ Pipeline failed: {exc}", err=True)
         click.echo(traceback.format_exc(), err=True)
         sys.exit(1)

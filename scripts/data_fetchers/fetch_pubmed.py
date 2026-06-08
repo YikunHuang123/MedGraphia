@@ -14,12 +14,12 @@ Arguments:
   --from     Start date, YYYY-MM-DD (optional)
   --to       End date, YYYY-MM-DD (optional)
 """
+
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -43,15 +43,11 @@ DOMAIN_QUERIES: dict[str, str] = {
     "cardiovascular": (
         "cardiovascular diseases[MeSH] AND drug therapy[MeSH] AND English[Language]"
     ),
-    "oncology": (
-        "neoplasms[MeSH] AND drug therapy[MeSH] AND English[Language]"
-    ),
+    "oncology": ("neoplasms[MeSH] AND drug therapy[MeSH] AND English[Language]"),
     "drug_interaction": (
         "drug interactions[MeSH] AND (adverse effects OR toxicity) AND English[Language]"
     ),
-    "hypertension": (
-        "hypertension[MeSH] AND antihypertensive agents[MeSH] AND English[Language]"
-    ),
+    "hypertension": ("hypertension[MeSH] AND antihypertensive agents[MeSH] AND English[Language]"),
 }
 
 

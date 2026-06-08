@@ -10,6 +10,7 @@ Token estimation is intentionally lightweight (no ML tokenizer dependency)
 EN/DE: word_count × 1.3 (BPE inflation approximation)
 ZH:    cjk_char_count × 0.75  (CJK char ≈ 1.3 BPE tokens on BGE-M3)
 """
+
 from __future__ import annotations
 
 import re
@@ -62,9 +63,7 @@ class MedicalChunker:
             if doc.full_text.strip() and doc.full_text.strip() != doc.abstract.strip():
                 text_parts.append(("Body", doc.full_text))
             for section_name, text in text_parts:
-                chunks.extend(
-                    self._chunk_plain_text(text, doc, section_path=section_name)
-                )
+                chunks.extend(self._chunk_plain_text(text, doc, section_path=section_name))
 
         logger.info(
             "chunking_complete",
@@ -168,7 +167,9 @@ class MedicalChunker:
             if para_tokens > self.max_tokens:
                 if buffer:
                     yield _flush()
-                    buffer = _overlap_tail(buffer, self.overlap_tokens, doc.language, self._estimate_tokens)
+                    buffer = _overlap_tail(
+                        buffer, self.overlap_tokens, doc.language, self._estimate_tokens
+                    )
                     buffer_tokens = sum(self._estimate_tokens(p, doc.language) for p in buffer)
                 yield from self._split_by_sentence(para, doc, section_path, base_page)
                 continue
@@ -176,7 +177,9 @@ class MedicalChunker:
             # Adding this paragraph would overflow — flush first
             if buffer and buffer_tokens + para_tokens > self.max_tokens:
                 yield _flush()
-                buffer = _overlap_tail(buffer, self.overlap_tokens, doc.language, self._estimate_tokens)
+                buffer = _overlap_tail(
+                    buffer, self.overlap_tokens, doc.language, self._estimate_tokens
+                )
                 buffer_tokens = sum(self._estimate_tokens(p, doc.language) for p in buffer)
 
             buffer.append(para)
@@ -214,7 +217,9 @@ class MedicalChunker:
                     token_count=self._estimate_tokens(chunk_text, doc.language),
                     page=base_page,
                 )
-                buffer = _overlap_tail(buffer, self.overlap_tokens, doc.language, self._estimate_tokens)
+                buffer = _overlap_tail(
+                    buffer, self.overlap_tokens, doc.language, self._estimate_tokens
+                )
                 buffer_tokens = sum(self._estimate_tokens(s, doc.language) for s in buffer)
 
             buffer.append(sent)
@@ -250,6 +255,7 @@ class MedicalChunker:
 # ---------------------------------------------------------------------------
 # Text splitting helpers (module-level, importable for tests)
 # ---------------------------------------------------------------------------
+
 
 def _split_paragraphs(text: str) -> list[str]:
     """Split on one or more blank lines."""

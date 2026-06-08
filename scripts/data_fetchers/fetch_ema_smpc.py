@@ -16,6 +16,7 @@ Arguments:
   --out        Output directory (default: data/raw/ema_smpc)
   --lang       Language filter: en (default) or de
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -34,7 +35,9 @@ from medgraphia.logger import configure_logging, get_logger
 
 @click.command()
 @click.option("--drugs", default=None, help="Comma-separated drug names")
-@click.option("--drug-file", default=None, type=click.Path(exists=True), help="File with one drug per line")
+@click.option(
+    "--drug-file", default=None, type=click.Path(exists=True), help="File with one drug per line"
+)
 @click.option("--limit", default=50, show_default=True, help="Max products to download")
 @click.option("--out", default="data/raw/ema_smpc", show_default=True, help="Output directory")
 @click.option("--lang", default="en", type=click.Choice(["en", "de"]), help="Target language")
@@ -55,14 +58,14 @@ def main(
         drug_names = [d.strip() for d in drugs.split(",") if d.strip()]
     elif drug_file:
         drug_names = [
-            line.strip()
-            for line in Path(drug_file).read_text().splitlines()
-            if line.strip()
+            line.strip() for line in Path(drug_file).read_text().splitlines() if line.strip()
         ]
 
     language = Language.DE if lang == "de" else Language.EN
 
-    click.echo(f"Downloading EMA SmPC for {len(drug_names) if drug_names else 'all'} drugs (limit={limit})…")
+    click.echo(
+        f"Downloading EMA SmPC for {len(drug_names) if drug_names else 'all'} drugs (limit={limit})…"
+    )
     asyncio.run(_run(drug_names, limit, out, language))
 
 
@@ -73,7 +76,8 @@ async def _run(drug_names: list[str], limit: int, out: str, language: Language) 
         if drug_names:
             # Filter to requested drug names (case-insensitive substring match)
             filtered = [
-                p for p in products
+                p
+                for p in products
                 if any(
                     name.lower() in (p.get("Medicine name", "") or "").lower()
                     for name in drug_names

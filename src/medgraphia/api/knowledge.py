@@ -5,6 +5,7 @@ GET  /graph/entity          — Expand a 1–3-hop subgraph from a named entity.
 GET  /graph/entity/search   — Fuzzy-search entity names in Neo4j (for auto-complete).
 GET  /graph/stats           — Node / relationship counts (public summary).
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -25,6 +26,7 @@ router = APIRouter(prefix="/graph", tags=["knowledge"])
 # ---------------------------------------------------------------------------
 # GET /graph/entity — subgraph expansion from a named entity
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "/entity",
@@ -63,12 +65,14 @@ async def get_entity_subgraph(
             span.end(metadata={"found": True, "cui": entity_node.get("cui")})
 
         cui: str = entity_node.get("cui", "")
-        
+
         # ── Expand the subgraph ──────────────────────────────────────────────
         with trace.span("subgraph_expansion", input=cui) as span:
             try:
                 subgraph = await get_subgraph(cui=cui, hops=hops)
-                span.end(metadata={"nodes": len(subgraph["nodes"]), "edges": len(subgraph["edges"])})
+                span.end(
+                    metadata={"nodes": len(subgraph["nodes"]), "edges": len(subgraph["edges"])}
+                )
             except Exception as exc:
                 logger.error("subgraph_expansion_failed", cui=cui, error=str(exc))
                 raise HTTPException(
@@ -85,6 +89,7 @@ async def get_entity_subgraph(
 # ---------------------------------------------------------------------------
 # GET /graph/entity/search — name auto-complete
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "/entity/search",
@@ -119,6 +124,7 @@ async def search_entities(
 # GET /graph/stats — graph statistics
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/stats",
     summary="Knowledge-graph node and relation counts",
@@ -142,6 +148,7 @@ async def graph_stats(
 # ---------------------------------------------------------------------------
 # Internal Cypher helpers
 # ---------------------------------------------------------------------------
+
 
 async def _find_entity_by_name(name: str) -> dict[str, Any] | None:
     """
@@ -202,7 +209,7 @@ async def _fuzzy_search_entities(
     else:
         type_filter = "(e:Disease OR e:Drug OR e:Symptom OR e:Gene OR e:Procedure) AND"
 
-    # Optimization: Use case-insensitive regex (?i) or STARTS WITH 
+    # Optimization: Use case-insensitive regex (?i) or STARTS WITH
     # if we want to stay within standard indexes. CONTAINS is always a scan.
     cypher = f"""
     MATCH (e)
@@ -222,11 +229,13 @@ async def _fuzzy_search_entities(
         async with neo4j_session() as session:
             result = await session.run(cypher, q=q, limit=limit)
             async for record in result:
-                results.append({
-                    "cui": record["cui"],
-                    "label": record["label"],
-                    "entity_type": record["entity_type"],
-                })
+                results.append(
+                    {
+                        "cui": record["cui"],
+                        "label": record["label"],
+                        "entity_type": record["entity_type"],
+                    }
+                )
     except Exception as exc:
         logger.warning("entity_search_failed", q=q, error=str(exc))
     return results

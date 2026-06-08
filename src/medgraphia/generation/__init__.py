@@ -10,14 +10,14 @@ from medgraphia.generation.llm_router import (
     ModelTier,
     RoutingDecision,
 )
-from medgraphia.prompts import (
-    MedicalAnswer,
-)
 from medgraphia.llm.gateway import (
     CompletionRequest,
     CompletionResponse,
     LiteLLMGateway,
     LLMProvider,
+)
+from medgraphia.prompts import (
+    MedicalAnswer,
 )
 
 __all__ = [

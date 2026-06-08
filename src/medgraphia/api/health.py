@@ -3,10 +3,8 @@ Health check endpoints.
 GET /health/live  — liveness probe (always 200 if process is running)
 GET /health/ready — readiness probe (checks Neo4j, vector store, and model pre-warming)
 """
-from __future__ import annotations
 
-import asyncio
-from typing import Any
+from __future__ import annotations
 
 from fastapi import APIRouter, Response, status
 
@@ -48,7 +46,7 @@ async def readiness(response: Response) -> ReadinessResponse:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
     logger.debug("health_ready", neo4j=neo4j_status, vector=vector_status, warming=warm_status)
-    
+
     # We add 'warming' to the response (note: requires schema update or using extra)
     return ReadinessResponse(
         neo4j=neo4j_status,
@@ -67,31 +65,30 @@ async def _warm_up_models() -> None:
 
     try:
         from medgraphia.api.chat import _get_generation, _get_guard, _get_retrieval
-        
+
         # 1. Load & Prime Retrieval Pipeline
         # This triggers loading of GLiNER, BERT-NER, SapBERT, BGE-M3, and Reranker
         retrieval = await _get_retrieval()
         logger.info("warmup_retrieval_loading_done")
-        
+
         # 2. Load & Prime Safety Guardrails
         guard = await _get_guard()
         if guard.enabled:
-            # New: Automatically pull model if using Ollama and missing
+            # Automatically pull model if using Ollama and missing
             await guard.ensure_model_ready()
-            
+
             await guard.check_input("Warmup query")
             logger.info("warmup_safety_guard_done")
-        
+
         # 3. Load Generation Pipeline (LLM Router, Prompts)
         await _get_generation()
         logger.info("warmup_generation_done")
 
         # 4. Perform a dummy 'synthetic' request to compile GPU kernels
-        # We use a short medical term to exercise all paths
         await retrieval.execute(query="Metformin", top_k=1)
-        
+
         logger.info("warmup_synthetic_inference_done")
-        
+
         # 5. Mark as warm
         _IS_WARM = True
         logger.info("warmup_complete", message="All models are hot and ready for traffic.")

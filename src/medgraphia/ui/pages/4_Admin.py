@@ -10,6 +10,7 @@ Talks to:
     GET    /admin/keys
     DELETE /admin/keys/{prefix}
 """
+
 from __future__ import annotations
 
 import sys
@@ -23,15 +24,12 @@ if str(_UI_ROOT) not in sys.path:
     sys.path.insert(0, str(_UI_ROOT))
 
 from api_client import APIError, MedGraphiaClient  # noqa: E402
+from components.sidebar import render_common_sidebar  # noqa: E402
 from components.styles import (  # noqa: E402
     banner,
     inject_theme,
-    render_brand,
     status_badge,
 )
-
-
-from components.sidebar import render_common_sidebar  # noqa: E402
 
 st.set_page_config(page_title="Admin — MedGraphia", layout="wide")
 inject_theme()
@@ -61,9 +59,7 @@ if not st.session_state.get("admin_key"):
     st.stop()
 
 
-tab_pipeline, tab_keys, tab_models = st.tabs(
-    ["Pipeline", "API keys", "Model configuration"]
-)
+tab_pipeline, tab_keys, tab_models = st.tabs(["Pipeline", "API keys", "Model configuration"])
 
 
 # ===========================================================================
@@ -92,7 +88,10 @@ with tab_pipeline:
         with c2:
             pubmed_limit = st.number_input(
                 "PubMed article limit",
-                min_value=1, max_value=5000, value=200, step=50,
+                min_value=1,
+                max_value=5000,
+                value=200,
+                step=50,
             )
             include_drugbank = st.checkbox("Include DrugBank", value=False)
             include_ema_smpc = st.checkbox("Include EMA SmPC", value=False)
@@ -121,7 +120,8 @@ with tab_pipeline:
     )
 
     poll_domain = st.text_input(
-        "Domain to poll", value=domain if submitted else "t2dm",
+        "Domain to poll",
+        value=domain if submitted else "t2dm",
         key="status_domain",
     )
     auto_refresh = st.toggle("Auto-refresh every 5 s", value=False)
@@ -134,16 +134,16 @@ with tab_pipeline:
 
     stage = status.get("stage", "idle")
     stage_kind = {
-        "completed": "ok", "running": "info", "starting": "info",
-        "failed": "err", "idle": "warn",
+        "completed": "ok",
+        "running": "info",
+        "starting": "info",
+        "failed": "err",
+        "idle": "warn",
     }.get(stage, "info")
 
     live_dot = ""
     if stage in ("running", "starting"):
-        live_dot = (
-            ' <span style="color:#0FB3A1;font-weight:700;font-size:0.8rem">'
-            '● live</span>'
-        )
+        live_dot = ' <span style="color:#0FB3A1;font-weight:700;font-size:0.8rem">● live</span>'
 
     st.markdown(
         f"**Current stage:** {status_badge(stage, stage_kind)}{live_dot}",
@@ -151,14 +151,13 @@ with tab_pipeline:
     )
 
     progress = float(status.get("progress") or 0.0)
-    st.progress(min(max(progress, 0.0), 1.0),
-                text=f"{progress * 100:.1f}% complete")
+    st.progress(min(max(progress, 0.0), 1.0), text=f"{progress * 100:.1f}% complete")
 
     mc = st.columns(4)
-    mc[0].metric("Nodes created",    f"{status.get('nodes_created', 0):,}")
-    mc[1].metric("Edges created",    f"{status.get('edges_created', 0):,}")
-    mc[2].metric("Docs processed",   f"{status.get('documents_processed', 0):,}")
-    mc[3].metric("Docs total",       f"{status.get('documents_total', 0):,}")
+    mc[0].metric("Nodes created", f"{status.get('nodes_created', 0):,}")
+    mc[1].metric("Edges created", f"{status.get('edges_created', 0):,}")
+    mc[2].metric("Docs processed", f"{status.get('documents_processed', 0):,}")
+    mc[3].metric("Docs total", f"{status.get('documents_total', 0):,}")
 
     if err := status.get("error"):
         st.error(f"Last error: {err}")
@@ -188,9 +187,7 @@ with tab_keys:
             new = _client().create_api_key(role=role)
             st.success("Key created — copy it now, it cannot be retrieved again.")
             st.code(new.get("api_key", ""), language=None)
-            st.caption(
-                f"Role: `{new.get('role')}`  ·  Prefix: `{new.get('prefix')}`"
-            )
+            st.caption(f"Role: `{new.get('role')}`  ·  Prefix: `{new.get('prefix')}`")
         except APIError as exc:
             st.error(f"Could not create key: {exc.detail}")
 
@@ -217,8 +214,7 @@ with tab_keys:
                 status_badge(k.get("role", "user"), "info"),
                 unsafe_allow_html=True,
             )
-            if r3.button("Revoke", key=f"revoke_{prefix_clean}",
-                         use_container_width=True):
+            if r3.button("Revoke", key=f"revoke_{prefix_clean}", use_container_width=True):
                 try:
                     res = _client().revoke_api_key(prefix_clean[:8])
                     st.success(f"Revoked {res.get('count', 0)} key(s).")
@@ -243,11 +239,9 @@ with tab_models:
 
     try:
         _client().admin_graph_stats()
-        st.markdown(status_badge("backend reachable", "ok"),
-                    unsafe_allow_html=True)
+        st.markdown(status_badge("backend reachable", "ok"), unsafe_allow_html=True)
     except APIError as exc:
-        st.markdown(status_badge("backend unreachable", "err"),
-                    unsafe_allow_html=True)
+        st.markdown(status_badge("backend unreachable", "err"), unsafe_allow_html=True)
         st.caption(exc.detail[:120])
 
     st.markdown(

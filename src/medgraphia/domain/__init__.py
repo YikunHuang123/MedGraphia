@@ -1,8 +1,8 @@
-from medgraphia.domain.base import EntityType, RelationType, Language, QueryType
-from medgraphia.domain.document import SourceMeta, ParsedSection, RawDocument, Chunk
-from medgraphia.domain.medical import Entity, Relation
-from medgraphia.domain.community import Community
+from medgraphia.domain.base import EntityType, Language, QueryType, RelationType
 from medgraphia.domain.chat import Citation, Message, Session
+from medgraphia.domain.community import Community
+from medgraphia.domain.document import Chunk, ParsedSection, RawDocument, SourceMeta
+from medgraphia.domain.medical import Entity, Relation
 
 # Rebuild models that have forward references
 Chunk.model_rebuild()

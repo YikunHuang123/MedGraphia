@@ -3,11 +3,11 @@ Arq connection pool singleton for the FastAPI process.
 
 The API process uses this pool exclusively for *enqueueing* jobs.
 Actual execution happens in the separate worker process
-(``arq medgraphia.worker.WorkerSettings``).
 
 When REDIS_URL is not configured the pool is None and enqueueing is
 silently skipped — the admin endpoint falls back to asyncio.create_task.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -43,6 +43,7 @@ async def get_arq_pool() -> Any | None:
             return None
 
         from medgraphia.config import get_settings
+
         cfg = get_settings()
 
         if not cfg.redis_url:

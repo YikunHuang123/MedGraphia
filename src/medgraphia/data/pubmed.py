@@ -4,16 +4,15 @@ Uses NCBI's official REST API (no scraping).  Supports:
   - esearch  — keyword + date-range + citation-count filtering
   - efetch   — abstract + metadata retrieval in XML format
 
-Requires a PUBMED_EMAIL env var (NCBI policy); PUBMED_API_KEY is optional
-but raises the rate limit from 3 to 10 req/s.
 """
+
 from __future__ import annotations
 
 import asyncio
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, field
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import date
-from typing import AsyncIterator
 
 import aiohttp
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -34,8 +33,8 @@ class PubMedFetchConfig:
     date_from: date | None = None
     date_to: date | None = None
     min_citations: int = 0
-    rettype: str = "abstract"      # "abstract" or "full"
-    batch_size: int = 100          # eFetch batch size (NCBI limit: 10 000)
+    rettype: str = "abstract"  # "abstract" or "full"
+    batch_size: int = 100  # eFetch batch size (NCBI limit: 10 000)
 
 
 class PubMedConnector:
@@ -47,7 +46,7 @@ class PubMedConnector:
         self._api_key = cfg.pubmed_api_key
         self._session: aiohttp.ClientSession | None = None
 
-    async def __aenter__(self) -> "PubMedConnector":
+    async def __aenter__(self) -> PubMedConnector:
         self._session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=60),
             headers={"User-Agent": f"MedGraphia/0.1 (mailto:{self._email})"},
@@ -147,6 +146,7 @@ class PubMedConnector:
 # XML parsing
 # ---------------------------------------------------------------------------
 
+
 def _parse_pubmed_xml(xml_bytes: bytes) -> list[RawDocument]:
     """Parse PubMed XML response into RawDocument objects."""
     root = ET.fromstring(xml_bytes)
@@ -172,29 +172,25 @@ def _parse_article(article: ET.Element) -> RawDocument:
     # Extract structured abstract sections
     parsed_sections: list[ParsedSection] = []
     abstract_texts = article.findall(".//AbstractText")
-    
+
     for el in abstract_texts:
         label = el.get("Label")
         # NLM sometimes uses NlmCategory instead of Label
         if not label:
             label = el.get("NlmCategory")
-            
+
         content = (el.text or "").strip()
         if not content:
             continue
-            
+
         section_title = label.title() if label else "Abstract"
-        
+
         # If last section has the same title, append to it (sometimes PubMed splits long paragraphs)
         if parsed_sections and parsed_sections[-1].title == section_title:
             parsed_sections[-1].content += "\n" + content
         else:
             parsed_sections.append(
-                ParsedSection(
-                    section_path=section_title,
-                    title=section_title,
-                    content=content
-                )
+                ParsedSection(section_path=section_title, title=section_title, content=content)
             )
 
     # Full abstract text for backward compatibility

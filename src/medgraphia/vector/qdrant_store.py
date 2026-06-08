@@ -1,7 +1,8 @@
 """
 Qdrant vector store implementation.
-Supports dense-only and dense+sparse hybrid search (native Qdrant feature).
+Supports dense-only and dense+sparse hybrid search.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -58,9 +59,7 @@ class QdrantStore(VectorStoreBase):
         sparse_vectors_config: dict[str, qmodels.SparseVectorParams] | None = None
         if sparse:
             sparse_vectors_config = {
-                "sparse": qmodels.SparseVectorParams(
-                    index=qmodels.SparseIndexParams(on_disk=False)
-                )
+                "sparse": qmodels.SparseVectorParams(index=qmodels.SparseIndexParams(on_disk=False))
             }
 
         await self._client.create_collection(
@@ -91,7 +90,7 @@ class QdrantStore(VectorStoreBase):
     ) -> int:
         """Upsert chunks in batches.  Each Chunk must have .embedding set."""
         total_written = 0
-        
+
         for i in range(0, len(chunks), batch_size):
             batch = chunks[i : i + batch_size]
             points: list[qmodels.PointStruct] = []
@@ -172,8 +171,9 @@ class QdrantStore(VectorStoreBase):
         Falls back to dense-only if sparse vector is empty.
         """
         if not query_sparse:
-            return await self.search(collection_name, query_dense, limit=limit,
-                                     filter_payload=filter_payload)
+            return await self.search(
+                collection_name, query_dense, limit=limit, filter_payload=filter_payload
+            )
 
         qdrant_filter = _build_filter(filter_payload)
         sparse_indices = list(query_sparse.keys())
@@ -208,7 +208,9 @@ class QdrantStore(VectorStoreBase):
             collection_name=collection_name,
             points_selector=qmodels.FilterSelector(
                 filter=qmodels.Filter(
-                    must=[qmodels.FieldCondition(key="doc_id", match=qmodels.MatchValue(value=doc_id))]
+                    must=[
+                        qmodels.FieldCondition(key="doc_id", match=qmodels.MatchValue(value=doc_id))
+                    ]
                 )
             ),
         )
@@ -228,11 +230,11 @@ class QdrantStore(VectorStoreBase):
         Upsert entity dense embeddings into the entity collection in batches.
         """
         total_written = 0
-        
+
         for i in range(0, len(entity_points), batch_size):
             batch = entity_points[i : i + batch_size]
             points: list[qmodels.PointStruct] = []
-            
+
             for ep in batch:
                 if not ep.get("embedding"):
                     logger.warning("entity_missing_embedding", cui=ep.get("cui", "?"))
@@ -254,7 +256,9 @@ class QdrantStore(VectorStoreBase):
             if points:
                 await self._client.upsert(collection_name=collection_name, points=points, wait=True)
                 total_written += len(points)
-                logger.debug("qdrant_entities_batch_upserted", collection=collection_name, count=len(points))
+                logger.debug(
+                    "qdrant_entities_batch_upserted", collection=collection_name, count=len(points)
+                )
 
         return total_written
 
@@ -267,6 +271,7 @@ class QdrantStore(VectorStoreBase):
 def _entity_uuid(cui: str) -> str:
     """Deterministic UUID for an entity CUI used as the Qdrant point ID."""
     return str(uuid.uuid5(uuid.NAMESPACE_OID, cui))
+
 
 def _build_filter(filter_payload: dict[str, Any] | None) -> qmodels.Filter | None:
     if not filter_payload:

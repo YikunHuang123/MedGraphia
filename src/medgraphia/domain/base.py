@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 from enum import Enum
+
 
 class EntityType(str, Enum):
     DISEASE = "Disease"
@@ -8,6 +10,7 @@ class EntityType(str, Enum):
     GENE = "Gene"
     PROCEDURE = "Procedure"
     UNKNOWN = "Unknown"
+
 
 class RelationType(str, Enum):
     TREATS = "TREATS"
@@ -21,14 +24,26 @@ class RelationType(str, Enum):
     MENTIONED_IN = "MENTIONED_IN"
     FROM_DOC = "FROM_DOC"
 
+
 class Language(str, Enum):
     EN = "en"
     ZH = "zh"
     DE = "de"
     UNKNOWN = "unknown"
 
+    @property
+    def full_name(self) -> str:
+        """Return the human-readable name of the language (e.g. 'English', 'Chinese')."""
+        mapping = {
+            Language.EN: "English",
+            Language.ZH: "Chinese",
+            Language.DE: "German",
+            Language.UNKNOWN: "Unknown",
+        }
+        return mapping.get(self, "English")
+
     @classmethod
-    def detect(cls, text: str) -> "Language":
+    def detect(cls, text: str) -> Language:
         """
         Detect language using a hybrid approach:
         1. Fast Unicode check for Chinese.
@@ -37,17 +52,18 @@ class Language(str, Enum):
         """
         if not text or len(text.strip()) < 2:
             return cls.EN
-        
+
         # Step 1: Instant check for Chinese characters (CJK range)
-        if any('\u4e00' <= char <= '\u9fff' for char in text):
+        if any("\u4e00" <= char <= "\u9fff" for char in text):
             return cls.ZH
-            
+
         # Step 2: Use FastText for robust detection
         try:
             from fast_langdetect import detect as ft_detect
+
             # Note: low_memory parameter is not supported in all versions of fast-langdetect
             result = ft_detect(text)
-            
+
             # Handle list vs dict return type from different versions
             if isinstance(result, list) and len(result) > 0:
                 lang_code = result[0].get("lang", "en").lower()
@@ -55,7 +71,7 @@ class Language(str, Enum):
                 lang_code = result.get("lang", "en").lower()
             else:
                 lang_code = "en"
-            
+
             if lang_code == "de":
                 return cls.DE
             if lang_code == "zh":
@@ -68,6 +84,7 @@ class Language(str, Enum):
         except Exception as e:
             print(f"ERROR: Language detection failed: {e}. Falling back to English.")
             return cls.EN
+
 
 class QueryType(str, Enum):
     CLINICAL_DECISION = "clinical_decision"

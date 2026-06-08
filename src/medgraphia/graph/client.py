@@ -2,11 +2,12 @@
 Neo4j async driver with connection-pool management.
 Use get_driver() / close_driver() at application lifespan boundaries.
 """
+
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from neo4j import AsyncDriver, AsyncGraphDatabase, AsyncSession
 

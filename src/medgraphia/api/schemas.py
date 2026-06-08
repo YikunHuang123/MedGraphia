@@ -1,19 +1,20 @@
 """
 Pydantic request / response DTOs for the FastAPI application.
 """
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from medgraphia.domain import Citation, Language, QueryType
 
-
 # ---------------------------------------------------------------------------
 # Chat
 # ---------------------------------------------------------------------------
+
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4096)
@@ -32,12 +33,13 @@ class ChatResponse(BaseModel):
     faithfulness_score: float | None = None
     query_type: QueryType | None = None
     disclaimer: str = ""
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # ---------------------------------------------------------------------------
 # Knowledge graph
 # ---------------------------------------------------------------------------
+
 
 class EntityQueryRequest(BaseModel):
     name: str = Field(..., min_length=1)
@@ -53,6 +55,7 @@ class EntityQueryResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Admin / pipeline
 # ---------------------------------------------------------------------------
+
 
 class PipelineStatusResponse(BaseModel):
     stage: str
@@ -79,6 +82,7 @@ class GraphStatsResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
+
 
 class LivenessResponse(BaseModel):
     status: str = "ok"

@@ -12,6 +12,7 @@ Arguments:
   --limit      Max labels per drug to download (default: 3)
   --out        Output directory (default: data/raw/fda_dailymed)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -41,9 +42,7 @@ def main(drugs: str | None, drug_file: str | None, limit: int, out: str) -> None
         drug_names = [d.strip() for d in drugs.split(",") if d.strip()]
     elif drug_file:
         drug_names = [
-            line.strip()
-            for line in Path(drug_file).read_text().splitlines()
-            if line.strip()
+            line.strip() for line in Path(drug_file).read_text().splitlines() if line.strip()
         ]
 
     if not drug_names:

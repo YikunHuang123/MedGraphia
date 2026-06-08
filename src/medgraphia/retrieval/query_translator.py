@@ -16,6 +16,7 @@ language.  The retrieval pipeline then runs one language-filtered Qdrant search 
 language using the per-language translation, guaranteeing fair representation in the
 candidate pool regardless of the source language.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -27,12 +28,6 @@ from medgraphia.logger import get_logger
 logger = get_logger(__name__)
 
 _SUPPORTED: list[Language] = [Language.EN, Language.ZH, Language.DE]
-
-_LANG_NAMES: dict[Language, str] = {
-    Language.EN: "English",
-    Language.ZH: "Chinese (Simplified)",
-    Language.DE: "German",
-}
 
 
 @dataclass
@@ -61,7 +56,7 @@ class QueryTranslator:
     """
 
     @classmethod
-    def from_settings(cls) -> "QueryTranslator":
+    def from_settings(cls) -> QueryTranslator:
         return cls()
 
     async def translate(
@@ -88,10 +83,7 @@ class QueryTranslator:
         if not target_languages:
             return TranslatedQuery(original=query, source_language=source_language)
 
-        coros = [
-            self._translate_one(query, source_language, tgt)
-            for tgt in target_languages
-        ]
+        coros = [self._translate_one(query, source_language, tgt) for tgt in target_languages]
         results = await asyncio.gather(*coros, return_exceptions=True)
 
         translations: dict[Language, str] = {}
@@ -122,29 +114,20 @@ class QueryTranslator:
         source_language: Language,
         target_language: Language,
     ) -> str:
-        src_name = _LANG_NAMES[source_language]
-        tgt_name = _LANG_NAMES[target_language]
+        src_name = source_language.full_name
+        tgt_name = target_language.full_name
 
         def _sync() -> str:
             import dspy
+
             from medgraphia.llm.dspy_setup import get_lm
+            from medgraphia.programs.translator import get_translator
 
             lm = get_lm("rewriter")
 
-            class TranslateMedicalQuery(dspy.Signature):
-                """Translate a medical query from source_lang to target_lang.
-                Preserve all clinical and pharmacological terminology precisely.
-                Output ONLY the translated text — no explanation, no prefix."""
-
-                source_text: str = dspy.InputField(desc="Medical query to translate")
-                source_lang: str = dspy.InputField(desc="Language of source_text")
-                target_lang: str = dspy.InputField(desc="Language to translate into")
-                translated_text: str = dspy.OutputField(
-                    desc="Translation only, no additional text"
-                )
-
             with dspy.context(lm=lm):
-                pred = dspy.Predict(TranslateMedicalQuery)(
+                program = get_translator()
+                pred = program(
                     source_text=query,
                     source_lang=src_name,
                     target_lang=tgt_name,

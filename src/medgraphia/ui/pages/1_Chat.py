@@ -5,12 +5,13 @@ Talks to:
     POST /chat/stream  (SSE)
     POST /chat         (sync, fallback)
 """
+
 from __future__ import annotations
 
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import streamlit as st
 
@@ -27,10 +28,7 @@ from components.citations import (  # noqa: E402
 from components.styles import (  # noqa: E402
     banner,
     inject_theme,
-    render_brand,
-    status_badge,
 )
-
 
 st.set_page_config(page_title="Chat — MedGraphia", layout="wide")
 inject_theme()
@@ -39,6 +37,7 @@ inject_theme()
 # ---------------------------------------------------------------------------
 # Cached client (mirrors streamlit_app.py)
 # ---------------------------------------------------------------------------
+
 
 @st.cache_resource
 def _client_cached(base_url: str, api_key: str, admin_key: str) -> MedGraphiaClient:
@@ -59,6 +58,7 @@ def _client() -> MedGraphiaClient:
 
 from components.sidebar import render_common_sidebar  # noqa: E402
 
+
 def render_chat_sidebar() -> None:
     with st.sidebar:
         # 1. Standard Sidebar Sections
@@ -76,20 +76,20 @@ def render_chat_sidebar() -> None:
             st.caption("No conversations yet.")
         else:
             active_id = st.session_state.get("active_conv_id")
-            
+
             # Pagination Logic
             page_size = 8
             total_convs = len(convs)
             total_pages = (total_convs + page_size - 1) // page_size
             curr_page = st.session_state.setdefault("conv_page", 1)
-            
+
             start_idx = (curr_page - 1) * page_size
             end_idx = start_idx + page_size
             page_convs = convs[start_idx:end_idx]
 
             for c in page_convs:
-                is_active = (c["id"] == active_id)
-                is_editing = (st.session_state.get("_editing_conv") == c["id"])
+                is_active = c["id"] == active_id
+                is_editing = st.session_state.get("_editing_conv") == c["id"]
 
                 if is_editing:
                     ec, bc = st.columns([4, 1])
@@ -132,21 +132,30 @@ def render_chat_sidebar() -> None:
                 st.markdown('<div style="margin-top: 0.5rem;"></div>', unsafe_allow_html=True)
                 pcol1, pcol2, pcol3 = st.columns([1, 2, 1])
                 with pcol1:
-                    if st.button("◀", key="prev_c_page", disabled=curr_page <= 1, use_container_width=True):
+                    if st.button(
+                        "◀", key="prev_c_page", disabled=curr_page <= 1, use_container_width=True
+                    ):
                         st.session_state.conv_page -= 1
                         st.rerun()
                 with pcol2:
                     st.markdown(
                         f"<div style='text-align:center; font-size:0.75rem; color:#64748B; line-height:30px;'>"
                         f"{curr_page} / {total_pages}</div>",
-                        unsafe_allow_html=True
+                        unsafe_allow_html=True,
                     )
                 with pcol3:
-                    if st.button("▶", key="next_c_page", disabled=curr_page >= total_pages, use_container_width=True):
+                    if st.button(
+                        "▶",
+                        key="next_c_page",
+                        disabled=curr_page >= total_pages,
+                        use_container_width=True,
+                    ):
                         st.session_state.conv_page += 1
                         st.rerun()
+
+
 # ── Sync history from backend on first load ────────────────────────────────
-if (st.session_state.get("api_key") or st.session_state.get("admin_key")):
+if st.session_state.get("api_key") or st.session_state.get("admin_key"):
     chat_history.sync_from_backend(_client())
 
 render_chat_sidebar()
@@ -158,9 +167,7 @@ banner("Chat", "Ask a clinical question — answers cite their source chunks.")
 # Top control bar — active conv summary
 # ---------------------------------------------------------------------------
 
-active = chat_history.ensure_active(
-    language=st.session_state.get("chat_language", "unknown")
-)
+active = chat_history.ensure_active(language=st.session_state.get("chat_language", "unknown"))
 
 # Lazy-load content if this was synced from backend summary
 if active.get("is_lazy"):
@@ -205,6 +212,7 @@ for i, msg in enumerate(active["messages"]):
 # ---------------------------------------------------------------------------
 # SSE token iterator (consumed by st.write_stream)
 # ---------------------------------------------------------------------------
+
 
 def _stream_tokens(events: Iterator[dict], meta_sink: dict) -> Iterator[str]:
     for ev in events:
@@ -252,7 +260,7 @@ if prompt:
                 language="unknown",  # Force auto-detection on backend
             )
             full_text = st.write_stream(_stream_tokens(events, meta))
-            
+
             # Check for moderation
             if meta.get("moderated"):
                 full_text = (

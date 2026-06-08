@@ -4,9 +4,8 @@ Phase 2 tests: MedicalChunker + MedicalNormalizer.
 Tests are pure-Python unit tests — no Neo4j, no GPU, no network required.
 All Chunk / RawDocument objects are constructed in-memory.
 """
-from __future__ import annotations
 
-import textwrap
+from __future__ import annotations
 
 import pytest
 
@@ -19,10 +18,10 @@ from medgraphia.ingestion.chunker import (
 )
 from medgraphia.ingestion.normalizer import MedicalNormalizer
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_source() -> SourceMeta:
     return SourceMeta(source_id="test:001", source_title="Test Document")
@@ -47,6 +46,7 @@ def _make_doc(
 # ===========================================================================
 # MedicalChunker — section-based documents
 # ===========================================================================
+
 
 class TestChunkerSections:
     def test_single_small_section_produces_one_chunk(self):
@@ -89,7 +89,7 @@ class TestChunkerSections:
     def test_empty_section_skipped(self):
         sections = [
             ParsedSection(section_path="Empty", content=""),
-            ParsedSection(section_path="Full",  content="Non-empty content here."),
+            ParsedSection(section_path="Full", content="Non-empty content here."),
         ]
         doc = _make_doc(sections=sections)
         chunks = MedicalChunker().chunk(doc)
@@ -140,9 +140,7 @@ class TestChunkerSections:
         assert chunks[0].token_count > 0
 
     def test_page_info_carried_from_section(self):
-        sections = [
-            ParsedSection(section_path="S", content="Text.", page_start=7)
-        ]
+        sections = [ParsedSection(section_path="S", content="Text.", page_start=7)]
         doc = _make_doc(sections=sections)
         chunks = MedicalChunker().chunk(doc)
 
@@ -152,6 +150,7 @@ class TestChunkerSections:
 # ===========================================================================
 # MedicalChunker — abstract-only documents (PubMed style)
 # ===========================================================================
+
 
 class TestChunkerAbstractOnly:
     def test_abstract_produces_at_least_one_chunk(self):
@@ -198,6 +197,7 @@ class TestChunkerAbstractOnly:
 # MedicalChunker — multi-paragraph splitting
 # ===========================================================================
 
+
 class TestChunkerParagraphSplit:
     def test_multiple_paragraphs_merged_within_limit(self):
         text = "Para one.\n\nPara two.\n\nPara three."
@@ -211,7 +211,7 @@ class TestChunkerParagraphSplit:
     def test_overlap_preserves_context(self):
         # Make paragraphs that force two chunks; check overlap content appears in both
         word = "medication "
-        para_a = word * 50   # ~65 tokens
+        para_a = word * 50  # ~65 tokens
         para_b = word * 50
         para_c = word * 50
         text = f"{para_a.strip()}\n\n{para_b.strip()}\n\n{para_c.strip()}"
@@ -225,6 +225,7 @@ class TestChunkerParagraphSplit:
 # ===========================================================================
 # Internal helpers
 # ===========================================================================
+
 
 class TestSplitHelpers:
     def test_split_paragraphs_on_blank_lines(self):
@@ -271,8 +272,8 @@ class TestSplitHelpers:
 # MedicalNormalizer — frequency normalisation
 # ===========================================================================
 
-class TestNormalizerFrequency:
 
+class TestNormalizerFrequency:
     @pytest.fixture(autouse=True)
     def setup(self):
         self.norm = MedicalNormalizer()
@@ -368,8 +369,8 @@ class TestNormalizerFrequency:
 # MedicalNormalizer — dosage unit normalisation
 # ===========================================================================
 
-class TestNormalizerDosageUnits:
 
+class TestNormalizerDosageUnits:
     @pytest.fixture(autouse=True)
     def setup(self):
         self.norm = MedicalNormalizer()
@@ -408,9 +409,11 @@ class TestNormalizerDosageUnits:
 # MedicalNormalizer — normalize_chunk
 # ===========================================================================
 
+
 class TestNormalizerChunk:
     def test_normalize_chunk_returns_new_chunk(self):
         from medgraphia.domain import Chunk
+
         norm = MedicalNormalizer()
         source = _make_source()
         chunk = Chunk(
@@ -429,6 +432,7 @@ class TestNormalizerChunk:
 
     def test_normalize_chunk_unchanged_text_returns_same_object(self):
         from medgraphia.domain import Chunk
+
         norm = MedicalNormalizer()
         source = _make_source()
         chunk = Chunk(
@@ -447,6 +451,7 @@ class TestNormalizerChunk:
 # Integration: chunker + normalizer pipeline
 # ===========================================================================
 
+
 class TestChunkerNormalizerIntegration:
     def test_pipeline_preserves_section_path_and_normalises_text(self):
         sections = [
@@ -456,7 +461,7 @@ class TestChunkerNormalizerIntegration:
             )
         ]
         doc = _make_doc(sections=sections)
-        chunker    = MedicalChunker()
+        chunker = MedicalChunker()
         normalizer = MedicalNormalizer()
 
         chunks = [normalizer.normalize_chunk(c) for c in chunker.chunk(doc)]
@@ -474,7 +479,7 @@ class TestChunkerNormalizerIntegration:
             )
         ]
         doc = _make_doc(sections=sections, language=Language.DE)
-        chunker    = MedicalChunker()
+        chunker = MedicalChunker()
         normalizer = MedicalNormalizer()
 
         chunks = [normalizer.normalize_chunk(c) for c in chunker.chunk(doc)]

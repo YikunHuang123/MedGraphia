@@ -5,6 +5,7 @@ Talks to:
     GET /graph/entity/search
     GET /graph/entity
 """
+
 from __future__ import annotations
 
 import sys
@@ -18,10 +19,8 @@ if str(_UI_ROOT) not in sys.path:
 
 from api_client import APIError, MedGraphiaClient  # noqa: E402
 from components.graph_viz import render_subgraph  # noqa: E402
-from components.styles import banner, inject_theme, render_brand  # noqa: E402
-
-
 from components.sidebar import render_common_sidebar  # noqa: E402
+from components.styles import banner, inject_theme  # noqa: E402
 
 st.set_page_config(page_title="Graph Explorer — MedGraphia", layout="wide")
 inject_theme()
@@ -36,6 +35,7 @@ banner(
 # ---------------------------------------------------------------------------
 # Cached search (debounces auto-complete on rerun)
 # ---------------------------------------------------------------------------
+
 
 @st.cache_resource
 def _client_cached(base_url: str, api_key: str, admin_key: str) -> MedGraphiaClient:
@@ -52,8 +52,12 @@ def _client() -> MedGraphiaClient:
 
 @st.cache_data(ttl=15, show_spinner=False)
 def _search_cached(
-    base_url: str, api_key: str, admin_key: str,
-    q: str, limit: int, entity_type: str | None,
+    base_url: str,
+    api_key: str,
+    admin_key: str,
+    q: str,
+    limit: int,
+    entity_type: str | None,
 ) -> list[dict]:
     with MedGraphiaClient(base_url=base_url, api_key=api_key, admin_key=admin_key) as c:
         return c.search_entities(q=q, limit=limit, entity_type=entity_type)
@@ -78,8 +82,7 @@ with st.container(border=True):
             label_visibility="collapsed",
         )
     with c2:
-        etype = st.selectbox("Type", _ENTITY_TYPES, index=0,
-                             label_visibility="collapsed")
+        etype = st.selectbox("Type", _ENTITY_TYPES, index=0, label_visibility="collapsed")
     with c3:
         hops = st.slider("Hops", 1, 3, value=1)
     with c4:
@@ -144,8 +147,7 @@ target_name = st.session_state.get("explorer_picked")
 
 if target_name:
     st.markdown(
-        f'<div class="mg-section-title">Subgraph · "{target_name}" '
-        f"({hops}-hop)</div>",
+        f'<div class="mg-section-title">Subgraph · "{target_name}" ({hops}-hop)</div>',
         unsafe_allow_html=True,
     )
     try:
@@ -159,8 +161,8 @@ if target_name:
     subgraph = payload.get("subgraph", {}) or {}
 
     info = st.columns(4)
-    info[0].metric("CUI",   entity.get("cui", "—"))
-    info[1].metric("Type",  entity.get("entity_type", "—"))
+    info[0].metric("CUI", entity.get("cui", "—"))
+    info[1].metric("Type", entity.get("entity_type", "—"))
     info[2].metric("Nodes", len(subgraph.get("nodes", []) or []))
     info[3].metric("Edges", len(subgraph.get("edges", []) or []))
 
@@ -170,7 +172,4 @@ if target_name:
     with tab_raw:
         st.json(payload, expanded=False)
 else:
-    st.info(
-        "Type at least two characters above, then click a match to render its "
-        "neighbourhood."
-    )
+    st.info("Type at least two characters above, then click a match to render its neighbourhood.")

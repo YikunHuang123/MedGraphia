@@ -11,6 +11,7 @@ Output type:  list[GraphTriple]
   relation_type — Cypher relationship type string (e.g. "TREATS")
   neighbor      — neighbor node dict {cui, label, entity_type, ...}
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -26,9 +27,11 @@ logger = get_logger(__name__)
 # Output types
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class GraphTriple:
     """A single (entity, relation, neighbor) triple from graph traversal."""
+
     entity_cui: str
     entity_label: str
     entity_type: str
@@ -51,14 +54,14 @@ class GraphTriple:
         if self.evidence_text:
             # Clean up text (remove excessive whitespace/newlines)
             clean_evidence = " ".join(self.evidence_text.split())
-            return f"{base}. Evidence: \"{clean_evidence}\""
+            return f'{base}. Evidence: "{clean_evidence}"'
         return base
-
 
 
 @dataclass
 class GraphRetrievalResult:
     """Aggregated result from all seed CUIs."""
+
     triples: list[GraphTriple] = field(default_factory=list)
     seed_cuis: list[str] = field(default_factory=list)
     hops: int = 2
@@ -155,6 +158,7 @@ LIMIT $limit
 # GraphRetriever
 # ---------------------------------------------------------------------------
 
+
 class GraphRetriever:
     """
     Async graph retriever using Neo4j.
@@ -176,7 +180,7 @@ class GraphRetriever:
         self._per_seed_limit = per_seed_limit
 
     @classmethod
-    def from_settings(cls) -> "GraphRetriever":
+    def from_settings(cls) -> GraphRetriever:
         return cls()
 
     # ------------------------------------------------------------------
@@ -219,10 +223,10 @@ class GraphRetriever:
             if isinstance(item, Exception):
                 logger.warning("graph_retriever_task_failed", error=str(item))
                 continue
-            
+
             for triple in item:
                 key = (triple.entity_cui, triple.relation_type, triple.neighbor_cui)
-                
+
                 if key not in rel_map:
                     rel_map[key] = triple
                 else:
@@ -247,7 +251,9 @@ class GraphRetriever:
     # Internal
     # ------------------------------------------------------------------
 
-    async def _expand_one(self, cui: str, hops: int, user_id: str | None = None) -> list[GraphTriple]:
+    async def _expand_one(
+        self, cui: str, hops: int, user_id: str | None = None
+    ) -> list[GraphTriple]:
         """Run node summary, 1-hop and optionally 2-hop Cypher for a single seed CUI."""
         triples: list[GraphTriple] = []
 
@@ -263,14 +269,22 @@ class GraphRetriever:
                     rels = record["top_relations"]
                     if rels:
                         summary_text = f"{label} ({e_type}) is a key entity in the knowledge graph. Known relations include: "
-                        summary_text += "; ".join([f"{r['rel']} {r['target']} ({r['target_type']})" for r in rels])
-                        triples.append(GraphTriple(
-                            entity_cui=cui, entity_label=label, entity_type=e_type,
-                            relation_type="IDENTITY",
-                            neighbor_cui=cui, neighbor_label=label, neighbor_type=e_type,
-                            evidence_text=summary_text,
-                            confidence=1.1 # Identity has highest priority
-                        ))
+                        summary_text += "; ".join(
+                            [f"{r['rel']} {r['target']} ({r['target_type']})" for r in rels]
+                        )
+                        triples.append(
+                            GraphTriple(
+                                entity_cui=cui,
+                                entity_label=label,
+                                entity_type=e_type,
+                                relation_type="IDENTITY",
+                                neighbor_cui=cui,
+                                neighbor_label=label,
+                                neighbor_type=e_type,
+                                evidence_text=summary_text,
+                                confidence=1.1,  # Identity has highest priority
+                            )
+                        )
 
                 # 2. Get 1-hop Neighbors
                 result = await session.run(
@@ -331,6 +345,7 @@ class GraphRetriever:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _record_to_triple(record: Any) -> GraphTriple | None:
     """Convert a Neo4j record dict to a GraphTriple.  Returns None on missing fields."""

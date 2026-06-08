@@ -4,12 +4,14 @@ Thin HTTP/SSE client for the MedGraphia FastAPI backend.
 All UI pages access the backend exclusively through `MedGraphiaClient`.
 No business logic should ever be re-implemented on the UI side.
 """
+
 from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any
 
 import httpx
 
@@ -40,7 +42,7 @@ class MedGraphiaClient:
         self.base_url = (base_url or os.getenv("API_BASE_URL", "http://localhost:8058")).rstrip("/")
         self.api_key = api_key or os.getenv("MEDGRAPHIA_API_KEY", "")
         self.admin_key = admin_key or os.getenv("MEDGRAPHIA_ADMIN_KEY", "")
-        
+
         # Persistent client for connection pooling
         self.client = httpx.Client(timeout=DEFAULT_TIMEOUT, follow_redirects=True)
 
@@ -49,7 +51,7 @@ class MedGraphiaClient:
         if hasattr(self, "client"):
             self.client.close()
 
-    def __enter__(self) -> "MedGraphiaClient":
+    def __enter__(self) -> MedGraphiaClient:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -133,9 +135,7 @@ class MedGraphiaClient:
             params["entity_type"] = entity_type
         return self._request("GET", "/graph/entity/search", params=params) or []
 
-    def get_entity_subgraph(
-        self, name: str, hops: int = 1, lang: str = "en"
-    ) -> dict[str, Any]:
+    def get_entity_subgraph(self, name: str, hops: int = 1, lang: str = "en") -> dict[str, Any]:
         params = {"name": name, "hops": hops, "lang": lang}
         return self._request("GET", "/graph/entity", params=params)
 
@@ -204,15 +204,15 @@ class MedGraphiaClient:
                         status_code=resp.status_code,
                         detail=resp.text or "Stream rejected",
                     )
-                
+
                 # Buffer for multi-line data concatenation
                 for raw_line in resp.iter_lines():
                     if not raw_line:
                         continue
-                    
+
                     # Robust SSE parsing: check for data: prefix
                     if raw_line.startswith("data:"):
-                        payload = raw_line[len("data:"):].lstrip()
+                        payload = raw_line[len("data:") :].lstrip()
                         if not payload:
                             continue
                         try:
@@ -245,14 +245,10 @@ class MedGraphiaClient:
             "include_drugbank": include_drugbank,
             "include_ema_smpc": include_ema_smpc,
         }
-        return self._request(
-            "POST", "/admin/pipeline/trigger", admin=True, json_body=body
-        )
+        return self._request("POST", "/admin/pipeline/trigger", admin=True, json_body=body)
 
     def pipeline_status(self, domain: str = "t2dm") -> dict[str, Any]:
-        return self._request(
-            "GET", "/admin/pipeline/status", admin=True, params={"domain": domain}
-        )
+        return self._request("GET", "/admin/pipeline/status", admin=True, params={"domain": domain})
 
     def admin_graph_stats(self) -> dict[str, int]:
         return self._request("GET", "/admin/graph/stats", admin=True)
@@ -262,9 +258,7 @@ class MedGraphiaClient:
     # ------------------------------------------------------------------
 
     def create_api_key(self, role: str = "user") -> dict[str, str]:
-        return self._request(
-            "POST", "/admin/keys", admin=True, params={"role": role}
-        )
+        return self._request("POST", "/admin/keys", admin=True, params={"role": role})
 
     def list_api_keys(self) -> list[dict[str, str]]:
         return self._request("GET", "/admin/keys", admin=True) or []

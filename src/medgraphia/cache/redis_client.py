@@ -5,6 +5,7 @@ When REDIS_URL is not configured (or Redis is unreachable) every public
 function is a silent no-op — the rest of the application never needs to
 check for None or catch exceptions from this module.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -44,6 +45,7 @@ async def get_redis() -> Any | None:
             return None
 
         from medgraphia.config import get_settings
+
         cfg = get_settings()
 
         if not cfg.redis_url:

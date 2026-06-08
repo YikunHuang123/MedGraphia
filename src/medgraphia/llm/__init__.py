@@ -10,6 +10,7 @@ from medgraphia.llm.gateway import (
 # LLMClient uses pydantic-ai which is optional; guard the import
 try:
     from medgraphia.llm.client import LLMClient
+
     __all__ = [
         "LiteLLMGateway",
         "LLMProvider",

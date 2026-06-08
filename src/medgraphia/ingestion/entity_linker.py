@@ -1,7 +1,7 @@
 """
 Entity Linker: maps NER mention entities (cui="MENTION:...") to MeSH IDs.
 
-Two-stage pipeline (architecture doc §2.4):
+Two-stage pipeline:
   Stage 1 — BM25 candidate retrieval (top-K lexical candidates)
   Stage 2 — SapBERT re-ranking (cross-lingual semantic similarity)
 
@@ -19,6 +19,7 @@ Degradation:
   - SapBERT unavail.  → fall back to BM25 + string distance
   - Neo4j unavail.    → entities are linked in-memory but not written to the graph
 """
+
 from __future__ import annotations
 
 import re
@@ -36,14 +37,16 @@ logger = get_logger(__name__)
 
 try:
     from rank_bm25 import BM25Okapi as _BM25  # type: ignore[import]
+
     _BM25_AVAILABLE = True
 except ImportError:
     _BM25_AVAILABLE = False
     logger.warning("rank_bm25_not_installed", msg="pip install rank-bm25 for candidate retrieval")
 
 try:
-    from sentence_transformers import SentenceTransformer as _ST  # type: ignore[import]
     import numpy as _np
+    from sentence_transformers import SentenceTransformer as _ST  # type: ignore[import]
+
     _SAPBERT_AVAILABLE = True
 except ImportError:
     _SAPBERT_AVAILABLE = False
@@ -59,6 +62,7 @@ _MENTION_PREFIX = "MENTION:"
 # ---------------------------------------------------------------------------
 # Text tokenizer (BM25 tokenization)
 # ---------------------------------------------------------------------------
+
 
 def _tokenize(text: str) -> list[str]:
     """
@@ -79,6 +83,7 @@ def _tokenize(text: str) -> list[str]:
 # MeSH concept index entry
 # ---------------------------------------------------------------------------
 
+
 class _ConceptEntry:
     __slots__ = ("cui", "label", "synonyms", "entity_type", "lang_labels", "all_tokens")
 
@@ -97,6 +102,7 @@ class _ConceptEntry:
 # ---------------------------------------------------------------------------
 # EntityLinker
 # ---------------------------------------------------------------------------
+
 
 class EntityLinker:
     """
@@ -148,9 +154,10 @@ class EntityLinker:
         sapbert_model: str | None = None,
         sapbert_threshold: float | None = None,
         **kwargs: Any,
-    ) -> "EntityLinker":
+    ) -> EntityLinker:
         """Load MeSH data and return a ready-to-use EntityLinker."""
         from medgraphia.data.mesh import MeSHLoader
+
         loader = MeSHLoader(storage_dir=mesh_dir)
         try:
             index = loader.load(limit=limit)
@@ -158,16 +165,19 @@ class EntityLinker:
         except Exception as exc:
             logger.warning("el_mesh_load_failed", error=str(exc))
             index = {}
-        
+
         # Use provided sapbert settings or fall back to defaults
-        if sapbert_model: kwargs["sapbert_model"] = sapbert_model
-        if sapbert_threshold: kwargs["sapbert_threshold"] = sapbert_threshold
-            
+        if sapbert_model:
+            kwargs["sapbert_model"] = sapbert_model
+        if sapbert_threshold:
+            kwargs["sapbert_threshold"] = sapbert_threshold
+
         return cls(concept_index=index, **kwargs)
 
     @classmethod
-    def from_settings(cls) -> "EntityLinker":
+    def from_settings(cls) -> EntityLinker:
         from medgraphia.config import get_settings
+
         cfg = get_settings()
         return cls.from_mesh(
             mesh_dir=cfg.mesh_dir,
@@ -232,7 +242,7 @@ class EntityLinker:
                 linked.append(entity)
                 continue
 
-            mention_text = entity.cui[len(_MENTION_PREFIX):]
+            mention_text = entity.cui[len(_MENTION_PREFIX) :]
             best = self._find_best_match(mention_text, entity.entity_type)
             if best:
                 cui, label, lang_labels, confidence = best
@@ -282,6 +292,7 @@ class EntityLinker:
             return
         try:
             from medgraphia.graph.queries import link_entity_to_chunk, merge_entity
+
             for entity in chunk.entities:
                 await merge_entity(entity)
                 await link_entity_to_chunk(entity.cui, entity.entity_type.value, chunk.chunk_id)
@@ -367,7 +378,9 @@ class EntityLinker:
         try:
             cand_labels = [e.label for e in candidates]
             all_texts = [mention] + cand_labels
-            embeddings = self._sapbert.encode(all_texts, normalize_embeddings=True, show_progress_bar=False)
+            embeddings = self._sapbert.encode(
+                all_texts, normalize_embeddings=True, show_progress_bar=False
+            )
             mention_emb = embeddings[0]
             cand_embs = embeddings[1:]
             scores = (cand_embs @ mention_emb).tolist()
@@ -421,10 +434,12 @@ class EntityLinker:
 # Utility
 # ---------------------------------------------------------------------------
 
+
 def _top_k_indices(scores: Any, k: int) -> list[int]:
     """Return indices of top-k scores (descending order).  Works with numpy arrays."""
     try:
         import numpy as np
+
         arr = np.array(scores)
         k = min(k, len(arr))
         idx = np.argpartition(arr, -k)[-k:]

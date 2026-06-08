@@ -6,29 +6,30 @@ python scripts/pipeline/ingest_multilingual.py --limit 1000 --skip-en --skip-de 
 python scripts/pipeline/ingest_multilingual.py --limit 1000 --skip-en --skip-zh --batch-size 30
 python scripts/pipeline/ingest_multilingual.py --limit 1000 --skip-zh --skip-de --batch-size 20
 """
+
 from __future__ import annotations
 
 import asyncio
 import sys
-from pathlib import Path
 from itertools import islice
+from pathlib import Path
 
 import click
 
 # Ensure src/ is on sys.path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from medgraphia.config import get_settings
-from medgraphia.logger import configure_logging, get_logger
-from medgraphia.ingestion.parsers.structured_parser import StructuredParser
-from medgraphia.ingestion.pipeline import (
-    chunk_task, ner_task, link_task, extract_task, embed_task
-)
-
-from tqdm import tqdm
 import logging
 
+from tqdm import tqdm
+
+from medgraphia.config import get_settings
+from medgraphia.ingestion.parsers.structured_parser import StructuredParser
+from medgraphia.ingestion.pipeline import chunk_task, embed_task, link_task, ner_task
+from medgraphia.logger import configure_logging, get_logger
+
 logger = get_logger("ingest_multilingual")
+
 
 def batched(iterable, n):
     """Batch data into lists of length n. The last batch may be shorter."""
@@ -39,11 +40,12 @@ def batched(iterable, n):
             return
         yield batch
 
+
 async def process_batch(batch, batch_idx, total_batches):
     """Runs the core pipeline stages for a single batch of documents."""
     # We use logger.debug to avoid cluttering the terminal when tqdm is active
     logger.debug("process_batch_start", index=batch_idx, total=total_batches, size=len(batch))
-    
+
     # 1. Chunking (also writes to Neo4j)
     chunks = await chunk_task(batch)
     if not chunks:
@@ -58,6 +60,7 @@ async def process_batch(batch, batch_idx, total_batches):
     # 5. Embedding (writes to Qdrant)
     await embed_task(chunks)
 
+
 @click.command()
 @click.option("--batch-size", default=20, help="Number of documents per batch (default 20 for M1)")
 @click.option("--limit", default=None, type=int, help="Limit total documents for testing")
@@ -70,7 +73,7 @@ def main(batch_size, limit, skip_en, skip_zh, skip_de, verbose):
     # If not verbose, we set log level to WARNING to hide info logs and show tqdm clearly
     log_level = cfg.log_level if verbose else "WARNING"
     configure_logging(log_level)
-    
+
     # Silence some very noisy libraries
     if not verbose:
         for noisy_logger in ["prefect", "httpx", "neo4j", "sentence_transformers", "FlagEmbedding"]:
@@ -83,7 +86,7 @@ def main(batch_size, limit, skip_en, skip_zh, skip_de, verbose):
         de_path = Path("data/raw/germed/GERNERMED_dataset.json")
         if de_path.exists():
             all_docs.append(parser.parse_germed(de_path))
-            
+
     if not skip_zh:
         zh_path = Path("data/raw/huatuo/huatuo_lite.jsonl")
         if zh_path.exists():
@@ -109,7 +112,7 @@ def main(batch_size, limit, skip_en, skip_zh, skip_de, verbose):
     total_docs = len(docs_list)
     batches = list(batched(docs_list, batch_size))
     total_batches = len(batches)
-    
+
     click.echo(f"🚀 Starting ingestion: {total_docs} documents | {total_batches} batches")
 
     async def run_all():
@@ -119,14 +122,15 @@ def main(batch_size, limit, skip_en, skip_zh, skip_de, verbose):
                     await process_batch(batch, i + 1, total_batches)
                     pbar.update(1)
                 except Exception as exc:
-                    logger.error("batch_failed", index=i+1, error=str(exc))
-                    if click.confirm(f"\nBatch {i+1} failed. Continue?"):
+                    logger.error("batch_failed", index=i + 1, error=str(exc))
+                    if click.confirm(f"\nBatch {i + 1} failed. Continue?"):
                         continue
                     else:
                         break
 
     asyncio.run(run_all())
     click.echo("\n✓ Multilingual ingestion complete.")
+
 
 if __name__ == "__main__":
     main()

@@ -4,9 +4,10 @@ GLiNER zero-shot coarse NER for multilingual medical text.
 Default model: urchade/gliner_mediumv2.1
 Handles EN / ZH / DE in a single zero-shot pass using a biomedical label set.
 
-Graceful degradation: if `gliner` is not installed, predict() returns [] and logs a
+if `gliner` is not installed, predict() returns [] and logs a
 warning.  The NER pipeline continues with BERT-only or regex mode.
 """
+
 from __future__ import annotations
 
 from medgraphia.domain import EntityType, Language
@@ -17,6 +18,7 @@ logger = get_logger(__name__)
 
 try:
     from gliner import GLiNER as _GLiNERModel  # type: ignore[import]
+
     _GLINER_AVAILABLE = True
 except ImportError:
     _GLINER_AVAILABLE = False
@@ -36,29 +38,30 @@ _ENTITY_LABELS: dict[EntityType, list[str]] = {
     EntityType.PROCEDURE: ["procedure", "手术", "Operation"],
 }
 
-_ALL_LABELS: list[str] = [
-    label for labels in _ENTITY_LABELS.values() for label in labels
-]
+_ALL_LABELS: list[str] = [label for labels in _ENTITY_LABELS.values() for label in labels]
 
 # Reverse map: label text → EntityType (built at import time)
 _LABEL_TO_TYPE: dict[str, EntityType] = {
-    label: etype
-    for etype, labels in _ENTITY_LABELS.items()
-    for label in labels
+    label: etype for etype, labels in _ENTITY_LABELS.items() for label in labels
 }
 
 # Language-specific subsets keep the label list shorter for focused documents.
-_EN_LABELS = [l for l in _ALL_LABELS if not any("一" <= c <= "鿿" for c in l)
-              and not any(c in "äöüÄÖÜß" for c in l)]
-_ZH_LABELS = [l for l in _ALL_LABELS if any("一" <= c <= "鿿" for c in l)] + \
-             [l for l in _EN_LABELS[:12]]  # keep core English labels too
-_DE_LABELS = [l for l in _ALL_LABELS if any(c in "äöüÄÖÜß" for c in l)] + \
-             [l for l in _EN_LABELS[:12]]
+_EN_LABELS = [
+    l
+    for l in _ALL_LABELS
+    if not any("一" <= c <= "鿿" for c in l) and not any(c in "äöüÄÖÜß" for c in l)
+]
+_ZH_LABELS = [l for l in _ALL_LABELS if any("一" <= c <= "鿿" for c in l)] + [
+    l for l in _EN_LABELS[:12]
+]  # keep core English labels too
+_DE_LABELS = [l for l in _ALL_LABELS if any(c in "äöüÄÖÜß" for c in l)] + [
+    l for l in _EN_LABELS[:12]
+]
 
 _LABELS_BY_LANG: dict[Language, list[str]] = {
-    Language.EN:      _EN_LABELS,
-    Language.ZH:      _ZH_LABELS,
-    Language.DE:      _DE_LABELS,
+    Language.EN: _EN_LABELS,
+    Language.ZH: _ZH_LABELS,
+    Language.DE: _DE_LABELS,
     Language.UNKNOWN: _ALL_LABELS,
 }
 
@@ -66,14 +69,9 @@ _LABELS_BY_LANG: dict[Language, list[str]] = {
 class GLiNERNER:
     """
     Zero-shot biomedical NER using GLiNER.
-
-    Model is loaded lazily on the first predict() call.
-
     Usage::
-
         ner = GLiNERNER()
         spans = ner.predict("Metformin treats type 2 diabetes.", Language.EN)
-        # → [MentionSpan("Metformin", ..., DRUG), MentionSpan("type 2 diabetes", ..., DISEASE)]
     """
 
     def __init__(

@@ -9,9 +9,9 @@ Docling preserves:
 Install: pip install docling
 Docling documentation: https://ds4sd.github.io/docling/
 """
+
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -35,11 +35,10 @@ class DoclingParser:
         if self._converter is None:
             try:
                 from docling.document_converter import DocumentConverter
+
                 self._converter = DocumentConverter()
             except ImportError:
-                raise ImportError(
-                    "Docling not installed.  Run: pip install docling"
-                )
+                raise ImportError("Docling not installed.  Run: pip install docling")
         return self._converter
 
     # ------------------------------------------------------------------
@@ -66,7 +65,7 @@ class DoclingParser:
 
         # Modern Docling: export to Markdown (includes tables, structure)
         full_text = result.document.export_to_markdown()
-        
+
         # Split markdown into structured sections
         sections = _parse_markdown_sections(full_text)
 
@@ -96,6 +95,7 @@ class DoclingParser:
 # ---------------------------------------------------------------------------
 # Section extraction from Docling JSON / Markdown
 # ---------------------------------------------------------------------------
+
 
 def _parse_markdown_sections(md_text: str) -> list[ParsedSection]:
     """
@@ -130,7 +130,7 @@ def _parse_markdown_sections(md_text: str) -> list[ParsedSection]:
                     level += 1
                 else:
                     break
-            
+
             heading = line.lstrip("#").strip()
             # Update current path based on level
             current_path = current_path[: level - 1] + [heading]

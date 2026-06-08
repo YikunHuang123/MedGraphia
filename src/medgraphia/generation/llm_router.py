@@ -1,8 +1,13 @@
 """
-LLM Router — selects provider + model based on query type and language.
+LLM Router — selects provider + model based on query complexity and language.
 
-Routing strategy
-────────────────
+Routing strategy:
+
+Primary source (preferred): DSPy-assessed complexity_tier from the rewriter.
+  The rewriter scores each query using a quantified rubric (E+I=Total) and
+  returns SMALL / MEDIUM / LARGE directly.
+
+Fallback (when tier is None): static QueryType → ModelTier table.
 QueryType                 → ModelTier   Rationale
 ──────────────────────────────────────────────────────────────────────
 PATIENT_FAQ               → SMALL       Low stakes, high volume; cheap fast model
@@ -25,6 +30,7 @@ Model tiers are configured via Settings (with sensible defaults):
 If the preferred language-override provider lacks an API key, the router
 falls back to the configured large-tier model.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -43,6 +49,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 # Model-tier enum
 # ---------------------------------------------------------------------------
+
 
 class ModelTier(str, Enum):
     SMALL = "small"
@@ -75,6 +82,7 @@ _LANG_LARGE_PREF: dict[Language, tuple[LLMProvider, str]] = {
 # Routing decision dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class RoutingDecision:
     """
@@ -88,6 +96,7 @@ class RoutingDecision:
         language    — Language that influenced the decision
         reason      — Human-readable explanation for tracing / observability
     """
+
     provider: LLMProvider
     model_name: str
     tier: ModelTier
@@ -99,6 +108,7 @@ class RoutingDecision:
 # ---------------------------------------------------------------------------
 # LLMRouter
 # ---------------------------------------------------------------------------
+
 
 class LLMRouter:
     """
@@ -132,21 +142,22 @@ class LLMRouter:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_settings(cls) -> "LLMRouter":
+    def from_settings(cls) -> LLMRouter:
         """
         Construct a router from Settings.
 
         Reads optional tier-specific env vars, falling back to the global
-        llm_provider / llm_model when not set.
+        default_llm_provider / default_llm_model when not set.
         """
         from medgraphia.config import get_settings
+
         cfg = get_settings()
 
-        default_provider = _parse_provider(cfg.llm_provider)
-        default_model = cfg.llm_model
+        default_provider = _parse_provider(cfg.default_llm_provider)
+        default_model = cfg.default_llm_model
 
         def _tier(provider_attr: str, model_attr: str) -> tuple[LLMProvider, str]:
-            p_str = getattr(cfg, provider_attr, None) or cfg.llm_provider
+            p_str = getattr(cfg, provider_attr, None) or cfg.default_llm_provider
             m_str = getattr(cfg, model_attr, None) or default_model
             return _parse_provider(p_str), m_str
 
@@ -172,24 +183,38 @@ class LLMRouter:
         self,
         query_type: QueryType,
         language: Language = Language.EN,
+        tier: ModelTier | None = None,
     ) -> tuple[LiteLLMGateway, RoutingDecision]:
         """
         Return (gateway, decision) for the given query type and language.
+
+        Args:
+            query_type: Intent class from the retrieval router.
+            language:   Detected query language (influences LARGE-tier model choice).
+            tier:       DSPy-assessed complexity tier from the rewriter.  When
+                        provided it takes precedence over the static QueryType
+                        mapping.  Pass None to fall back to the static table.
         """
         from medgraphia.config import get_settings
+
         cfg = get_settings()
-        
-        tier = _QUERY_TYPE_TIER.get(query_type, ModelTier.MEDIUM)
+
+        if tier is not None:
+            # DSPy-assessed tier takes priority — more accurate than the static table
+            reason = f"dspy_tier={tier.value} (query_type={query_type.value})"
+        else:
+            # Fall back to the static QueryType → ModelTier table
+            tier = _QUERY_TYPE_TIER.get(query_type, ModelTier.MEDIUM)
+            reason = f"static_table: query_type={query_type.value} → tier={tier.value}"
+
         provider, model_name = self._tier_models[tier]
-        reason = f"query_type={query_type.value} → tier={tier.value}"
 
         # ── Language Preference Override ─────────────────────────────────────
         # Only apply if:
         # 1. It's a LARGE tier query
         # 2. We are in 'respect_language' mode
         # 3. The user HAS NOT explicitly set a tier-specific provider
-        #    (i.e., the current provider is still the global default)
-        
+
         is_explicit_config = False
         if tier == ModelTier.LARGE and cfg.llm_large_provider:
             is_explicit_config = True
@@ -239,14 +264,16 @@ class LLMRouter:
         self,
         query_type: QueryType,
         language: Language = Language.EN,
+        tier: ModelTier | None = None,
     ) -> LiteLLMGateway:
-        gateway, _ = self.route(query_type, language)
+        gateway, _ = self.route(query_type, language, tier=tier)
         return gateway
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _parse_provider(value: str) -> LLMProvider:
     """Parse provider string, defaulting to OLLAMA for unknown values."""
@@ -260,6 +287,7 @@ def _parse_provider(value: str) -> LLMProvider:
 def _api_key_available(provider: LLMProvider) -> bool:
     """Return True if a non-empty API key is configured for the provider."""
     from medgraphia.config import get_settings
+
     cfg = get_settings()
 
     def get_val(attr_name: str) -> str | None:

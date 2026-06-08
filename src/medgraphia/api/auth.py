@@ -2,6 +2,7 @@
 Authentication layer.
 Supports multiple strategies: none, apikey, oidc.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -33,18 +34,16 @@ async def _load_bootstrap_key() -> None:
     bootstrap = cfg.admin_bootstrap_key.get_secret_value()
     if bootstrap:
         if bootstrap == "change-me":
-            logger.warning("auth_insecure_default_key", 
-                           message="Using default 'change-me' admin key. CHANGE THIS IN PRODUCTION!")
-        
+            logger.warning(
+                "auth_insecure_default_key",
+                message="Using default 'change-me' admin key. CHANGE THIS IN PRODUCTION!",
+            )
+
         key_hash = _hash_key(bootstrap)
         # Check if already exists to avoid unnecessary writes
         existing = await get_api_key_node(key_hash)
         if not existing:
-            await create_api_key_node(
-                key_hash=key_hash,
-                prefix=bootstrap[:8],
-                role="admin"
-            )
+            await create_api_key_node(key_hash=key_hash, prefix=bootstrap[:8], role="admin")
             logger.info("auth_bootstrap_key_persisted", prefix=bootstrap[:8])
 
 
@@ -55,11 +54,7 @@ def generate_api_key() -> str:
 
 async def register_key(key: str, role: str = "user") -> None:
     """Add a key to the database (admin only)."""
-    await create_api_key_node(
-        key_hash=_hash_key(key),
-        prefix=key[:8],
-        role=role
-    )
+    await create_api_key_node(key_hash=_hash_key(key), prefix=key[:8], role=role)
 
 
 async def require_api_key(
@@ -92,14 +87,14 @@ async def require_api_key(
     # Verify key hash against database
     key_hash = _hash_key(api_key)
     meta = await get_api_key_node(key_hash)
-    
+
     if not meta:
         logger.warning("auth_invalid_key", key_prefix=api_key[:8])
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid or revoked API key",
         )
-    
+
     return meta
 
 

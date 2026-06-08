@@ -1,5 +1,5 @@
 """
-Streamlit frontend (Phase 9).
+Streamlit frontend.
 
 Entry point: `streamlit_app.py`. Multipage layout under `pages/`:
     1_Chat.py            — SSE-streamed Q&A with citation expansion

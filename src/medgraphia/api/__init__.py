@@ -1,8 +1,7 @@
 """
 FastAPI application factory with lifespan management.
 
-Startup sequence
-────────────────
+Startup sequence:
 1. Configure structured logging
 2. Load the bootstrap admin API key from config
 3. Connect to Neo4j and apply the graph schema (idempotent DDL)
@@ -12,17 +11,17 @@ Startup sequence
 7. Initialise Arq task-queue pool (no-op when REDIS_URL is not set)
 8. Background warm-up of ML models
 
-Shutdown sequence
-─────────────────
+Shutdown sequence:
 1. Flush any pending Langfuse events
 2. Close Arq connection pool
 3. Close Redis connection pool
 4. Close the Neo4j driver connection pool
 """
+
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -58,6 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # 4. Langfuse: initialise singleton (no-op when tracing is disabled)
     from medgraphia.observability import get_langfuse_client
+
     lf = get_langfuse_client()
     logger.info(
         "observability_ready",
@@ -65,12 +65,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         tracing=cfg.tracing_enabled,
     )
 
-    # 6. Redis: optional cache layer (gracefully skipped when REDIS_URL is unset)
-    from medgraphia.cache.redis_client import get_redis, close_redis
+    # 6. Redis: optional cache layer (skipped when REDIS_URL is unset)
+    from medgraphia.cache.redis_client import close_redis, get_redis
+
     await get_redis()  # triggers lazy init + connectivity check
 
     # 7. Arq: optional task-queue pool for durable pipeline execution
-    from medgraphia.worker.arq_client import get_arq_pool, close_arq_pool
+    from medgraphia.worker.arq_client import close_arq_pool, get_arq_pool
+
     arq_pool = await get_arq_pool()
     logger.info(
         "task_queue_ready",
@@ -78,8 +80,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
 
     # 8. Background Warm-up: eagerly load ML models and prime GPU kernels
-    from medgraphia.api.health import _warm_up_models
     import asyncio
+
+    from medgraphia.api.health import _warm_up_models
+
     asyncio.create_task(_warm_up_models())
 
     logger.info("medgraphia_ready", port=cfg.api_port)
@@ -133,14 +137,17 @@ def create_app() -> FastAPI:
 
     # Chat — synchronous and streaming Q&A
     from medgraphia.api.chat import router as chat_router
+
     app.include_router(chat_router)
 
     # Knowledge-graph exploration
     from medgraphia.api.knowledge import router as knowledge_router
+
     app.include_router(knowledge_router)
 
     # Admin (requires admin role)
     from medgraphia.api.admin import router as admin_router
+
     app.include_router(admin_router)
 
     return app
@@ -149,6 +156,7 @@ def create_app() -> FastAPI:
 def run() -> None:
     """Entry point used by the `medgraphia-api` CLI script."""
     import uvicorn
+
     cfg = get_settings()
     uvicorn.run(
         "medgraphia.api:create_app",
@@ -164,6 +172,7 @@ def run() -> None:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 async def _check_qdrant(qdrant_url: str) -> None:
     """
     Verify that Qdrant is reachable at startup.
@@ -173,12 +182,12 @@ async def _check_qdrant(qdrant_url: str) -> None:
     """
     try:
         from medgraphia.api.deps import get_vector_store
+
         store = get_vector_store()
         ok = await store.health()
         if ok:
             logger.info("qdrant_ready", url=qdrant_url)
         else:
-            # Not fatal — the app starts but queries will degrade gracefully
             logger.warning("qdrant_unreachable", url=qdrant_url)
     except Exception as exc:
         logger.warning("qdrant_check_failed", url=qdrant_url, error=str(exc))

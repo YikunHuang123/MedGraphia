@@ -86,17 +86,27 @@ class RetrievalPipeline:
         Returns:
             RerankedResult containing the optimal context items.
         """
-        logger.info("retrieval_pipeline_started", query_len=len(query), has_history=bool(history), user_id=user_id)
+        logger.info(
+            "retrieval_pipeline_started",
+            query_len=len(query),
+            has_history=bool(history),
+            user_id=user_id,
+        )
 
         # ---------------------------------------------------------
-        # Step 0: Contextual Query Rewriting
+        # Step 0: Contextual Query Rewriting + Complexity Assessment
+        # Runs unconditionally — complexity scoring depends on the question
+        # itself, not history.  Empty history is valid (first message).
         # ---------------------------------------------------------
-        search_query = query
+        from medgraphia.generation.llm_router import ModelTier
+
+        complexity_tier: ModelTier | None = None
+        search_query, complexity_tier = await self.rewriter.rewrite(
+            query=query, history=history or [], language=language or Language.EN
+        )
         if history:
-            search_query = await self.rewriter.rewrite(
-                query=query, history=history, language=language or Language.EN
-            )
             logger.info("retrieval_using_rewritten_query", rewritten=search_query)
+        logger.info("complexity_tier_assessed", tier=complexity_tier.value)
 
         # ---------------------------------------------------------
         # Step 0.5: Multilingual query expansion
@@ -115,6 +125,7 @@ class RetrievalPipeline:
         if src_lang is not None:
             try:
                 from medgraphia.config import get_settings
+
                 cfg = get_settings()
                 if cfg.multilingual_retrieval_enabled:
                     translated: TranslatedQuery = await self.query_translator.translate(
@@ -159,6 +170,7 @@ class RetrievalPipeline:
         if plan.use_vector:
             if queries_by_language is not None:
                 from medgraphia.config import get_settings
+
                 _cfg = get_settings()
                 tasks.append(
                     asyncio.create_task(
@@ -252,6 +264,7 @@ class RetrievalPipeline:
         final_result.query_type = plan.query_type
         final_result.linked_cuis = plan.linked_cuis
         final_result.unlinked_mentions = plan.query_entities.unlinked_mentions
+        final_result.complexity_tier = complexity_tier
 
         logger.info(
             "retrieval_pipeline_completed",

@@ -3,10 +3,10 @@ MinerU-based PDF parser for Chinese academic documents.
 MinerU is optimised for double-column Chinese layouts, formulas, and academic PDFs.
 It produces a structured JSON (similar to Docling) with section hierarchy.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from medgraphia.domain import Language, ParsedSection, RawDocument, SourceMeta
 from medgraphia.logger import get_logger
@@ -27,6 +27,7 @@ class MinerUParser:
         if self._available is None:
             try:
                 import magic_pdf  # noqa: F401
+
                 self._available = True
             except ImportError:
                 logger.warning(
@@ -57,6 +58,7 @@ class MinerUParser:
         if not self._check_available():
             logger.info("mineru_fallback_ocr", file=str(path))
             from medgraphia.ingestion.parsers.ocr_parser import OCRParser
+
             return OCRParser().parse(file_path, source_meta, language)
 
         logger.info("mineru_parsing", file=str(path))
@@ -79,10 +81,10 @@ class MinerUParser:
 
     def _run_mineru(self, path: Path) -> tuple[list[ParsedSection], str]:
         """Run MinerU conversion and extract sections from the output JSON."""
+        from magic_pdf.config.make_content_config import DropMode
         from magic_pdf.data.data_reader_writer import FileBasedDataWriter
         from magic_pdf.data.dataset import PymuDocDataset
         from magic_pdf.model.doc_analyze_by_custom_model import doc_analyze
-        from magic_pdf.config.make_content_config import DropMode, MakeMode
 
         # MinerU writes output to a temp directory; we read it back
         output_dir = path.parent / (path.stem + "_mineru_out")
@@ -117,6 +119,7 @@ class MinerUParser:
 # ---------------------------------------------------------------------------
 # Markdown → sections (works for both MinerU and generic MD)
 # ---------------------------------------------------------------------------
+
 
 def _parse_markdown_sections(md_text: str) -> list[ParsedSection]:
     """

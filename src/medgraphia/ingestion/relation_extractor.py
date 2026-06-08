@@ -1,15 +1,17 @@
 """
-LLM-based relation extractor (architecture doc §2.5).
+LLM-based relation extractor.
 """
+
 from __future__ import annotations
 
-from typing import Any
 from tqdm.asyncio import tqdm
+
 from medgraphia.domain import Chunk, Relation, RelationType
 from medgraphia.logger import get_logger
-from medgraphia.prompts import ExtractMedicalRelations, ExtractedRelation
+from medgraphia.prompts import ExtractedRelation
 
 logger = get_logger(__name__)
+
 
 class RelationExtractor:
     """
@@ -33,21 +35,26 @@ class RelationExtractor:
             return []
 
         import dspy
+
         from medgraphia.llm.dspy_setup import get_lm
+        from medgraphia.programs.extractor import get_extractor
+
         lm = get_lm("extractor")
 
         # Prepare labels/types context
-        entity_info = "\n".join([f"- {e.label} (CUI: {e.cui}, Type: {e.entity_type.value})" for e in linked])
+        entity_info = "\n".join(
+            [f"- {e.label} (CUI: {e.cui}, Type: {e.entity_type.value})" for e in linked]
+        )
         allowed_relations = ", ".join([rt.value for rt in RelationType])
 
         try:
             with dspy.context(lm=lm):
-                # Use dspy.Predict for Pydantic Signature in DSPy 3.x
-                predictor = dspy.Predict(ExtractMedicalRelations)
-                prediction = predictor(
+                # Use the centralized extractor program (supports compiled few-shots)
+                program = get_extractor()
+                prediction = program(
                     text_content=chunk.text,
                     entities=entity_info,
-                    allowed_relations=allowed_relations
+                    allowed_relations=allowed_relations,
                 )
             return self._process_result(prediction.relations, chunk)
         except Exception as exc:
@@ -57,6 +64,7 @@ class RelationExtractor:
     async def extract_batch(self, chunks: list[Chunk], max_workers: int = 5) -> list[Relation]:
         """Extract relations from all chunks in parallel."""
         import asyncio
+
         semaphore = asyncio.Semaphore(max_workers)
 
         async def _task(chunk: Chunk):
@@ -65,7 +73,7 @@ class RelationExtractor:
 
         tasks = [_task(c) for c in chunks]
         results = await tqdm.gather(*tasks, desc="Extracting relations", unit="chunk")
-        
+
         all_relations: list[Relation] = []
         for relations in results:
             all_relations.extend(relations)
@@ -75,12 +83,15 @@ class RelationExtractor:
         """Convert DSPy output to domain Relation objects."""
         relations: list[Relation] = []
         valid_types = {rt.value for rt in RelationType}
-        
+
         for item in data:
-            if item.source_cui == item.target_cui: continue
-            if item.relation_type not in valid_types: continue
-            if item.confidence < self._min_confidence: continue
-                    
+            if item.source_cui == item.target_cui:
+                continue
+            if item.relation_type not in valid_types:
+                continue
+            if item.confidence < self._min_confidence:
+                continue
+
             relations.append(
                 Relation(
                     source_cui=item.source_cui,
@@ -97,9 +108,11 @@ class RelationExtractor:
 
     async def write_relations_to_neo4j(self, relations: list[Relation]) -> None:
         """Write Relation edges to Neo4j."""
-        if not relations: return
+        if not relations:
+            return
         try:
             from medgraphia.graph.queries import create_relation
+
             for rel in relations:
                 await create_relation(rel)
             logger.info("re_neo4j_written", count=len(relations))
@@ -107,10 +120,11 @@ class RelationExtractor:
             logger.warning("re_neo4j_write_failed", count=len(relations), error=str(exc))
 
     @classmethod
-    def from_settings(cls) -> "RelationExtractor":
+    def from_settings(cls) -> RelationExtractor:
         from medgraphia.config import get_settings
+
         cfg = get_settings()
         return cls(
             min_confidence=0.50,
-            extracted_by=f"{cfg.llm_provider}/{cfg.llm_model}",
+            extracted_by=f"{cfg.default_llm_provider}/{cfg.default_llm_model}",
         )

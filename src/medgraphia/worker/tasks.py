@@ -10,6 +10,7 @@ Task signatures follow the Arq convention:
 
 ``ctx`` carries the worker context (arq pool, any objects added in on_startup).
 """
+
 from __future__ import annotations
 
 import time

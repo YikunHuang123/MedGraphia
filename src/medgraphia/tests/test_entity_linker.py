@@ -4,17 +4,16 @@ SapBERT re-ranking (skipped if sentence-transformers not installed).
 
 All tests are pure-Python unit tests: no network, no Neo4j, no GPU required.
 """
-from __future__ import annotations
 
-import pytest
+from __future__ import annotations
 
 from medgraphia.domain import Chunk, Entity, EntityType, Language, SourceMeta
 from medgraphia.ingestion.entity_linker import EntityLinker, _tokenize
 
-
 # ---------------------------------------------------------------------------
 # Helpers — minimal in-memory UMLS index
 # ---------------------------------------------------------------------------
+
 
 def _mini_umls() -> dict[str, dict]:
     """
@@ -72,7 +71,7 @@ def _linker(umls: dict | None = None) -> EntityLinker:
         umls_index=umls or _mini_umls(),
         bm25_top_k=10,
         link_threshold=0.60,
-        sapbert_model="",       # no SapBERT in unit tests
+        sapbert_model="",  # no SapBERT in unit tests
         sapbert_threshold=0.75,
     )
     linker.build_index()
@@ -102,6 +101,7 @@ def _make_chunk(entities: list[Entity]) -> Chunk:
 # ===========================================================================
 # Tokenizer
 # ===========================================================================
+
 
 class TestTokenize:
     def test_english_words(self):
@@ -133,6 +133,7 @@ class TestTokenize:
 # EntityLinker — index construction
 # ===========================================================================
 
+
 class TestLinkerBuildIndex:
     def test_build_index_idempotent(self):
         linker = _linker()
@@ -155,6 +156,7 @@ class TestLinkerBuildIndex:
 # ===========================================================================
 # BM25 candidate retrieval
 # ===========================================================================
+
 
 class TestBM25Candidates:
     def test_exact_label_match(self):
@@ -192,6 +194,7 @@ class TestBM25Candidates:
 # String re-ranking (difflib fallback)
 # ===========================================================================
 
+
 class TestStringRerank:
     def test_exact_label_gets_high_score(self):
         linker = _linker()
@@ -217,6 +220,7 @@ class TestStringRerank:
 # ===========================================================================
 # link_entities — end-to-end
 # ===========================================================================
+
 
 class TestLinkEntities:
     def test_english_drug_linked(self):
@@ -301,6 +305,7 @@ class TestLinkEntities:
 # link_chunk
 # ===========================================================================
 
+
 class TestLinkChunk:
     def test_link_chunk_returns_new_chunk(self):
         linker = _linker()
@@ -327,9 +332,11 @@ class TestLinkChunk:
 # SapBERT availability probe
 # ===========================================================================
 
+
 class TestSapBERTAvailability:
     def test_sapbert_available_flag_is_bool(self):
         from medgraphia.ingestion.entity_linker import _SAPBERT_AVAILABLE
+
         assert isinstance(_SAPBERT_AVAILABLE, bool)
 
     def test_linker_works_without_sapbert(self):
@@ -347,6 +354,7 @@ class TestSapBERTAvailability:
 # ===========================================================================
 # Phase 4 integration tests
 # ===========================================================================
+
 
 class TestGLiNERNERToELIntegration:
     """
@@ -395,8 +403,11 @@ class TestGLiNERNERToELIntegration:
 
         # Inject fixed spans into the pipeline (both BERT and GLiNER patched)
         from unittest.mock import patch
-        with patch.object(pipeline._gliner, "predict", return_value=gliner_spans), \
-             patch.object(pipeline._bert, "predict", return_value=[]):
+
+        with (
+            patch.object(pipeline._gliner, "predict", return_value=gliner_spans),
+            patch.object(pipeline._bert, "predict", return_value=[]),
+        ):
             chunk_with_entities = pipeline.extract(chunk)
 
         # All entities should start with MENTION: at this stage
@@ -410,15 +421,15 @@ class TestGLiNERNERToELIntegration:
 
         # Build mapping: normalized_text → linked CUI
         linked_map = {
-            e.cui[len("MENTION:"):] if e.cui.startswith("MENTION:") else e.label.lower(): e.cui
+            e.cui[len("MENTION:") :] if e.cui.startswith("MENTION:") else e.label.lower(): e.cui
             for e in linked_chunk.entities
         }
 
         for mention_text, expected_cui in expected_cuis.items():
             matched = [
-                e for e in linked_chunk.entities
-                if e.cui == expected_cui
-                or (e.label.lower() == mention_text.lower())
+                e
+                for e in linked_chunk.entities
+                if e.cui == expected_cui or (e.label.lower() == mention_text.lower())
             ]
             assert matched, (
                 f"Expected CUI {expected_cui!r} for mention {mention_text!r} "
@@ -432,7 +443,9 @@ class TestGLiNERNERToELIntegration:
 
         text = "Metformin is used to treat type 2 diabetes."
         gliner_spans = [
-            MentionSpan.from_text("Metformin", 0, 9, EntityType.DRUG, confidence=0.9, source="gliner"),
+            MentionSpan.from_text(
+                "Metformin", 0, 9, EntityType.DRUG, confidence=0.9, source="gliner"
+            ),
         ]
         self._run_pipeline(text, gliner_spans, {"Metformin": "C0025598"})
 
@@ -454,8 +467,12 @@ class TestGLiNERNERToELIntegration:
 
         text = "Warfarin interacts with Aspirin in hypertension patients."
         gliner_spans = [
-            MentionSpan.from_text("Warfarin", 0, 8, EntityType.DRUG, confidence=0.92, source="gliner"),
-            MentionSpan.from_text("Aspirin", 23, 30, EntityType.DRUG, confidence=0.91, source="gliner"),
+            MentionSpan.from_text(
+                "Warfarin", 0, 8, EntityType.DRUG, confidence=0.92, source="gliner"
+            ),
+            MentionSpan.from_text(
+                "Aspirin", 23, 30, EntityType.DRUG, confidence=0.91, source="gliner"
+            ),
         ]
         from medgraphia.ingestion.ner.pipeline import MedicalNERPipeline
 
@@ -469,12 +486,14 @@ class TestGLiNERNERToELIntegration:
         linker.build_index()
 
         source = SourceMeta(source_id="int:multi", source_title="Multi")
-        chunk = Chunk(doc_id="d1", source=source, language=Language.EN,
-                      section_path="", text=text)
+        chunk = Chunk(doc_id="d1", source=source, language=Language.EN, section_path="", text=text)
 
         from unittest.mock import patch
-        with patch.object(pipeline._gliner, "predict", return_value=gliner_spans), \
-             patch.object(pipeline._bert, "predict", return_value=[]):
+
+        with (
+            patch.object(pipeline._gliner, "predict", return_value=gliner_spans),
+            patch.object(pipeline._bert, "predict", return_value=[]),
+        ):
             chunk = pipeline.extract(chunk)
 
         linked = linker.link_chunk(chunk)
@@ -500,12 +519,14 @@ class TestGLiNERNERToELIntegration:
         linker.build_index()
 
         source = SourceMeta(source_id="int:unknown", source_title="Unknown")
-        chunk = Chunk(doc_id="d2", source=source, language=Language.EN,
-                      section_path="", text=text)
+        chunk = Chunk(doc_id="d2", source=source, language=Language.EN, section_path="", text=text)
 
         from unittest.mock import patch
-        with patch.object(pipeline._gliner, "predict", return_value=gliner_spans), \
-             patch.object(pipeline._bert, "predict", return_value=[]):
+
+        with (
+            patch.object(pipeline._gliner, "predict", return_value=gliner_spans),
+            patch.object(pipeline._bert, "predict", return_value=[]),
+        ):
             chunk = pipeline.extract(chunk)
 
         linked = linker.link_chunk(chunk)
@@ -531,12 +552,14 @@ class TestGLiNERNERToELIntegration:
         linker.build_index()
 
         source = SourceMeta(source_id="int:conf", source_title="Conf")
-        chunk = Chunk(doc_id="d3", source=source, language=Language.EN,
-                      section_path="", text=text)
+        chunk = Chunk(doc_id="d3", source=source, language=Language.EN, section_path="", text=text)
 
         from unittest.mock import patch
-        with patch.object(pipeline._gliner, "predict", return_value=gliner_spans), \
-             patch.object(pipeline._bert, "predict", return_value=[]):
+
+        with (
+            patch.object(pipeline._gliner, "predict", return_value=gliner_spans),
+            patch.object(pipeline._bert, "predict", return_value=[]),
+        ):
             chunk = pipeline.extract(chunk)
 
         linked = linker.link_chunk(chunk)
@@ -560,7 +583,7 @@ class TestBM25TypeFilterPriority:
         index = _mini_umls()
         index["C9999999"] = {
             "cui": "C9999999",
-            "label": "Aspirin Hypersensitivity",    # also contains 'aspirin' in synonyms
+            "label": "Aspirin Hypersensitivity",  # also contains 'aspirin' in synonyms
             "entity_type": "Disease",
             "synonyms": ["aspirin allergy", "aspirin"],  # synonym overlap
             "lang_labels": {},
@@ -649,9 +672,7 @@ class TestBM25TypeFilterPriority:
         result = linker._find_best_match("Aspirin", EntityType.DRUG)
         assert result is not None
         cui, label, lang_labels, score = result
-        assert cui == "C0004057", (
-            f"_find_best_match should return Drug CUI C0004057, got {cui!r}"
-        )
+        assert cui == "C0004057", f"_find_best_match should return Drug CUI C0004057, got {cui!r}"
 
     def test_typed_pool_non_empty_means_untyped_pool_not_used(self):
         """
@@ -673,6 +694,5 @@ class TestBM25TypeFilterPriority:
         cui = result[0]
         # The winning entry must be from the Disease category
         assert index[cui]["entity_type"] == "Disease", (
-            f"Expected a Disease-type CUI, got {cui!r} with type "
-            f"{index[cui]['entity_type']!r}"
+            f"Expected a Disease-type CUI, got {cui!r} with type {index[cui]['entity_type']!r}"
         )

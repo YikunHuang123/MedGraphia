@@ -11,17 +11,17 @@ Both run the complete MedGraphia pipeline:
   4. History persistence — user + assistant messages appended to in-memory session
   5. Observability       — every stage traced to Langfuse (no-op when disabled)
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
 import time
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 # import Any
 from typing import Any
 
-import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
@@ -30,7 +30,7 @@ from medgraphia.api.deps import create_or_get_session, save_session
 from medgraphia.api.schemas import ChatRequest, ChatResponse
 from medgraphia.domain.base import Language, QueryType
 from medgraphia.domain.chat import Message, Session
-from medgraphia.generation.citation import build_numbered_context, inject_citations
+from medgraphia.generation.citation import inject_citations
 from medgraphia.generation.guard import LlamaGuard
 from medgraphia.generation.pipeline import GenerationPipeline
 from medgraphia.logger import get_logger
@@ -87,12 +87,14 @@ async def _get_guard() -> LlamaGuard:
 # GET /chat/sessions — list history
 # ---------------------------------------------------------------------------
 
+
 @router.get("/sessions", summary="List all chat sessions for the current user")
 async def list_sessions(
     principal: dict = Depends(require_api_key),
 ) -> list[dict[str, Any]]:
     """Return a summary of all stored chat sessions."""
     from medgraphia.graph.queries import list_chat_sessions
+
     user_id = principal.get("id", "anonymous")
     return await list_chat_sessions(user_id=user_id)
 
@@ -104,6 +106,7 @@ async def get_session_history(
 ) -> Session:
     """Retrieve the full message history and metadata for a session."""
     from medgraphia.api.deps import get_session
+
     session = await get_session(session_id)
     if not session:
         raise HTTPException(
@@ -116,6 +119,7 @@ async def get_session_history(
 # ---------------------------------------------------------------------------
 # POST /chat — synchronous
 # ---------------------------------------------------------------------------
+
 
 @router.post("", response_model=ChatResponse, summary="Synchronous chat Q&A")
 async def chat(
@@ -136,7 +140,7 @@ async def chat(
     language = body.language
     if language == Language.UNKNOWN:
         language = Language.detect(body.message)
-    
+
     logger.info("query_received", language=language.value, stream=False)
 
     guard = await _get_guard()
@@ -184,7 +188,9 @@ async def chat(
             ) from exc
 
         # ── Step 2a: Output Safety Check ────────────────────────────────
-        output_safety = await guard.check_output(body.message, result["answer"], history=session.messages)
+        output_safety = await guard.check_output(
+            body.message, result["answer"], history=session.messages
+        )
         if not output_safety.is_safe:
             return ChatResponse(
                 session_id=session.session_id,
@@ -216,13 +222,13 @@ async def chat(
         await save_session(session)
 
         # ── Step 5: Update Long-term Graph Memory ─────────────────────
-        # Record interest in both explicit query entities and the top retrieved graph node
         all_cuis = set(result.get("linked_cuis", []))
         if result.get("top_graph_cui"):
             all_cuis.add(result["top_graph_cui"])
 
         if all_cuis:
             from medgraphia.graph.queries import update_user_interests
+
             u_id = principal.get("id", "anonymous")
             cuis_list = list(all_cuis)
             logger.info("scheduling_interest_update", user_id=u_id, entities=cuis_list)
@@ -251,6 +257,7 @@ async def chat(
 # POST /chat/stream — SSE streaming
 # ---------------------------------------------------------------------------
 
+
 @router.post("/stream", summary="Streaming chat Q&A (Server-Sent Events)")
 async def chat_stream(
     body: ChatRequest,
@@ -258,13 +265,7 @@ async def chat_stream(
     principal: dict = Depends(require_api_key),
 ) -> StreamingResponse:
     """
-    Stream the answer token-by-token as Server-Sent Events.
-
-    Refactored in Phase 8 to avoid fragile JSON streaming.
-    1. Retrieval runs to completion.
-    2. LLM streams raw text tokens (immediate UI feedback).
-    3. Structured citations and disclaimer sent as final metadata events.
-    """
+    Stream the answer token-by-token as Server-Sent Events."""
     session = await create_or_get_session(body.session_id)
     request_id: str = request.state.request_id if hasattr(request.state, "request_id") else ""
     langfuse = get_langfuse_client()
@@ -273,7 +274,7 @@ async def chat_stream(
     language = body.language
     if language == Language.UNKNOWN:
         language = Language.detect(body.message)
-    
+
     logger.info("query_received", language=language.value, stream=True)
 
     async def _event_stream() -> AsyncIterator[str]:
@@ -289,10 +290,12 @@ async def chat_stream(
             guard = await _get_guard()
             input_safety = await guard.check_input(body.message, history=session.messages)
             if not input_safety.is_safe:
-                yield _sse({
-                    "type": "error", 
-                    "detail": f"Blocked by safety guardrails: {input_safety.category}"
-                })
+                yield _sse(
+                    {
+                        "type": "error",
+                        "detail": f"Blocked by safety guardrails: {input_safety.category}",
+                    }
+                )
                 return
 
             # ── Step 1: Retrieval ───────────────────────────────────────────
@@ -314,16 +317,18 @@ async def chat_stream(
 
                 items = getattr(reranked, "items", [])
                 query_type: QueryType = getattr(reranked, "query_type", QueryType.PATIENT_FAQ)
+                complexity_tier = getattr(reranked, "complexity_tier", None)
                 retrieval_paths = list({item.source.value for item in items})
                 span.end(output=f"{len(items)} items")
 
             # ── Step 2 & 3: Stream LLM tokens via Unified Generation Pipeline ──
-            # This ENSURES compiled DSPy rigor and term database consistency
             accumulated: list[str] = []
-            
-            # Get disclaimer and routing info
+
+            # Get disclaimer and routing info (pass tier so routing is consistent)
             disclaimer = generation.get_streaming_components(query_type, language)["disclaimer"]
-            _, routing = (await _get_generation()).router.route(query_type, language)
+            _, routing = (await _get_generation()).router.route(
+                query_type, language, tier=complexity_tier
+            )
 
             with trace.span("generation_stream", input=body.message):
                 try:
@@ -333,6 +338,7 @@ async def chat_stream(
                         retrieved_items=items,
                         history=session.messages,
                         language=language,
+                        complexity_tier=complexity_tier,
                     ):
                         accumulated.append(token)
                         yield _sse({"type": "chunk", "content": token})
@@ -345,13 +351,17 @@ async def chat_stream(
 
             # ── Step 4: Finalise (Citations & History) ──────────────────────
             # ── Step 4a: Output Safety Check ────────────────────────────────
-            output_safety = await guard.check_output(body.message, full_text, history=session.messages)
+            output_safety = await guard.check_output(
+                body.message, full_text, history=session.messages
+            )
             if not output_safety.is_safe:
-                yield _sse({
-                    "type": "moderated",
-                    "category": output_safety.category,
-                    "detail": "Response redacted due to safety violation."
-                })
+                yield _sse(
+                    {
+                        "type": "moderated",
+                        "category": output_safety.category,
+                        "detail": "Response redacted due to safety violation.",
+                    }
+                )
                 return
 
             # Inject citations from the final text
@@ -376,20 +386,21 @@ async def chat_stream(
             # ── Step 5: Update Long-term Graph Memory ─────────────────────
             # 1. CUIs explicitly linked from the query (high signal)
             all_cuis = set(getattr(reranked, "linked_cuis", []))
-            
+
             # 2. Implicit interest: Top-ranked graph node if it appears in top-10
             from medgraphia.retrieval.fusion import RetrievalSource
+
             top_items = getattr(reranked, "items", [])[:10]
             for item in top_items:
                 if item.source == RetrievalSource.GRAPH:
                     cui = item.metadata.get("entity_cui")
                     if cui:
                         all_cuis.add(cui)
-                        # We only link the SINGLE most relevant graph node from the top 10
                         break
 
             if all_cuis:
                 from medgraphia.graph.queries import update_user_interests
+
                 u_id = principal.get("id", "anonymous")
                 cuis_list = list(all_cuis)
                 logger.info("scheduling_interest_update", user_id=u_id, entities=cuis_list)
@@ -398,17 +409,21 @@ async def chat_stream(
                 logger.info("no_linked_entities_for_memory")
 
             # ── Step 6: Send Metadata Events ────────────────────────────────
-            yield _sse({
-                "type": "citations",
-                "citations": [c.model_dump() for c in citation_result.citations],
-            })
-            yield _sse({
-                "type": "done",
-                "session_id": session.session_id,
-                "model_used": routing.model_name,
-                "query_type": query_type.value,
-                "disclaimer": disclaimer,
-            })
+            yield _sse(
+                {
+                    "type": "citations",
+                    "citations": [c.model_dump() for c in citation_result.citations],
+                }
+            )
+            yield _sse(
+                {
+                    "type": "done",
+                    "session_id": session.session_id,
+                    "model_used": routing.model_name,
+                    "query_type": query_type.value,
+                    "disclaimer": disclaimer,
+                }
+            )
 
             trace.update(output=full_text[:500])
 
@@ -437,13 +452,14 @@ async def _run_full_pipeline(
     # ── Retrieval ─────────────────────────────────────────────────────────────
     with trace.span("retrieval", input=query) as span:
         reranked = await retrieval.execute(
-            query=query, 
+            query=query,
             history=history,
             language=language,
             user_id=user_id,
         )
         items = getattr(reranked, "items", [])
         query_type: QueryType = getattr(reranked, "query_type", QueryType.PATIENT_FAQ)
+        complexity_tier = getattr(reranked, "complexity_tier", None)
         retrieval_paths = list({item.source.value for item in items})
         span.end(output=f"{len(items)} items")
 
@@ -455,12 +471,14 @@ async def _run_full_pipeline(
             retrieved_items=items,
             history=history,
             language=language,
+            complexity_tier=complexity_tier,
         )
         model_used = gen_result.routing.model_name if gen_result.routing else ""
         span.end(output=gen_result.answer[:200])
 
     # ── Step 3: Extract implicit interest (Top graph node in top 10) ──────────
     from medgraphia.retrieval.fusion import RetrievalSource
+
     top_graph_cui = None
     for item in items[:10]:
         if item.source == RetrievalSource.GRAPH:

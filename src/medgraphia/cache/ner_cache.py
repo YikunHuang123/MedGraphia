@@ -8,6 +8,7 @@ Serialiser : JSON via orjson (fast, handles bytes)
 On any Redis error the helpers are silent no-ops so the calling code
 never needs to branch on cache availability.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -32,6 +33,7 @@ _PREFIX = "ner"
 # Key helpers
 # ---------------------------------------------------------------------------
 
+
 def _cache_key(query: str, lang: Language) -> str:
     normalised = unicodedata.normalize("NFC", query.strip().lower())
     digest = hashlib.sha256(normalised.encode()).hexdigest()[:16]
@@ -42,7 +44,8 @@ def _cache_key(query: str, lang: Language) -> str:
 # Serialisation
 # ---------------------------------------------------------------------------
 
-def _serialise(result: "QueryEntities") -> str:
+
+def _serialise(result: QueryEntities) -> str:
     import orjson  # already a project dependency
 
     entities_raw = [
@@ -66,9 +69,10 @@ def _serialise(result: "QueryEntities") -> str:
     return orjson.dumps(payload).decode()
 
 
-def _deserialise(data: str) -> "QueryEntities | None":
+def _deserialise(data: str) -> QueryEntities | None:
     try:
         import orjson
+
         from medgraphia.retrieval.query_ner import QueryEntities
 
         payload = orjson.loads(data)
@@ -107,7 +111,8 @@ def _deserialise(data: str) -> "QueryEntities | None":
 # Public API
 # ---------------------------------------------------------------------------
 
-async def ner_cache_get(query: str, lang: Language) -> "QueryEntities | None":
+
+async def ner_cache_get(query: str, lang: Language) -> QueryEntities | None:
     """Return a cached NER result, or None on cache miss / Redis unavailable."""
     redis = await get_redis()
     if redis is None:
@@ -127,7 +132,7 @@ async def ner_cache_get(query: str, lang: Language) -> "QueryEntities | None":
         return None
 
 
-async def ner_cache_set(query: str, lang: Language, result: "QueryEntities") -> None:
+async def ner_cache_set(query: str, lang: Language, result: QueryEntities) -> None:
     """Persist a NER result in Redis, silently ignoring any errors."""
     redis = await get_redis()
     if redis is None:

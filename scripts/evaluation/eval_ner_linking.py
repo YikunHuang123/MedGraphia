@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """
-Phase 3 quality-validation script.
-
-Evaluates NER + entity-linking accuracy on a small annotated golden set covering
+Evaluates NER + entity-linking accuracy on a small set covering
 English, Chinese, and German medical text.
 
 Metrics reported:
@@ -13,6 +11,7 @@ Usage:
   python scripts/eval_ner_linking.py
   python scripts/eval_ner_linking.py --mesh-dir data/mesh --verbose
 """
+
 from __future__ import annotations
 
 import sys
@@ -25,7 +24,7 @@ import click
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from medgraphia.config import get_settings
-from medgraphia.domain import Chunk, EntityType, Language, SourceMeta
+from medgraphia.domain import Chunk, Language, SourceMeta
 from medgraphia.logger import configure_logging, get_logger
 
 logger = get_logger(__name__)
@@ -42,24 +41,24 @@ GOLDEN_SET: list[dict[str, Any]] = [
         "text": "Metformin is first-line therapy for type 2 diabetes mellitus.",
         "lang": "en",
         "entities": [
-            {"text": "Metformin",                  "type": "Drug",    "cui": "D008687"},
-            {"text": "type 2 diabetes mellitus",    "type": "Disease", "cui": "D003924"},
+            {"text": "Metformin", "type": "Drug", "cui": "D008687"},
+            {"text": "type 2 diabetes mellitus", "type": "Disease", "cui": "D003924"},
         ],
     },
     {
         "text": "Warfarin interacts with aspirin and increases bleeding risk.",
         "lang": "en",
         "entities": [
-            {"text": "Warfarin",  "type": "Drug", "cui": "D014859"},
-            {"text": "aspirin",   "type": "Drug", "cui": "D001241"},
-            {"text": "bleeding",  "type": "Symptom", "cui": "D006470"},
+            {"text": "Warfarin", "type": "Drug", "cui": "D014859"},
+            {"text": "aspirin", "type": "Drug", "cui": "D001241"},
+            {"text": "bleeding", "type": "Symptom", "cui": "D006470"},
         ],
     },
     {
         "text": "Patients with hypertension should be monitored for renal impairment.",
         "lang": "en",
         "entities": [
-            {"text": "hypertension",     "type": "Disease", "cui": "D006973"},
+            {"text": "hypertension", "type": "Disease", "cui": "D006973"},
             {"text": "renal impairment", "type": "Disease", "cui": "D051437"},
         ],
     },
@@ -68,7 +67,7 @@ GOLDEN_SET: list[dict[str, Any]] = [
         "text": "二甲双胍是治疗2型糖尿病的一线用药。",
         "lang": "zh",
         "entities": [
-            {"text": "二甲双胍",  "type": "Drug",    "cui": "D008687"},
+            {"text": "二甲双胍", "type": "Drug", "cui": "D008687"},
             {"text": "2型糖尿病", "type": "Disease", "cui": "D003924"},
         ],
     },
@@ -77,7 +76,7 @@ GOLDEN_SET: list[dict[str, Any]] = [
         "lang": "zh",
         "entities": [
             {"text": "心肌梗死", "type": "Disease", "cui": "D009203"},
-            {"text": "阿司匹林", "type": "Drug",    "cui": "D001241"},
+            {"text": "阿司匹林", "type": "Drug", "cui": "D001241"},
         ],
     },
     # ---------- German ----------
@@ -85,7 +84,7 @@ GOLDEN_SET: list[dict[str, Any]] = [
         "text": "Metformin ist die Erstlinientherapie bei Typ-2-Diabetes mellitus.",
         "lang": "de",
         "entities": [
-            {"text": "Metformin",          "type": "Drug",    "cui": "D008687"},
+            {"text": "Metformin", "type": "Drug", "cui": "D008687"},
             {"text": "Typ-2-Diabetes mellitus", "type": "Disease", "cui": "D003924"},
         ],
     },
@@ -95,6 +94,7 @@ GOLDEN_SET: list[dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 # Data classes for evaluation results
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class NERResult:
@@ -134,6 +134,7 @@ class ELResult:
 # Evaluation helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_chunk(text: str, lang: str) -> Chunk:
     lang_map = {"en": Language.EN, "zh": Language.ZH, "de": Language.DE}
     return Chunk(
@@ -154,6 +155,7 @@ def _spans_overlap(pred_text: str, gold_text: str) -> bool:
 
 def eval_ner(verbose: bool = False) -> NERResult:
     from medgraphia.ingestion.ner import build_pipeline_from_settings
+
     pipeline = build_pipeline_from_settings()
     result = NERResult()
 
@@ -173,15 +175,19 @@ def eval_ner(verbose: bool = False) -> NERResult:
         for pred in pred_entities:
             matched = False
             for gi, gold in enumerate(gold_entities):
-                if gi in matched_gold: continue
-                if (pred.entity_type.value == gold["type"] and _spans_overlap(pred.label, gold["text"])):
+                if gi in matched_gold:
+                    continue
+                if pred.entity_type.value == gold["type"] and _spans_overlap(
+                    pred.label, gold["text"]
+                ):
                     result.tp += 1
                     matched_gold.add(gi)
                     matched = True
                     break
             if not matched:
                 result.fp += 1
-                if verbose: logger.debug("ner_fp", text=pred.label, type=pred.entity_type.value)
+                if verbose:
+                    logger.debug("ner_fp", text=pred.label, type=pred.entity_type.value)
 
         result.fn += len(gold_entities) - len(matched_gold)
         if verbose:
@@ -192,16 +198,16 @@ def eval_ner(verbose: bool = False) -> NERResult:
 
 
 def eval_el(mesh_dir: str, verbose: bool = False) -> ELResult:
+    from medgraphia.config import get_settings
     from medgraphia.ingestion.entity_linker import EntityLinker
     from medgraphia.ingestion.ner import build_pipeline_from_settings
-    from medgraphia.config import get_settings
 
     cfg = get_settings()
     pipeline = build_pipeline_from_settings()
     linker = EntityLinker.from_mesh(
         mesh_dir=mesh_dir,
         sapbert_model=cfg.el_sapbert_model,
-        sapbert_threshold=cfg.el_sapbert_threshold
+        sapbert_threshold=cfg.el_sapbert_threshold,
     )
     linker.build_index()
     result = ELResult()
@@ -219,7 +225,7 @@ def eval_el(mesh_dir: str, verbose: bool = False) -> ELResult:
 
         # Match predicted entities to golden entities based on ID
         predicted_cuis = {e.cui for e in linked.entities}
-        
+
         for gold in sample["entities"]:
             result.total += 1
             gold_cui = gold.get("cui", "")
@@ -229,10 +235,16 @@ def eval_el(mesh_dir: str, verbose: bool = False) -> ELResult:
 
             if gold_cui in predicted_cuis:
                 result.top1_correct += 1
-                if verbose: logger.debug("el_correct", mention=gold["text"], cui=gold_cui)
+                if verbose:
+                    logger.debug("el_correct", mention=gold["text"], cui=gold_cui)
             else:
                 if verbose:
-                    logger.debug("el_wrong", mention=gold["text"], expected=gold_cui, got="NOT_IN_PREDICTIONS")
+                    logger.debug(
+                        "el_wrong",
+                        mention=gold["text"],
+                        expected=gold_cui,
+                        got="NOT_IN_PREDICTIONS",
+                    )
 
     return result
 
@@ -241,15 +253,22 @@ def eval_el(mesh_dir: str, verbose: bool = False) -> ELResult:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 @click.command()
 @click.option("--mesh-dir", default=None, help="Path to MeSH storage dir")
 @click.option("--skip-ner", is_flag=True)
-@click.option("--skip-el",  is_flag=True)
-@click.option("--verbose",  is_flag=True)
+@click.option("--skip-el", is_flag=True)
+@click.option("--verbose", is_flag=True)
 @click.option("--ner-f1-threshold", default=0.72, show_default=True)
 @click.option("--el-acc-threshold", default=0.65, show_default=True)
-def main(mesh_dir: str | None, skip_ner: bool, skip_el: bool, verbose: bool, 
-         ner_f1_threshold: float, el_acc_threshold: float) -> None:
+def main(
+    mesh_dir: str | None,
+    skip_ner: bool,
+    skip_el: bool,
+    verbose: bool,
+    ner_f1_threshold: float,
+    el_acc_threshold: float,
+) -> None:
     cfg = get_settings()
     # Force DEBUG level if verbose is set
     log_level = "DEBUG" if verbose else cfg.log_level
@@ -258,14 +277,15 @@ def main(mesh_dir: str | None, skip_ner: bool, skip_el: bool, verbose: bool,
 
     passed = True
     click.echo("\n" + "=" * 60)
-    click.echo("  MedGraphia — Phase 3 Quality Evaluation (MeSH)")
+    click.echo("  MedGraphia — Quality Evaluation (MeSH)")
     click.echo("=" * 60 + "\n")
 
     if not skip_ner:
         click.echo("Evaluating NER...")
         ner = eval_ner(verbose=verbose)
         click.echo(f"  F1: {ner.f1:.3f} (Target: {ner_f1_threshold})")
-        if ner.f1 < ner_f1_threshold: passed = False
+        if ner.f1 < ner_f1_threshold:
+            passed = False
         if ner.errors:
             click.echo("  NER Errors:")
             for err in ner.errors:
@@ -275,7 +295,8 @@ def main(mesh_dir: str | None, skip_ner: bool, skip_el: bool, verbose: bool,
         click.echo(f"Evaluating EL (MeSH: {mesh_path})...")
         el = eval_el(mesh_dir=mesh_path, verbose=verbose)
         click.echo(f"  Top-1 Accuracy: {el.top1_accuracy:.3f} (Target: {el_acc_threshold})")
-        if el.top1_accuracy < el_acc_threshold: passed = False
+        if el.top1_accuracy < el_acc_threshold:
+            passed = False
         if el.errors:
             click.echo("  EL Errors:")
             for err in el.errors:

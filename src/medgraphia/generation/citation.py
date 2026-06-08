@@ -1,8 +1,7 @@
 """
 Citation injection for MedGraphia.
 
-Workflow
-────────
+Workflow:
 1.  The retrieval pipeline returns a list of FusedItems (ranked context passages).
 2.  build_numbered_context() formats them as "[1] text…\n\n[2] text…" for the LLM.
 3.  The LLM generates an answer that contains [N] inline references.
@@ -21,6 +20,7 @@ Citation fields populated from FusedItem.metadata:
 Unresolvable citation numbers (e.g. the LLM hallucinated [99] but only 5 passages
 were given) are collected in CitationResult.unresolved for observability.
 """
+
 from __future__ import annotations
 
 import re
@@ -43,6 +43,7 @@ _SNIPPET_MAX = 200
 # Output dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class CitationResult:
     """
@@ -53,6 +54,7 @@ class CitationResult:
         citations    — Resolved Citation objects, ordered by first appearance in text.
         unresolved   — [N] numbers that could not be mapped to a context item.
     """
+
     answer_text: str
     citations: list[Citation] = field(default_factory=list)
     unresolved: list[int] = field(default_factory=list)
@@ -72,6 +74,7 @@ class CitationResult:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def inject_citations(
     answer_text: str,
@@ -97,7 +100,7 @@ def inject_citations(
     # ── Step 1: collect unique citation numbers ──
     seen_nums: list[int] = []
     seen_set: set[int] = set()
-    
+
     # First priority: explicit structured citations from the LLM
     if explicit_citations:
         for n in explicit_citations:
@@ -191,6 +194,7 @@ def build_numbered_context(
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _item_to_citation(number: int, item: FusedItem) -> Citation:
     """Build a Citation object from a citation number + FusedItem."""
     meta = item.metadata
@@ -210,10 +214,10 @@ def _item_to_citation(number: int, item: FusedItem) -> Citation:
     else:
         # Avoid showing raw UUIDs to the user
         raw_title = "Unstructured Medical Context"
-    
+
     # Clean up repetitive FDA/EMA boilerplate from titles
     clean_title = _clean_title(raw_title)
-    
+
     # Add source type prefix for better intuition (e.g. "[Vector] Metformin...")
     source_type_label = f"[{item.source.value.capitalize()}]"
     final_title = f"{source_type_label} {clean_title}"
@@ -235,7 +239,7 @@ def _clean_title(title: str) -> str:
     """Remove boilerplate 'highlights' text and truncate overly long titles."""
     if not title:
         return "Unknown Source"
-        
+
     # Remove common FDA boilerplate strings
     noise = [
         "These highlights do not include all the information needed to use",
@@ -244,15 +248,15 @@ def _clean_title(title: str) -> str:
     ]
     for n in noise:
         title = title.replace(n, "")
-    
+
     # Remove double spaces, trailing dots or dashes
     title = " ".join(title.split())
     title = title.strip(". -")
-    
+
     # If it's still empty, provide a fallback
     if not title:
         return "Medical Reference"
-        
+
     # Hard truncation for UI sanity
     if len(title) > 100:
         title = title[:97] + "..."

@@ -1,5 +1,5 @@
 """
-Tests for document parsing pipeline (Phase 1).
+Tests for document parsing pipeline.
 Covers:
   - PubMed XML parsing
   - FDA DailyMed SPL XML parsing
@@ -8,23 +8,22 @@ Covers:
   - OCR section extraction (Tesseract path, with mock)
   - UMLS RRF streaming
 """
+
 from __future__ import annotations
 
 import textwrap
 import xml.etree.ElementTree as ET
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from medgraphia.domain import Language, SourceMeta
-from medgraphia.data.pubmed import _parse_pubmed_xml
+from medgraphia.data.drugbank import _parse_drug_element
 from medgraphia.data.fda_dailymed import _parse_spl_xml
-from medgraphia.data.drugbank import _parse_drug_element, _NS
-from medgraphia.data.mesh import MeSHLoader, _resolve_entity_type
-from medgraphia.ingestion.parsers.docling_parser import _extract_sections, _extract_full_text
+from medgraphia.data.mesh import _resolve_entity_type
+from medgraphia.data.pubmed import _parse_pubmed_xml
+from medgraphia.domain import Language
+from medgraphia.ingestion.parsers.docling_parser import _extract_full_text, _extract_sections
 from medgraphia.ingestion.parsers.mineru_parser import _parse_markdown_sections
-
 
 # ===========================================================================
 # PubMed XML parser
@@ -196,6 +195,7 @@ def test_drugbank_parse_language():
 # MeSH entity type resolution (MeSH tree numbers; replaces UMLS STY tests)
 # ===========================================================================
 
+
 def test_mesh_entity_type_disease():
     # C-branch = Diseases and Conditions
     assert _resolve_entity_type(["C14.280"]) == "Disease"
@@ -227,12 +227,30 @@ def test_mesh_entity_type_priority():
 
 SAMPLE_DOCLING_JSON = {
     "body": [
-        {"label": "section_header", "text": "4 Clinical Particulars", "level": 1, "prov": [{"page_no": 4}]},
-        {"label": "section_header", "text": "4.1 Therapeutic Indications", "level": 2, "prov": [{"page_no": 4}]},
-        {"label": "text", "text": "Metformin is indicated for type 2 diabetes.", "prov": [{"page_no": 4}]},
+        {
+            "label": "section_header",
+            "text": "4 Clinical Particulars",
+            "level": 1,
+            "prov": [{"page_no": 4}],
+        },
+        {
+            "label": "section_header",
+            "text": "4.1 Therapeutic Indications",
+            "level": 2,
+            "prov": [{"page_no": 4}],
+        },
+        {
+            "label": "text",
+            "text": "Metformin is indicated for type 2 diabetes.",
+            "prov": [{"page_no": 4}],
+        },
         {"label": "section_header", "text": "4.2 Posology", "level": 2, "prov": [{"page_no": 5}]},
         {"label": "text", "text": "Adults: 500 mg twice daily.", "prov": [{"page_no": 5}]},
-        {"label": "table", "data": {"rows": [["Drug", "Dose"], ["Metformin", "500 mg"]]}, "prov": [{"page_no": 5}]},
+        {
+            "label": "table",
+            "data": {"rows": [["Drug", "Dose"], ["Metformin", "500 mg"]]},
+            "prov": [{"page_no": 5}],
+        },
     ]
 }
 
@@ -321,6 +339,7 @@ def test_mineru_hierarchical_path():
 # Integration smoke test: PubMedConnector with mocked HTTP
 # ===========================================================================
 
+
 @pytest.mark.asyncio
 async def test_pubmed_connector_search_returns_ids():
     """Verify that the connector correctly calls esearch and returns IDs."""
@@ -328,9 +347,9 @@ async def test_pubmed_connector_search_returns_ids():
 
     mock_response = AsyncMock()
     mock_response.raise_for_status = MagicMock()
-    mock_response.json = AsyncMock(return_value={
-        "esearchresult": {"idlist": ["11111111", "22222222"]}
-    })
+    mock_response.json = AsyncMock(
+        return_value={"esearchresult": {"idlist": ["11111111", "22222222"]}}
+    )
     mock_response.__aenter__ = AsyncMock(return_value=mock_response)
     mock_response.__aexit__ = AsyncMock(return_value=False)
 

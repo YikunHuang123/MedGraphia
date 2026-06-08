@@ -1,30 +1,30 @@
 """Online query pipeline: three-path retrieval, RRF fusion, reranking."""
 
-from medgraphia.retrieval.query_ner import QueryEntities, QueryNERLinker
-from medgraphia.retrieval.router import QueryRouter, RetrievalPlan, RouterState
-from medgraphia.retrieval.graph_retriever import (
-    GraphRetriever,
-    GraphRetrievalResult,
-    GraphTriple,
-)
-from medgraphia.retrieval.vector_retriever import (
-    VectorRetriever,
-    VectorRetrievalResult,
-    VectorHit,
-)
 from medgraphia.retrieval.community_retriever import (
-    CommunityRetriever,
-    CommunityRetrievalResult,
     CommunityHit,
+    CommunityRetrievalResult,
+    CommunityRetriever,
 )
 from medgraphia.retrieval.fusion import (
-    RRFFusion,
-    FusionResult,
     FusedItem,
+    FusionResult,
     RetrievalSource,
+    RRFFusion,
 )
-from medgraphia.retrieval.reranker import Reranker, RerankedResult
+from medgraphia.retrieval.graph_retriever import (
+    GraphRetrievalResult,
+    GraphRetriever,
+    GraphTriple,
+)
 from medgraphia.retrieval.pipeline import RetrievalPipeline
+from medgraphia.retrieval.query_ner import QueryEntities, QueryNERLinker
+from medgraphia.retrieval.reranker import RerankedResult, Reranker
+from medgraphia.retrieval.router import QueryRouter, RetrievalPlan, RouterState
+from medgraphia.retrieval.vector_retriever import (
+    VectorHit,
+    VectorRetrievalResult,
+    VectorRetriever,
+)
 
 __all__ = [
     # Pipeline

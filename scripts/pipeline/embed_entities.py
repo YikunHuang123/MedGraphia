@@ -3,8 +3,8 @@
 Embed entity nodes from Neo4j using SapBERT and write to Qdrant.
 
 Reads all Disease / Drug / Symptom / Gene / Procedure nodes from Neo4j,
-encodes their canonical labels with SapBERT, and upserts dense (768-dim)
-vectors into the entity Qdrant collection for entity-level similarity search.
+encodes their canonical labels with SapBERT, and upserts dense vectors
+into the entity Qdrant collection for entity-level similarity search.
 
 Usage::
 
@@ -17,6 +17,7 @@ Usage::
     # Dry-run: count entities in Neo4j without embedding
     python scripts/embed_entities.py --dry-run
 """
+
 from __future__ import annotations
 
 import argparse
@@ -47,6 +48,7 @@ def _parse_args() -> argparse.Namespace:
 
 async def _run(collection: str | None, dry_run: bool) -> int:
     from medgraphia.logger import configure_logging
+
     configure_logging("INFO")
 
     from medgraphia.graph.queries import get_all_entities
@@ -58,6 +60,7 @@ async def _run(collection: str | None, dry_run: bool) -> int:
         return 0
 
     from medgraphia.ingestion.embedder import EntityEmbedder
+
     embedder = EntityEmbedder.from_settings()
     count = await embedder.embed_and_store(collection_name=collection)
     print(f"Embedded and stored {count} entities → Qdrant")

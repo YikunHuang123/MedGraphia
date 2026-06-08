@@ -7,6 +7,7 @@ Merges results from the three retrieval paths into a single ranked list.
   Path 2 — Vector retriever  : VectorRetrievalResult (dense+sparse chunks)
   Path 3 — Community retriever: CommunityRetrievalResult (community summaries)
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -23,6 +24,7 @@ _RRF_K: int = 60  # smoothing constant
 # ---------------------------------------------------------------------------
 # Unified item type
 # ---------------------------------------------------------------------------
+
 
 class RetrievalSource(str, Enum):
     GRAPH = "graph"
@@ -42,6 +44,7 @@ class FusedItem:
         rrf_score   — Aggregated RRF score (higher = more relevant across paths).
         metadata    — Source-specific provenance (e.g. chunk_id, source_title, cuis).
     """
+
     item_id: str
     text: str
     source: RetrievalSource
@@ -57,10 +60,11 @@ class FusedItem:
 @dataclass
 class FusionResult:
     """Final ranked list after RRF fusion (and before optional reranking)."""
+
     items: list[FusedItem] = field(default_factory=list)
     query: str = ""
 
-    def top(self, n: int) -> "FusionResult":
+    def top(self, n: int) -> FusionResult:
         return FusionResult(items=self.items[:n], query=self.query)
 
     def texts(self) -> list[str]:
@@ -74,9 +78,11 @@ class FusionResult:
 # Adapters: each retrieval result → list[FusedItem]
 # ---------------------------------------------------------------------------
 
+
 def _graph_to_items(result: Any) -> list[FusedItem]:
     """Convert GraphRetrievalResult → FusedItem list."""
     from medgraphia.retrieval.graph_retriever import GraphRetrievalResult
+
     if not isinstance(result, GraphRetrievalResult):
         return []
 
@@ -85,9 +91,7 @@ def _graph_to_items(result: Any) -> list[FusedItem]:
 
     # Sort triples: IDENTITY summaries first, then others by confidence
     sorted_triples = sorted(
-        result.triples, 
-        key=lambda x: (x.relation_type == "IDENTITY", x.confidence), 
-        reverse=True
+        result.triples, key=lambda x: (x.relation_type == "IDENTITY", x.confidence), reverse=True
     )
 
     for triple in sorted_triples:
@@ -100,8 +104,12 @@ def _graph_to_items(result: Any) -> list[FusedItem]:
         # If the triple has a chunk_id, use it as the item_id.
         # This allows it to overlap with the Vector search's chunk_id,
         # resulting in a much higher RRF score for "Knowledge Graph confirmed" chunks.
-        item_id = triple.chunk_id if triple.chunk_id else f"{triple.entity_cui}|{triple.relation_type}|{triple.neighbor_cui}"
-        
+        item_id = (
+            triple.chunk_id
+            if triple.chunk_id
+            else f"{triple.entity_cui}|{triple.relation_type}|{triple.neighbor_cui}"
+        )
+
         items.append(
             FusedItem(
                 item_id=item_id,
@@ -123,6 +131,7 @@ def _graph_to_items(result: Any) -> list[FusedItem]:
 def _vector_to_items(result: Any) -> list[FusedItem]:
     """Convert VectorRetrievalResult → FusedItem list."""
     from medgraphia.retrieval.vector_retriever import VectorRetrievalResult
+
     if not isinstance(result, VectorRetrievalResult):
         return []
 
@@ -152,6 +161,7 @@ def _vector_to_items(result: Any) -> list[FusedItem]:
 def _community_to_items(result: Any) -> list[FusedItem]:
     """Convert CommunityRetrievalResult → FusedItem list."""
     from medgraphia.retrieval.community_retriever import CommunityRetrievalResult
+
     if not isinstance(result, CommunityRetrievalResult):
         return []
 
@@ -176,6 +186,7 @@ def _community_to_items(result: Any) -> list[FusedItem]:
 # ---------------------------------------------------------------------------
 # Core RRF computation
 # ---------------------------------------------------------------------------
+
 
 def _rrf_score(rank: int, k: int = _RRF_K) -> float:
     """1-indexed rank → RRF contribution."""
@@ -219,6 +230,7 @@ def _reciprocal_rank_fusion(
 # RRFFusion — public interface
 # ---------------------------------------------------------------------------
 
+
 class RRFFusion:
     """
     Fuses results from graph, vector, and community retrievers using RRF.
@@ -244,7 +256,7 @@ class RRFFusion:
         self._k = k
 
     @classmethod
-    def from_settings(cls) -> "RRFFusion":
+    def from_settings(cls) -> RRFFusion:
         return cls()
 
     def fuse(

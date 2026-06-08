@@ -5,6 +5,7 @@ pyvis-powered knowledge-graph visualisation.
 `GET /graph/entity` into an interactive HTML widget embedded via
 `streamlit.components.v1.html`.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -14,15 +15,15 @@ import streamlit.components.v1 as components
 
 # Distinct colours for the five entity labels the backend whitelists.
 _NODE_COLOURS = {
-    "Disease":   "#E63946",   # red
-    "Drug":      "#1D4ED8",   # blue
-    "Symptom":   "#F59E0B",   # amber
-    "Gene":      "#10B981",   # green
-    "Procedure": "#8B5CF6",   # violet
-    "Community": "#6B7280",   # neutral grey
+    "Disease": "#E63946",  # red
+    "Drug": "#1D4ED8",  # blue
+    "Symptom": "#F59E0B",  # amber
+    "Gene": "#10B981",  # green
+    "Procedure": "#8B5CF6",  # violet
+    "Community": "#6B7280",  # neutral grey
 }
 _DEFAULT_NODE_COLOUR = "#374151"
-_SEED_NODE_COLOUR = "#0B3D91"   # match the app primary
+_SEED_NODE_COLOUR = "#0B3D91"  # match the app primary
 
 
 def _node_label(node: dict[str, Any]) -> str:

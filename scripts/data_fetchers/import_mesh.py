@@ -6,6 +6,7 @@ Replaces the old UMLS-based import logic with a fully automated, open-source flo
 Usage:
   python scripts/import_mesh.py --limit 10000
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -33,7 +34,7 @@ BATCH_SIZE = 500
 def main(limit: int, dry_run: bool) -> None:
     cfg = get_settings()
     configure_logging(cfg.log_level)
-    
+
     click.echo(f"Starting MeSH import (limit={limit or 'all'}, dry_run={dry_run})")
     asyncio.run(_run(limit or None, dry_run))
 
@@ -43,10 +44,10 @@ async def _run(limit: int | None, dry_run: bool) -> None:
     cfg = get_settings()
 
     loader = MeSHLoader(storage_dir=cfg.mesh_dir)
-    
+
     # Step 1: Download data if missing
     await loader.ensure_data()
-    
+
     # Step 2: Parse ASCII file
     index = loader.load(limit=limit)
     click.echo(f"Parsed {len(index)} concepts from MeSH.")

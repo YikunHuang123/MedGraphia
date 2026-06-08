@@ -5,6 +5,7 @@ CLI tool: download the Huatuo-Lite (Chinese medical QA) dataset from Hugging Fac
 Usage:
   python scripts/data_fetchers/fetch_chinese_qa.py --limit 20000
 """
+
 from __future__ import annotations
 
 import json
@@ -20,6 +21,7 @@ from medgraphia.config import get_settings
 from medgraphia.logger import configure_logging, get_logger
 
 DATASET_NAME = "FreedomIntelligence/Huatuo26M-Lite"
+
 
 @click.command()
 @click.option("--limit", default=5000, show_default=True, help="Number of items to export")
@@ -41,13 +43,13 @@ def main(limit: int, out: str) -> None:
     target_file = out_path / "huatuo_lite.jsonl"
 
     click.echo(f"Downloading {DATASET_NAME} from Hugging Face...")
-    
+
     try:
         # Load the dataset (Huatuo26M-Lite usually has a 'train' split)
         dataset = load_dataset(DATASET_NAME, split="train", streaming=True)
-        
+
         click.echo(f"Exporting top {limit} items to {target_file}...")
-        
+
         count = 0
         with open(target_file, "w", encoding="utf-8") as f:
             for item in dataset:
@@ -55,14 +57,15 @@ def main(limit: int, out: str) -> None:
                 count += 1
                 if count >= limit:
                     break
-        
+
         click.echo(f"Successfully exported {count} items.")
         logger.info("huatuo_download_complete", path=str(target_file), count=count)
-            
+
     except Exception as e:
         click.echo(f"Error: {str(e)}")
         logger.error("huatuo_download_failed", error=str(e))
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
