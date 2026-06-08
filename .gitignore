@@ -8,7 +8,14 @@ __pycache__/
 
 medgraphia.egg-info/
 
-/data/
+# Data and results
+!data/
+data/mesh/*
+!data/mesh/.gitkeep
+data/raw/**/*
+!data/raw/**/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
 
 ./eval_output.log
 ./eval_results.csv
