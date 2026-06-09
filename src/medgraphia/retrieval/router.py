@@ -85,6 +85,10 @@ _RULES: list[tuple[QueryType, list[str], int]] = [
             r"\bpolypharmac\w*\b",
             r"\bco.?administr\w*\b",
             r"\bdrug.{0,10}drug\b",
+            # Colloquial drug-combination phrasings: "take X with Y", "use together"
+            r"\btake\b.{0,25}\bwith\b",
+            r"\b(together|simultaneously)\b",
+            r"\bsafe\s+to\s+(take|use|combine)\b",
             r"\b相互作用\b",  # ZH
             r"\bWechselwirkung\w*\b",  # DE
         ],
@@ -139,9 +143,16 @@ _RULES: list[tuple[QueryType, list[str], int]] = [
             r"\bsymptom\b",
             r"\bprognosis\b",
             r"\bcomorbid\w*\b",
-            r"\b诊断\b",  # ZH: diagnosis
-            r"\b治疗\b",  # ZH: treatment
-            r"\bBehandlung\b",  # DE: treatment
+            r"\brisk\s+factor\w*\b",  # "risk factors for X"
+            r"\bmonitor\w*\b",        # "monitoring", "monitor eGFR"
+            r"\bcontraindic\w*\b",    # contraindication (non-drug-drug context)
+            r"\brenal\b",             # renal impairment, eGFR questions
+            r"\begfr\b",              # eGFR threshold questions
+            r"\b肾\w*\b",            # ZH: renal
+            r"\b禁忌\b",             # ZH: contraindication
+            r"\b诊断\b",             # ZH: diagnosis
+            r"\b治疗\b",             # ZH: treatment
+            r"\bBehandlung\b",        # DE: treatment
         ],
         1,
     ),
@@ -228,7 +239,7 @@ def _plan_from_type(
             use_vector=True,
             use_community=False,
             graph_hops=1,
-            vector_limit=15,
+            vector_limit=25,
         )
     elif qtype == QueryType.CLINICAL_DECISION:
         plan = RetrievalPlan(
@@ -240,7 +251,7 @@ def _plan_from_type(
             use_vector=True,
             use_community=False,
             graph_hops=2,
-            vector_limit=20,
+            vector_limit=40,
         )
     elif qtype == QueryType.LITERATURE_MULTIHOP:
         plan = RetrievalPlan(
@@ -252,7 +263,7 @@ def _plan_from_type(
             use_vector=True,
             use_community=False,
             graph_hops=2,
-            vector_limit=25,
+            vector_limit=40,
         )
     elif qtype == QueryType.CROSS_CORPUS:
         plan = RetrievalPlan(
@@ -264,7 +275,7 @@ def _plan_from_type(
             use_vector=True,
             use_community=True,
             graph_hops=0,
-            vector_limit=15,
+            vector_limit=20,
             community_limit=8,
         )
     else:  # PATIENT_FAQ
@@ -277,7 +288,7 @@ def _plan_from_type(
             use_vector=True,
             use_community=False,
             graph_hops=0,
-            vector_limit=10,
+            vector_limit=25,
         )
 
     # --- CORE OVERRIDE: If medical entities are detected, ALWAYS use the graph ---

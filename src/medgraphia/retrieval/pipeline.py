@@ -71,7 +71,7 @@ class RetrievalPipeline:
         history: list[Message] | None = None,
         language: Language | None = None,
         user_id: str | None = None,
-        top_k: int = 5,
+        top_k: int = 10,
     ) -> RerankedResult:
         """
         Execute the full GraphRAG retrieval pipeline.
@@ -248,11 +248,45 @@ class RetrievalPipeline:
         )
 
         # ---------------------------------------------------------
+        # Step 3.5: Semantic Deduplication
+        # Filter out redundant chunks (near-identical text) to ensure
+        # the reranker has a diverse candidate pool.
+        # ---------------------------------------------------------
+        import difflib
+        
+        unique_items = []
+        seen_texts = []
+
+        # Sort by RRF score to prioritize better-ranked versions
+        fusion_items = sorted(fusion_result.items, key=lambda x: x.rrf_score, reverse=True)
+
+        for item in fusion_items:
+            # Simple deduplication: compare normalized first 300 chars
+            text_prefix = item.text[:300].strip().lower()
+            is_duplicate = False
+            
+            for seen in seen_texts:
+                # Use SequenceMatcher for fuzzy comparison (90% similarity threshold)
+                similarity = difflib.SequenceMatcher(None, text_prefix, seen).ratio()
+                if similarity > 0.90:
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                unique_items.append(item)
+                seen_texts.append(text_prefix)
+            else:
+                logger.debug("retrieval_deduplicated_item", source=item.source.value, item_id=item.item_id)
+
+        # Update fusion_result with unique items
+        fusion_result.items = unique_items
+
+        # ---------------------------------------------------------
         # Step 4: Cross-Encoder Reranking
         # ---------------------------------------------------------
         # Optimization: Only rerank the top-N candidates from the fusion result.
-        # Reranking 60+ items is slow; top 20 is typically enough for high recall.
-        rerank_candidates = fusion_result.top(20)
+        # Use top(25) to ensure the cross-encoder has enough candidates when top_k=10.
+        rerank_candidates = fusion_result.top(25)
 
         final_result = self.reranker.rerank(
             query=search_query,

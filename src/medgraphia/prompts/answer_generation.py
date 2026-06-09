@@ -5,7 +5,7 @@ DSPy Predictor prompt modules.
 from __future__ import annotations
 
 import dspy
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class MedicalAnswer(BaseModel):
@@ -18,6 +18,23 @@ class MedicalAnswer(BaseModel):
         default="",
         description="Mandatory safety disclaimer; required for clinical/drug/multihop scenarios",
     )
+
+    @field_validator("citations", mode="before")
+    @classmethod
+    def coerce_citations(cls, v: object) -> list[int]:
+        # Small models sometimes output ["[1]", "[2]"] instead of [1, 2].
+        # Strip brackets and convert to int, silently dropping unparseable values.
+        if not isinstance(v, list):
+            return []
+        result: list[int] = []
+        for item in v:
+            if isinstance(item, int):
+                result.append(item)
+            elif isinstance(item, str):
+                cleaned = item.strip().strip("[]")
+                if cleaned.isdigit():
+                    result.append(int(cleaned))
+        return result
 
 
 class GenerateClinicalAnswer(dspy.Signature):

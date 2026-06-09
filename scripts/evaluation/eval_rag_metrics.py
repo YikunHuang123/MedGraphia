@@ -7,8 +7,7 @@ RAGAS metrics: Faithfulness, Answer Relevancy, Context Precision, Context Recall
 
 Usage:
   python scripts/evaluation/eval_rag_metrics.py
-  python scripts/evaluation/eval_rag_metrics.py --input data/evaluation/synthetic_testset.csv
-  python scripts/evaluation/eval_rag_metrics.py --judge-model gpt-4o --by-category
+  python scripts/evaluation/eval_rag_metrics.py --input-file data/evaluation/synthetic_testset.csv --by-category
 """
 
 from __future__ import annotations
@@ -81,10 +80,11 @@ from ragas.run_config import RunConfig
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from medgraphia.domain import Language  # noqa: E402
-from medgraphia.generation.pipeline import GenerationPipeline  # noqa: E402
-from medgraphia.logger import configure_logging, get_logger  # noqa: E402
-from medgraphia.retrieval.pipeline import RetrievalPipeline  # noqa: E402
+from medgraphia.config import get_settings
+from medgraphia.domain import Language
+from medgraphia.generation.pipeline import GenerationPipeline
+from medgraphia.logger import configure_logging, get_logger
+from medgraphia.retrieval.pipeline import RetrievalPipeline
 
 logger = get_logger(__name__)
 
@@ -267,7 +267,7 @@ def run_ragas_scoring(df: pd.DataFrame, judge_model: str = "gpt-4o-mini") -> Any
 )
 @click.option(
     "--judge-model",
-    default="gpt-4o-mini",
+    default="gpt-4o",
     show_default=True,
     help="OpenAI model used as RAGAS judge (use gpt-4o for production-quality evaluation)",
 )

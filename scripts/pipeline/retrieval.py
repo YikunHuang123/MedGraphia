@@ -16,22 +16,23 @@ logging.basicConfig(
 )
 
 from medgraphia.retrieval.pipeline import RetrievalPipeline
+from medgraphia.domain.base import Language
 
 
 async def main():
-    print("=== MedGraphia Retrieval Pipeline Test ===")
+    print("=== MedGraphia Retrieval Pipeline Test (UI Simulation Mode) ===")
 
     # 1. Initialize Pipeline
-    # We use from_settings() which uses lazy loading internally
     pipeline = RetrievalPipeline.from_settings()
 
     # 2. Define test queries
     test_queries = [
-        "什么是肾衰竭?",
-        "What is the interaction between metformin and sitagliptin?",
-        "How to treat type 2 diabetes?",
-        "Give me an overview of cardiovascular disease prevalence.",
-        "Is aspirin safe for a patient with stomach ulcers?",
+        # "什么是肾衰竭?",
+        # "What is the interaction between metformin and sitagliptin?",
+        # "How to treat type 2 diabetes?",
+        # "Give me an overview of cardiovascular disease prevalence.",
+        # "Is aspirin safe for a patient with stomach ulcers?",
+        "What are the risk factors and management strategies for metformin-associated lactic acidosis?"
     ]
 
     for query in test_queries:
@@ -39,12 +40,24 @@ async def main():
         print("-" * 50)
 
         try:
-            # 3. Execute Pipeline
-            # This will trigger: NER -> Routing -> Retrieval -> Fusion -> Reranking
-            result = await pipeline.execute(query, top_k=3)
+            # 3. Detect language as UI does
+            language = Language.detect(query)
+            if language == Language.UNKNOWN:
+                language = Language.EN
+            print(f"[*] Detected Language: {language.value}")
 
-            # 4. Display Results
-            print(f"Reranked: {result.reranked}")
+            # 4. Execute Pipeline
+            # We use default top_k=10 to match UI, and pass empty history for first turn
+            result = await pipeline.execute(
+                query=query,
+                history=[],
+                language=language,
+                user_id="anonymous"
+            )
+
+            # 5. Display Results
+            print(f"[*] Complexity Tier: {getattr(result, 'complexity_tier', 'N/A')}")
+            print(f"[*] Total Reranked Items: {len(result.items)}")
 
             if not result.items:
                 print("No context items found (databases might be empty or unreachable).")
@@ -54,10 +67,11 @@ async def main():
                     if "reranker_score" in item.metadata:
                         score_str += f" | Rerank: {item.metadata['reranker_score']:.4f}"
 
-                    print(f"{i}. [{item.source.value}] {score_str}")
-                    # Print first 200 chars of text
-                    text_snippet = item.text.replace("\n", " ")[:200]
-                    print(f"   Text: {text_snippet}...")
+                    print(f"\n{i}. [{item.source.value}] {score_str}")
+                    # Print first 300 chars to check for truncation
+                    text_snippet = item.text.replace("\n", " ").strip()
+                    print(f"   Text: {text_snippet[:1000]}...")
+
 
         except Exception as e:
             print(f"❌ Error executing pipeline: {type(e).__name__}: {e}")

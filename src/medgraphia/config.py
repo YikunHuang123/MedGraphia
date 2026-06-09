@@ -119,11 +119,11 @@ class Settings(BaseSettings):
     # llm_large_provider: str = "ollama"        # e.g. "openai"
     # llm_large_model: str = "qwen2.5:3b"           # e.g. "gpt-4o"
     llm_small_provider: str = "deepseek"  # e.g. "ollama"
-    llm_small_model: str = "deepseek-chat"  # e.g. "qwen2.5:7b"
+    llm_small_model: str = "deepseek-v4-flash"  # e.g. "qwen2.5:7b"
     llm_medium_provider: str = "deepseek"  # e.g. "deepseek"
-    llm_medium_model: str = "deepseek-chat"  # e.g. "deepseek-chat"
-    llm_large_provider: str = "deepseek"  # e.g. "openai"
-    llm_large_model: str = "deepseek-chat"  # e.g. "gpt-4o"
+    llm_medium_model: str = "deepseek-v4-pro"  # e.g. "deepseek-chat"
+    llm_large_provider: str = "openai"  # e.g. "openai"
+    llm_large_model: str = "gpt-4.1"  # e.g. "gpt-4o"
 
     # Model used for community summary generation; defaults to default_llm_model if empty
     community_summary_llm: str = ""
@@ -180,13 +180,13 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Reranker
     # ------------------------------------------------------------------
-    reranker_threshold: float = 0.0  # Minimum score for a passage to be considered relevant
+    reranker_threshold: float = 0.1  # Minimum score for a passage to be considered relevant
 
     # ------------------------------------------------------------------
     # Multilingual retrieval
     # ------------------------------------------------------------------
     multilingual_retrieval_enabled: bool = True
-    multilingual_per_lang_quota: int = 7
+    multilingual_per_lang_quota: int = 12
 
     ner_gliner_model: str = "urchade/gliner_mediumv2.1"
     ner_gliner_threshold: float = 0.30  # lowered further
@@ -211,9 +211,10 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Leave unset (or empty) to run without Redis.
     # When set, enables:
-    #   • NER result caching (300–500 ms BERT inference → <5 ms Redis read)
+    #   • NER result caching
     #   • Arq task queue for durable build-pipeline execution
-    redis_url: str | None = None
+    # redis_url: str | None = None
+    redis_url: str | None = "redis://localhost:6379/0"
 
     # ------------------------------------------------------------------
     # Privacy / compliance

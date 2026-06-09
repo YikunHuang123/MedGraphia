@@ -69,7 +69,7 @@ from ragas.testset.transforms.relationship_builders import (
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from medgraphia.logger import configure_logging, get_logger  # noqa: E402
+from medgraphia.logger import configure_logging, get_logger
 
 logger = get_logger(__name__)
 

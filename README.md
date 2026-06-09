@@ -401,7 +401,7 @@ Before any processing, **Llama-Guard 3** inspects the input query and conversati
 If conversation history exists, the `QueryRewriter` resolves pronouns and ellipsis (e.g., "What are its side effects?" → "What are the side effects of Metformin?"), and create an overview of historical chat records in a fixed window, to create a standalone search query.
 
 **Step 2 — Intent Routing & Multilingual Expansion**
-- **NER & Linking**: The `QueryRouter` runs a multilingual NER pass on the query to identify medical entities and link them to MeSH CUIs. Results are transparently cached in Redis (TTL 1 h) via `route_async()`; cache hits skip BERT/SapBERT inference and reduce routing latency from ~400 ms to < 5 ms.
+- **NER & Linking**: The `QueryRouter` runs a multilingual NER pass on the query to identify medical entities and link them to MeSH CUIs. Results are transparently cached in Redis (TTL 1 h) via `route_async()`; cache hits skip BERT/SapBERT inference and reduce routing latency from **~2550 ms to < 5 ms**.
 - **Intent Classification**: The query is classified into one of five categories: `CLINICAL_DECISION`, `DRUG_INTERACTION`, `LITERATURE_MULTIHOP`, `CROSS_CORPUS`, or `PATIENT_FAQ`.
 - **Multilingual expansion**: To eliminate lexical bias in sparse retrieval, the `QueryTranslator` translates the query into all three corpus languages (ZH / EN / DE) in parallel.
 

@@ -59,7 +59,7 @@ def get_lm(
         model_id = f"{provider}/{model}"
 
     # 2. Determine API key and Base URL
-    api_key = ""
+    api_key = None
     api_base = None
 
     # Check for specialized task credentials first
@@ -88,7 +88,9 @@ def get_lm(
             api_key = cfg.anthropic_api_key.get_secret_value()
 
     try:
-        kwargs = {"api_key": api_key}
+        kwargs = {}
+        if api_key:
+            kwargs["api_key"] = api_key
         if api_base:
             kwargs["api_base"] = api_base
         if temperature is not None:
