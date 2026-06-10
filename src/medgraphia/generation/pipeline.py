@@ -117,6 +117,15 @@ class GenerationPipeline:
                     no_info_message=get_no_info_message(language),
                 )
                 ans_data: MedicalAnswer = prediction.result
+
+                # ── Auto-Stitching: Ensure JSON citations are reflected in text ──
+                # This fixes "Format Drift" where LLMs omit [N] markers when a
+                # separate citations field is present in the schema.
+                if ans_data.citations:
+                    missing = [c for c in ans_data.citations if f"[{c}]" not in ans_data.answer]
+                    if missing:
+                        ans_data.answer += " " + "".join([f"[{c}]" for c in missing])
+
         except Exception as exc:
             logger.error("generation_failed", error=str(exc))
             ans_data = MedicalAnswer(
@@ -128,8 +137,10 @@ class GenerationPipeline:
         latency_ms = (time.perf_counter() - start_time) * 1000
 
         # 4. Finalise citations (ensure they match the context)
-        # Note: DSPy might have already cited, but we use inject_citations to be 100% sure
-        citation_result = inject_citations(ans_data.answer, retrieved_items)
+        # Note: We pass ans_data.citations as explicit_citations for dual-layered resolution
+        citation_result = inject_citations(
+            ans_data.answer, retrieved_items, explicit_citations=ans_data.citations
+        )
 
         return GenerationResult(
             answer=ans_data.answer,
@@ -207,6 +218,13 @@ class GenerationPipeline:
                     no_info_message=get_no_info_message(language),
                 )
                 ans_text = prediction.result.answer
+                explicit_cits = prediction.result.citations
+
+                # ── Auto-Stitching: Ensure JSON citations are reflected in text ──
+                if explicit_cits:
+                    missing = [c for c in explicit_cits if f"[{c}]" not in ans_text]
+                    if missing:
+                        ans_text += " " + "".join([f"[{c}]" for c in missing])
 
                 # Stream the answer character by character (or chunk) to satisfy UI expectations
                 # In a real high-perf scenario, we'd use dspy's underlying LM for true streaming

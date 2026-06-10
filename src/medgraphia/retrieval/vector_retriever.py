@@ -37,6 +37,7 @@ class VectorHit:
     section_path: str = ""
     language: str = ""
     page: int | None = None
+    parent_text: str = ""  # full section text; empty for legacy chunks without upgrade
 
     @classmethod
     def from_qdrant_payload(cls, chunk_id: str, score: float, payload: dict[str, Any]) -> VectorHit:
@@ -51,6 +52,7 @@ class VectorHit:
             section_path=payload.get("section_path") or "",
             language=payload.get("language") or "",
             page=payload.get("page"),
+            parent_text=payload.get("parent_text") or "",
         )
 
 

@@ -60,6 +60,7 @@ class Chunk(BaseModel):
     token_count: int | None = None
     page: int | None = None
     char_offset: int | None = None
+    parent_text: str = ""  # full section text; set by chunker for parent-child retrieval
     entities: list[Entity] = Field(default_factory=list)
     embedding: list[float] | None = None
     sparse_embedding: dict[int, float] | None = None  # token_id → weight

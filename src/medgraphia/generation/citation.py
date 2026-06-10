@@ -35,8 +35,8 @@ logger = get_logger(__name__)
 # Matches "[1]", "[12]", but NOT "[abc]" or "[]"
 _CITATION_RE = re.compile(r"\[(\d+)\]")
 
-# Maximum content_snippet length stored in the Citation object
-_SNIPPET_MAX = 200
+# Maximum content_snippet length stored in the Citation object (for UI previews)
+_SNIPPET_MAX = 500
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +154,7 @@ def inject_citations(
 
 def build_numbered_context(
     items: list[FusedItem],
-    max_chars_per_item: int = 800,
+    max_chars_per_item: int = 3000,
 ) -> str:
     """
     Format *items* into the numbered context string that gets injected into prompts.
@@ -171,7 +171,7 @@ def build_numbered_context(
 
     Args:
         items:              Ordered FusedItems from the retrieval pipeline.
-        max_chars_per_item: Hard character limit per item (default 800).
+        max_chars_per_item: Hard character limit per item (default 3000).
 
     Returns:
         Multi-line string suitable for the ``context`` input field of any predictor.

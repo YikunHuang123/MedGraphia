@@ -43,7 +43,9 @@ class GenerateClinicalAnswer(dspy.Signature):
     You MUST read and synthesize relevant information from ALL context paragraphs regardless
     of the language they are written in — translate and integrate cross-language evidence.
     Respond exclusively in target_language.
-    Cite sources using [N] inline.
+    Cite sources using [N] inline — every factual claim (mechanism, dosage, risk factor,
+    contraindication, outcome) MUST be directly supported by a specific cited passage [N].
+    Do not state any clinical fact without citing the numbered passage that contains it.
     If context paragraphs discuss the queried topic through clinical notes, differential diagnoses,
     case reports, pharmacological data, or pathological descriptions — even without a formal
     encyclopedic definition — synthesize whatever IS available and cite sources; do not refuse.

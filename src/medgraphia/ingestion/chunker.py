@@ -81,7 +81,8 @@ class MedicalChunker:
         if not section.content.strip():
             return []
 
-        tok = self._estimate_tokens(section.content, doc.language)
+        parent = section.content.strip()
+        tok = self._estimate_tokens(parent, doc.language)
         if tok <= self.max_tokens:
             return [
                 Chunk(
@@ -89,7 +90,8 @@ class MedicalChunker:
                     source=doc.source,
                     language=doc.language,
                     section_path=section.section_path,
-                    text=section.content.strip(),
+                    text=parent,
+                    parent_text=parent,
                     token_count=tok,
                     page=section.page_start,
                 )
@@ -101,6 +103,7 @@ class MedicalChunker:
                 doc=doc,
                 section_path=section.section_path,
                 base_page=section.page_start,
+                parent_text=parent,
             )
         )
 
@@ -121,6 +124,7 @@ class MedicalChunker:
                 text=text,
                 doc=doc,
                 section_path=section_path,
+                parent_text=text.strip(),
             )
         )
 
@@ -134,6 +138,7 @@ class MedicalChunker:
         doc: RawDocument,
         section_path: str,
         base_page: int | None = None,
+        parent_text: str = "",
     ) -> Iterator[Chunk]:
         """
         Greedily pack paragraphs into chunks up to max_tokens.
@@ -152,6 +157,7 @@ class MedicalChunker:
                 language=doc.language,
                 section_path=section_path,
                 text=chunk_text,
+                parent_text=parent_text,
                 token_count=self._estimate_tokens(chunk_text, doc.language),
                 page=base_page,
             )
@@ -171,7 +177,7 @@ class MedicalChunker:
                         buffer, self.overlap_tokens, doc.language, self._estimate_tokens
                     )
                     buffer_tokens = sum(self._estimate_tokens(p, doc.language) for p in buffer)
-                yield from self._split_by_sentence(para, doc, section_path, base_page)
+                yield from self._split_by_sentence(para, doc, section_path, base_page, parent_text)
                 continue
 
             # Adding this paragraph would overflow — flush first
@@ -194,6 +200,7 @@ class MedicalChunker:
         doc: RawDocument,
         section_path: str,
         base_page: int | None,
+        parent_text: str = "",
     ) -> Iterator[Chunk]:
         """Split a single oversized paragraph at sentence boundaries."""
         sentences = _split_sentences(paragraph, doc.language)
@@ -214,6 +221,7 @@ class MedicalChunker:
                     language=doc.language,
                     section_path=section_path,
                     text=chunk_text,
+                    parent_text=parent_text,
                     token_count=self._estimate_tokens(chunk_text, doc.language),
                     page=base_page,
                 )
@@ -233,6 +241,7 @@ class MedicalChunker:
                 language=doc.language,
                 section_path=section_path,
                 text=chunk_text,
+                parent_text=parent_text,
                 token_count=self._estimate_tokens(chunk_text, doc.language),
                 page=base_page,
             )

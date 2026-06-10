@@ -70,7 +70,7 @@ async def main():
                     print(f"\n{i}. [{item.source.value}] {score_str}")
                     # Print first 300 chars to check for truncation
                     text_snippet = item.text.replace("\n", " ").strip()
-                    print(f"   Text: {text_snippet[:1000]}...")
+                    print(f"   Text: {text_snippet[:2500]}...")
 
 
         except Exception as e:

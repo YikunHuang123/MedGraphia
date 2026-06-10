@@ -89,12 +89,20 @@ def _graph_to_items(result: Any) -> list[FusedItem]:
     items: list[FusedItem] = []
     seen_texts: set[str] = set()
 
-    # Sort triples: IDENTITY summaries first, then others by confidence
-    sorted_triples = sorted(
-        result.triples, key=lambda x: (x.relation_type == "IDENTITY", x.confidence), reverse=True
-    )
+    # Sort by confidence descending; IDENTITY triples are excluded below.
+    sorted_triples = sorted(result.triples, key=lambda x: x.confidence, reverse=True)
 
     for triple in sorted_triples:
+        # IDENTITY self-loops provide no clinical evidence beyond what 1-hop
+        # neighbours already capture, and their evidence_text often contains
+        # graph artefacts ("MEMBER_OF None") that hurt context precision and
+        # faithfulness when the LLM cites them.
+        if triple.relation_type == "IDENTITY":
+            continue
+        # Skip triples whose neighbour node is missing or a null placeholder.
+        if not triple.neighbor_cui or triple.neighbor_label.lower() in ("", "none", "null"):
+            continue
+
         text = triple.as_text()
         if text in seen_texts:
             continue
@@ -137,10 +145,14 @@ def _vector_to_items(result: Any) -> list[FusedItem]:
 
     items: list[FusedItem] = []
     for hit in result.hits:
+        # Use full section text when available; fall back to the child chunk text.
+        # This gives the reranker and LLM complete context while vector search
+        # still matched on the focused child chunk.
+        display_text = hit.parent_text or hit.text
         items.append(
             FusedItem(
                 item_id=hit.chunk_id,
-                text=hit.text,
+                text=display_text,
                 source=RetrievalSource.VECTOR,
                 metadata={
                     "chunk_id": hit.chunk_id,
@@ -152,6 +164,7 @@ def _vector_to_items(result: Any) -> list[FusedItem]:
                     "language": hit.language,
                     "page": hit.page,
                     "original_score": hit.score,
+                    "chunk_text": hit.text,  # original child chunk for provenance
                 },
             )
         )

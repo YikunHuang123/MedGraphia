@@ -114,7 +114,8 @@ class QdrantStore(VectorStoreBase):
                     "source_id": chunk.source.source_id,
                     "source_title": chunk.source.source_title,
                     "source_version": chunk.source.source_version,
-                    "text": chunk.text[:1000],
+                    "text": chunk.text,
+                    "parent_text": chunk.parent_text,
                     "page": chunk.page,
                 }
                 points.append(
@@ -202,6 +203,36 @@ class QdrantStore(VectorStoreBase):
             {"chunk_id": r.payload.get("chunk_id", ""), "score": r.score, "payload": r.payload}
             for r in results.points
         ]
+
+    async def set_payload_batch(
+        self,
+        collection_name: str,
+        updates: list[tuple[str, dict[str, Any]]],
+        batch_size: int = 100,
+    ) -> int:
+        """
+        Patch payload fields on existing points without touching vectors.
+
+        Args:
+            updates:    List of (point_id, payload_patch) pairs.
+            batch_size: Points per Qdrant request.
+
+        Returns:
+            Total number of points updated.
+        """
+        total = 0
+        for i in range(0, len(updates), batch_size):
+            batch = updates[i : i + batch_size]
+            for point_id, patch in batch:
+                await self._client.set_payload(
+                    collection_name=collection_name,
+                    payload=patch,
+                    points=[point_id],
+                    wait=True,
+                )
+            total += len(batch)
+            logger.debug("qdrant_payload_patched", collection=collection_name, count=len(batch))
+        return total
 
     async def delete_by_doc_id(self, collection_name: str, doc_id: str) -> None:
         await self._client.delete(

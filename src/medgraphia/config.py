@@ -123,7 +123,7 @@ class Settings(BaseSettings):
     llm_medium_provider: str = "deepseek"  # e.g. "deepseek"
     llm_medium_model: str = "deepseek-v4-pro"  # e.g. "deepseek-chat"
     llm_large_provider: str = "openai"  # e.g. "openai"
-    llm_large_model: str = "gpt-4.1"  # e.g. "gpt-4o"
+    llm_large_model: str = "gpt-5.1"  # e.g. "gpt-4opseek"
 
     # Model used for community summary generation; defaults to default_llm_model if empty
     community_summary_llm: str = ""
