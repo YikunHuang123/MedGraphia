@@ -254,39 +254,14 @@ class GraphRetriever:
     async def _expand_one(
         self, cui: str, hops: int, user_id: str | None = None
     ) -> list[GraphTriple]:
-        """Run node summary, 1-hop and optionally 2-hop Cypher for a single seed CUI."""
+        """Run 1-hop and optionally 2-hop Cypher for a single seed CUI."""
         triples: list[GraphTriple] = []
 
         try:
             from medgraphia.graph.client import get_session
 
             async with get_session() as session:
-                # 1. Get Node Summary (Identity)
-                summary_res = await session.run(_CYPHER_NODE_SUMMARY, cui=cui)
-                async for record in summary_res:
-                    label = record["label"]
-                    e_type = record["type"]
-                    rels = record["top_relations"]
-                    if rels:
-                        summary_text = f"{label} ({e_type}) is a key entity in the knowledge graph. Known relations include: "
-                        summary_text += "; ".join(
-                            [f"{r['rel']} {r['target']} ({r['target_type']})" for r in rels]
-                        )
-                        triples.append(
-                            GraphTriple(
-                                entity_cui=cui,
-                                entity_label=label,
-                                entity_type=e_type,
-                                relation_type="IDENTITY",
-                                neighbor_cui=cui,
-                                neighbor_label=label,
-                                neighbor_type=e_type,
-                                evidence_text=summary_text,
-                                confidence=1.1,  # Identity has highest priority
-                            )
-                        )
-
-                # 2. Get 1-hop Neighbors
+                # 1. Get 1-hop Neighbors
                 result = await session.run(
                     _CYPHER_1_HOP,
                     cui=cui,

@@ -89,16 +89,28 @@ def _graph_to_items(result: Any) -> list[FusedItem]:
     items: list[FusedItem] = []
     seen_texts: set[str] = set()
 
-    # Sort by confidence descending; IDENTITY triples are excluded below.
-    sorted_triples = sorted(result.triples, key=lambda x: x.confidence, reverse=True)
+    # Real relation triples first (confidence descending), IDENTITY node-summary triples
+    # ranked last so they don't displace substantive evidence in top RRF slots.
+    # IDENTITY triples whose evidence contains "None" placeholders are discarded.
+    real_triples = sorted(
+        [t for t in result.triples if t.relation_type != "IDENTITY"],
+        key=lambda x: x.confidence,
+        reverse=True,
+    )
+    identity_triples = sorted(
+        [
+            t for t in result.triples
+            if t.relation_type == "IDENTITY"
+            and t.evidence_text
+            and "None)" not in t.evidence_text
+            and "None (" not in t.evidence_text
+        ],
+        key=lambda x: x.confidence,
+        reverse=True,
+    )
+    sorted_triples = real_triples + identity_triples
 
     for triple in sorted_triples:
-        # IDENTITY self-loops provide no clinical evidence beyond what 1-hop
-        # neighbours already capture, and their evidence_text often contains
-        # graph artefacts ("MEMBER_OF None") that hurt context precision and
-        # faithfulness when the LLM cites them.
-        if triple.relation_type == "IDENTITY":
-            continue
         # Skip triples whose neighbour node is missing or a null placeholder.
         if not triple.neighbor_cui or triple.neighbor_label.lower() in ("", "none", "null"):
             continue

@@ -267,7 +267,7 @@ def run_ragas_scoring(df: pd.DataFrame, judge_model: str = "gpt-4o-mini") -> Any
 )
 @click.option(
     "--judge-model",
-    default="gpt-4o",
+    default="gpt-4o-mini",
     show_default=True,
     help="OpenAI model used as RAGAS judge (use gpt-4o for production-quality evaluation)",
 )

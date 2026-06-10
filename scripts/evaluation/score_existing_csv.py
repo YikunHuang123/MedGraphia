@@ -35,7 +35,6 @@ def main():
     print("Running RAGAS scoring (judge: gpt-4o-mini)...")
     
     # Run the evaluation using the imported function
-    # We use gpt-4o-mini to ensure stability and avoid timeouts/401s
     result = run_ragas_scoring(df, judge_model="gpt-4o-mini")
     
     print("\n" + "=" * 40)

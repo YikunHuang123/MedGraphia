@@ -6,49 +6,35 @@
       {
         "augmented": true,
         "system_instruction": "你是临床决策支持助手，提供仅基于数据库的循证医学建议。数据库内容可能包含中文、英文或德文，请综合所有语言的相关内容并用中文回答。",
-        "context": "[1] 尖锐湿疣的物理治疗包括激光和冷冻。 [2] 子宫粘连可能导致不孕。 [3] 某些口腔溃疡具有复发性。",
+        "context": "[1] 化疗对于治疗肺部肿瘤可以起到一定的效果。化疗可以杀死肿瘤细胞，并减小肿瘤的大小，从而缓解疼痛和呼吸困难的症状。然而，化疗也会对正常的组织细胞产生毒性作用，可能会导致一些副作用，如恶心、呕吐、乏力等。因此，在选择化疗时，医生会综合考虑肿瘤的性质、患者的身体状况以及治疗的预期效果。最好咨询医生，了解具体的化疗方案和其对于个体患者的效果。\n[2] This study aimed to explore clinical characteristics and outcomes among patients with biomass smoke-related chronic obstructive pulmonary disease (BS-COPD), those with cigarette smoke-related COPD (CS-COPD), and those exposed to both (CS+BS-COPD). The outcomes of patients receiving different inhaled drugs was also explored.\n[3] A vascularized microfluidic chip was applied to model angiogenesis, together with",
         "history": "No history.",
-        "question": "怎么治疗它？",
+        "question": "医生跟我说我爸的肺部肿瘤要用化疗，但我看网上说化疗让病人特别难受，又是吐又是没力气的。这化疗到底有什么用啊？不是说也会伤到正常细胞吗？那为什么还要用呢，怎么才能决定用不用啊？",
         "target_language": "Chinese",
         "no_info_message": "抱歉，数据库中没有足够的信息来回答这个问题。",
-        "reasoning": "The question \"怎么治疗它？\" (How to treat it?) is too vague without providing more context on what \"it\" refers to. There are three context paragraphs provided but without a specific medical condition mentioned, it is impossible to synthesize a relevant treatment approach from the given references. Context [1] relates to physical treatments for genital warts, context [2] links adhesions in the uterus to infertility but no treatment is suggested, and context [3] mentions recurrent oral ulcers with no information on treatment. There's no specific condition that can be linked to治疗.",
+        "reasoning": "在提供的[1]段落中，存在关于化疗治疗肺部肿瘤的相关信息。化疗能够杀死肿瘤细胞并减小肿瘤尺寸，缓解疼痛和呼吸困难等瘤体引起的症状。尽管化疗可能会导致恶心、呕吐、乏力等副作用，给患者的生活造成负面影响，但它依然是治疗肺部肿瘤的有效手段之一。医生会根据肿瘤性质、患者身体状况以及预期疗效等因素综合判断。",
         "result": {
-          "answer": "很抱歉，我目前没有足够信息来回答您的问题。请您提供具体病症以便我能给您提供相关治疗建议。",
-          "citations": [],
-          "disclaimer": ""
-        }
-      },
-      {
-        "augmented": true,
-        "system_instruction": "你是临床决策支持助手，提供仅基于数据库的循证医学建议。数据库内容可能包含中文、英文或德文，请综合所有语言的相关内容并用中文回答。",
-        "context": "[1] 胃溃疡的典型表现是餐后痛。 [2] 痔疮患者常伴有局部疼痛或出血。",
-        "history": "No history.",
-        "question": "能有更好的办法吗？",
-        "target_language": "Chinese",
-        "no_info_message": "抱歉，数据库中没有足够的信息来回答这个问题。",
-        "reasoning": "当前的数据库仅包含关于胃溃疡餐后痛和痔疮的局部疼痛或出血的信息，没有提供任何关于可替代治疗方案的详细资料，因此无法提供更好的治疗建议。",
-        "result": {
-          "answer": "数据库中没有提供关于胃溃疡或痔疮更好治疗方法的详细信息。为了获得更具体的治疗建议，建议咨询专业的医疗人士。",
-          "citations": [],
-          "disclaimer": "请注意，以上信息基于有限的数据库检索结果，仅供参考，不作为具体治疗指导。"
-        }
-      },
-      {
-        "augmented": true,
-        "system_instruction": "你是临床决策支持助手，提供仅基于数据库的循证医学建议。数据库内容可能包含中文、英文或德文，请综合所有语言的相关内容并用中文回答。",
-        "context": "[1] 肾病综合征通常表现为大量蛋白尿、高度水肿。 [2] Nierenversagen bezeichnet den vollständigen oder teilweisen Verlust der Nierenfunktion. Es wird in akutes Nierenversagen (ANV) and chronisches Nierenversagen (CNV) unterteilt. Ursachen sind u.a. Diabetes mellitus, Hypertonie und Glomerulonephritis. [3] Renal failure is characterized by the kidneys’ inability to filter waste products from the blood adequately.",
-        "history": "No history.",
-        "question": "什么是肾衰竭？",
-        "target_language": "Chinese",
-        "no_info_message": "抱歉，数据库中没有足够的信息来回答这个问题。",
-        "reasoning": "Not supplied for this particular example.",
-        "result": {
-          "answer": "肾衰竭是肾脏无法充分过滤血液中的代谢废物，它可以根据严重程度及其发展时长被划分为急性肾衰竭和慢性肾衰竭。这一状况的常见原因包括糖尿病，高血压以及肾小球肾炎等[2][3]。",
+          "answer": "化疗对于治疗肺部肿瘤有一定效果，可以杀死肿瘤细胞，减少肿瘤的大小，缓解疼痛和呼吸困难等症状。但化疗也可能对正常组织细胞产生毒性作用，导致恶心、呕吐、乏力等副作用[1]。是否选择化疗，医生会根据肿瘤的性质、患者身体状况和治疗预期效果综合考虑，建议详细咨询医生了解具体的化疗计划和对个体患者的影响。",
           "citations": [
-            2,
-            3
+            1
           ],
-          "disclaimer": "此建议基于数据库中有限的信息，不能替代专业医疗意见。"
+          "disclaimer": "请注意，这仅仅是基于现有信息提供的建议，并不能代替医生的专业意见。"
+        }
+      },
+      {
+        "augmented": true,
+        "system_instruction": "你是临床决策支持助手，提供仅基于数据库的循证医学建议。数据库内容可能包含中文、英文或德文，请综合所有语言的相关内容并用中文回答。",
+        "context": "[1] The primary intervention was the esthetic agent, and subjects were randomly assigned to receive either intranasal DEX (1.5 mcg/kg) or intravenous MID (0.07 mg/kg).\n[2] 上个月我腰疼，阴道痒，白带多，还有异味，去医院检查是阴道炎，在医院做了治疗，可是到现在一个月过去了，还没有治疗好，我想咨询一下，阴道炎是性病吗，为什么治疗需要怎么长时间？\n[3] Saline Flush 0.9 % Syringe Sig: Three (3) ml Injection twice\na day for 20 doses: prior to each vanco dose.",
+        "history": "No history.",
+        "question": "在鼻内右美托咪定与静脉咪达唑仑的镇静对比研究中，右美托咪定的单次鼻内剂量是多少？",
+        "target_language": "Chinese",
+        "no_info_message": "抱歉，数据库中没有足够的信息来回答这个问题。",
+        "reasoning": "The context paragraph [1] has information about the dosing of intranasal Dexmedetomidine (DEX), which is specified as 1.5 mcg/kg for each individual.",
+        "result": {
+          "answer": "在对比研究中，鼻内右美托咪定的单次剂量是1.5 mcg/kg [1].",
+          "citations": [
+            1
+          ],
+          "disclaimer": "请注意，具体用药请遵照医嘱。"
         }
       },
       {
@@ -70,25 +56,24 @@
         }
       },
       {
-        "system_instruction": "Sie sind ein klinischer Entscheidungsunterstützungsassistent. Geben Sie Empfehlungen basierend auf der Datenbank. Die Kontextabsätze können auf Englisch, Chinesisch oder Deutsch verfasst sein — fassen Sie alle relevanten Inhalte zusammen und antworten Sie auf Deutsch.",
-        "context": "[1] 邻居家小孩今年6岁，一直很健康，没什么问题，一个月前突然浑身抽搐，还有点白沫，大家都说可能是儿童癫痫病，邻居很担心。确诊儿童癫痫病要做什么检查？儿童癫痫病诊断结果\n[2] Coumadin wurde daher mit FFP und Vitamin K injiziert und rückgängig gemacht, da sie eine GIB-Vorgeschichte zur Antikoagulation hatte.\n[3] Check the Pen\n                  \n                  \n                     \n                        Take your new liraglutide injection pen out of the refrigerator. Wash hands with soap and water before use. Check pen label before each use to make sure it is your liraglutide injection pen. Pull off pen cap (See Figure A). Check liraglutide in the cartridge. The liquid should be clear, colorless and free of particles. If not, do not use. Wipe the rubber stopper with an alcohol swab. Step B. Attach the Needle\n                  \n                  \n                     \n                        Remove protective tab from outer needle cap. Push outer needle cap containing the needle straight onto the pen, then screw needle on until secure. (See Figure B). Pull off outer needle cap. (See Figure C). Do not throw away\n                     \n                     \n                        Pull off inner needle cap and throw away. (See Figure D). A small drop of liquid may appear. This is normal. Step",
-        "history": "User: \"Herr Doktor, ich bin 78 Jahre alt und nehme seit langem Warfarin wegen Vorhofflimmern. Mein Hausarzt hat mir jetzt ein Diabetesmedikament als Fertigpen verschrieben – Liraglutid. Ich habe Angst vor Wechselwirkungen und Blutungen.\"\nAssistant: \"Ihre Sorge ist verständlich. Es gibt genaue Anweisungen zur Anwendung des Liraglutid-Pens. Und zu Blutungen unter Warfarin existieren dokumentierte Behandlungsmöglichkeiten, zum Beispiel mit Vitamin K und FFP. Möchten Sie zuerst die Pen-Nutzung oder die Blutungsgegenmaßnahmen besprechen?\"\nUser: \"Ja, bitte erklären Sie mir Schritt für Schritt die Handhabung dieses Pens und was bei einer Blutung unter Warfarin passiert.\"",
-        "question": "\"Können Sie mir zeigen, wie ich den Liraglutid-Fertigpen ganz genau anwenden muss? Und was, wenn es unter der Warfarin-Therapie zu Blutungen kommt?\"",
-        "target_language": "German",
-        "no_info_message": "Es tut mir leid, die Datenbank enthält nicht genügend Informationen.",
+        "system_instruction": "You are a clinical decision-support assistant. Provide evidence-based guidance based ONLY on the database. Context paragraphs may be in English, Chinese, or German — synthesize all relevant content and respond in English.",
+        "context": "[1] Humalog 100 unit / mL Solution Sig: Schiebewaage Unterkutan qid: Bitte folgen Sie der neuen Schiebewaage und passen Sie die Empfehlungen von Domenico Klemt an.\n[2] 我父亲因为长期吸烟，所以导致肺部一直都不是很健康的，每天都咳嗽个不听，有好几次都差点没缓过气来，到医院检查出了早期肺癌，想知道临床表现有什么呢？有什么办法治疗呢？请问肺癌如何治疗？\n[3] This systematic review aims to evaluate the efficacy of laser-based photobiomodulation therapy (PBMT) in reducing pain associated with dental injections. The review addresses the research question: \"What is the effect of PBMT on pain levels during local anesthetic injections in dental patients compared to control interventions?\". A comprehensive search was conducted across PubMed, Scopus, Embase, Web of Science, and Cochrane Library databases. Studies included were prospective or retrospective clinical trials involving PBMT for pain control during dental injections. The quality of studies was assessed using the revised Cochrane Risk of Bias 2 tool. Data were extracted on patient demographics, laser parameters, and pain outcomes. A total of 14 studies were included in this systematic review, with 6 focusing on children and 8 on adults. In children, three studies indicated that PBMT effectively reduced pain, with a significant difference according to the Wong-Baker FACES Pain Rating Scal",
+        "history": "User: I'm reviewing insulin therapy guidelines. Could you provide details on Humalog?\nAssistant: Humalog is a rapid-acting insulin analog indicated for glucose control. The provided material notes it is available as a 100 unit/mL solution for subcutaneous use [1].\nUser: What does 'Schiebewaage' refer to in the dosing instructions?\nAssistant: 'Schiebewaage' likely means a sliding scale for insulin dose adjustment, though the exact term isn't defined in the given context [1].",
+        "question": "What is the recommended dosing frequency of Humalog?",
+        "target_language": "English",
+        "no_info_message": "I do not have enough medical information in the database to answer this question.",
         "rationale": "Synthetic example generated by DeepSeek teacher model.",
         "result": {
-          "answer": "Zur Anwendung des Liraglutid-Pens: Zuerst den Pen aus dem Kühlschrank nehmen und Hände waschen. Überprüfen Sie das Etikett und stellen Sie sicher, dass es sich um Ihren Liraglutid-Pen handelt. Ziehen Sie die Pen-Kappe ab und prüfen Sie die Flüssigkeit – sie muss klar, farblos und partikelfrei sein [3]. Wischen Sie den Gummistopfen mit einem Alkoholtupfer ab. Entfernen Sie dann die Schutzlasche von der äußeren Nadelkappe, setzen Sie die Nadel gerade auf und schrauben Sie sie fest [3]. Ziehen Sie die äußere Nadelkappe ab und anschließend die innere Nadelkappe – ein kleiner Flüssigkeitstropfen kann erscheinen, das ist normal [3].\n\nHinsichtlich Blutungen unter Warfarin: Falls eine schwere Blutung auftritt, kann das Warfarin mit Vitamin K und frisch gefrorenem Plasma (FFP) antagonisiert werden, wie es bei einer Patientin mit gastrointestinaler Blutung in der Vorgeschichte durchgeführt wurde [2].",
+          "answer": "According to the provided context, Humalog 100 unit/mL solution is to be administered subcutaneously four times daily (qid) [1].",
           "citations": [
-            2,
-            3
+            1
           ],
-          "disclaimer": "Dies stellt keine persönliche ärztliche Beratung dar; bitte wenden Sie sich bei Unsicherheiten an Ihren behandelnden Arzt."
+          "disclaimer": "This information is derived solely from the given context and should not be considered medical advice."
         }
       }
     ],
     "signature": {
-      "instructions": "Answer the medical question in the requested language using ONLY the provided database.\nContext paragraphs may be written in multiple languages (English, Chinese, German).\nYou MUST read and synthesize relevant information from ALL context paragraphs regardless\nof the language they are written in — translate and integrate cross-language evidence.\nRespond exclusively in target_language.\nCite sources using [N] inline.\nIf context paragraphs discuss the queried topic through clinical notes, differential diagnoses,\ncase reports, pharmacological data, or pathological descriptions — even without a formal\nencyclopedic definition — synthesize whatever IS available and cite sources; do not refuse.\nUse no_info_message ONLY when ALL context paragraphs are entirely off-topic (e.g., purely\nadministrative records, or medical conditions completely unrelated to the question).\nNever refuse simply because context is clinical rather than definitional, or because it is\nwritten in a different language than the question.",
+      "instructions": "You are a clinical decision support assistant deployed in a critical care environment where clinicians rely on your answers to make urgent, life-or-death decisions. The information you provide must be absolutely trustworthy and derived exclusively from the supplied database—any unsupported claim, fabricated detail, or overlooked evidence could directly lead to patient harm or mortality. Therefore, you must execute your task with zero-defect adherence to the following rules, treating each query as a high-stakes emergency.\n\nAnswer the medical question in the requested language using ONLY the provided database.\nContext paragraphs may be written in multiple languages (English, Chinese, German).\nYou MUST read and synthesize relevant information from ALL context paragraphs regardless\nof the language they are written in — translate and integrate cross-language evidence.\nRespond exclusively in target_language.\nCite sources using [N] inline. For every factual claim you write, you MUST\nimmediately follow it with [N]. If you cannot find a supporting paragraph for\na fact, do not write that fact at all — omit it rather than writing it without\na citation. A sentence without [N] is only acceptable for brief connective\nphrases (\"Based on the database...\" / \"In summary...\") that contain no medical claims.\nOnly include information explicitly stated in the numbered context paragraphs.\nNever add clinical details, mechanisms, statistics, contraindications, or outcomes\nthat are not directly present in the context — even if they are medically accurate\nfrom general knowledge. If a fact is not in the context, do not include it.\nIf context paragraphs discuss the queried topic through clinical notes, differential diagnoses,\ncase reports, pharmacological data, or pathological descriptions — even without a formal\nencyclopedic definition — synthesize whatever IS available and cite sources; do not refuse.\nUse no_info_message ONLY when ALL context paragraphs are entirely off-topic (e.g., purely\nadministrative records, or medical conditions completely unrelated to the question).\nNever refuse simply because context is clinical rather than definitional, or because it is\nwritten in a different language than the question.\n\nEvery answer you give is final and could be acted upon immediately, so your reasoning must be flawless: double-check that every statement is directly traceable to a numbered paragraph, cross-verify across languages, and when in doubt, favor omission over speculation. Your performance is a lifeline—act accordingly.",
       "fields": [
         {
           "prefix": "System Instruction:",

@@ -17,9 +17,6 @@ import types
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-# ── Monkeypatch: must execute before any ragas / langchain imports ───────────
-# RAGAS 0.4.3 still references langchain_community sub-modules that have been
-# split into separate packages in newer LangChain releases.
 try:
     import langchain_google_vertexai
 
@@ -49,7 +46,6 @@ except ImportError:
         sys.modules["mistralai"] = _mistral_mod
     except ImportError:
         pass
-# ────────────────────────────────────────────────────────────────────────────
 
 import click
 import pandas as pd

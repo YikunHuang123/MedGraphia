@@ -333,43 +333,66 @@ def rewrite_metric(example: dspy.Example, pred: dspy.Prediction, trace=None) -> 
 
 def answer_metric(example: dspy.Example, pred: dspy.Prediction, trace=None) -> float:
     """
-    Evaluate if the answer matches the reference, has correct citations,
-    and does NOT incorrectly refuse when cross-language context is available.
+    Evaluate citation correctness, inline [N] marker presence, refusal behaviour,
+    and citation density (fraction of factual sentences that carry a [N] marker).
+
+    Weight breakdown (max = 1.0):
+      0.25  citation set correctness
+      0.15  all cited numbers appear inline as [N]
+      0.25  refusal / synthesis correctness
+      0.35  citation density  ← key faithfulness proxy: penalise uncited factual claims
     """
     predicted_ans = pred.result.answer
     predicted_cites = pred.result.citations
     expected_cites = example.result["citations"]
+    is_refusal_case = len(expected_cites) == 0
 
     score = 0.0
 
-    # 1. Citation correctness (0.4 points)
+    # 1. Citation set correctness (0.25 points)
     if set(expected_cites) == set(predicted_cites):
-        score += 0.4
+        score += 0.25
     elif set(expected_cites).issubset(set(predicted_cites)):
-        score += 0.2  # over-citation is a minor penalty
+        score += 0.12  # over-citation: minor penalty
 
-    # 2. [N] markers present in text (0.3 points)
+    # 2. [N] markers present in text (0.15 points)
     if predicted_cites:
         if all(f"[{c}]" in predicted_ans for c in predicted_cites):
-            score += 0.3
-    else:
-        score += 0.3  # no citations expected and none produced
+            score += 0.15
+    elif not expected_cites:
+        score += 0.15  # no citations expected and none produced
+    # else: citations were expected but model produced none → no points
 
-    # 3. Content quality (0.3 points)
-    is_refusal_case = len(expected_cites) == 0
+    # 3. Content quality (0.25 points)
     refusal_keywords = ["抱歉", "没有足够", "不足", "sorry", "not enough", "cannot identify"]
-
     if is_refusal_case:
-        # Refusal cases: reward concise refusal, penalise hallucination
         if any(kw in predicted_ans for kw in refusal_keywords):
-            score += 0.3
+            score += 0.25
     else:
-        # Positive (synthesis) cases: reward substantive answers, penalise false refusal.
-        # A cross-language case that incorrectly says "抱歉/sorry" loses all content points.
         if any(kw in predicted_ans for kw in refusal_keywords):
-            score -= 0.3  # false refusal when context IS relevant
+            score -= 0.25  # false refusal when context IS relevant
         elif len(predicted_ans) > 50:
-            score += 0.3
+            score += 0.25
+
+    # 4. Citation density (0.35 points)
+    # Each sentence longer than 15 chars that lacks a [N] marker lowers this score.
+    # Refusal answers score full marks (no factual claims → perfect density).
+    # Split on Chinese/sentence-ending punctuation and ". " (period + space) only,
+    # so decimal numbers like "7.4" or "0.5 mg" are NOT split mid-number.
+    sentences = [
+        s.strip()
+        for s in re.split(r"[。!?！？\n]|\.\s+", predicted_ans)
+        if len(s.strip()) > 15
+    ]
+    if is_refusal_case:
+        score += 0.35
+    elif not sentences:
+        # Answer exists but all fragments are short; check for at least one [N].
+        score += 0.35 if re.search(r"\[\d+\]", predicted_ans) else 0.0
+    else:
+        cited_count = sum(1 for s in sentences if re.search(r"\[\d+\]", s))
+        density = cited_count / len(sentences)
+        score += 0.35 * density
 
     return max(0.0, score)
 
@@ -469,7 +492,6 @@ def compile_rewriter():
 
     # Save the compiled module
 
-    # Ensure we save to the root data directory regardless of where the script is run
     base_dir = Path(__file__).resolve().parent.parent.parent
     out_dir = base_dir / "data" / "dspy"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -482,7 +504,7 @@ def compile_rewriter():
 
 
 def compile_generator():
-    print("\n--- Compiling Answer Generator ---")
+    print("\n--- Compiling Answer Generator (MIPROv2) ---")
     from medgraphia.programs.generator import GeneratorModule
 
     module = GeneratorModule()
@@ -490,18 +512,63 @@ def compile_generator():
     # Merge handcrafted + synthetic examples.  Handcrafted come first so they
     # are prioritised as labeled demos; synthetic examples expand the bootstrap pool.
     synthetic = load_synthetic_generator_data()
-    trainset = ANSWER_DATA + synthetic
+    full_set = ANSWER_DATA + synthetic
     print(
-        f"  Trainset: {len(ANSWER_DATA)} handcrafted + {len(synthetic)} synthetic = {len(trainset)} total"
+        f"  Full set: {len(ANSWER_DATA)} handcrafted + {len(synthetic)} synthetic = {len(full_set)} total"
     )
 
-    teleprompter = BootstrapFewShot(
+    # Hold out 20% of synthetic examples as valset so MIPROv2's Bayesian search
+    # evaluates against unseen data.  Handcrafted examples are never placed in
+    # valset — they are too valuable as labeled demos.
+    random.seed(42)
+    shuffled_synthetic = synthetic.copy()
+    random.shuffle(shuffled_synthetic)
+    val_size = max(1, len(shuffled_synthetic) // 5)
+    valset = shuffled_synthetic[:val_size]
+    trainset = ANSWER_DATA + shuffled_synthetic[val_size:]
+    print(f"  Split → train: {len(trainset)}, val: {len(valset)}")
+
+    # Baseline: measure uncompiled module before optimisation.
+    print("  Evaluating baseline (uncompiled)…")
+    with dspy.context(lm=student_lm):
+        baseline_eval = dspy.Evaluate(
+            devset=valset,
+            metric=answer_metric,
+            num_threads=4,
+            display_progress=True,
+        )
+        baseline_score = _eval_to_float(baseline_eval(module))
+    print(f"  Baseline score: {baseline_score:.3f}")
+
+    # MIPROv2: proposal_lm proposes instruction variants via Bayesian search;
+    # student_lm is the task model evaluated under each candidate.
+    # auto="medium" runs ~20-30 trials.
+    teleprompter = MIPROv2(
         metric=answer_metric,
-        max_bootstrapped_demos=3,
-        max_labeled_demos=5,
+        prompt_model=proposal_lm,
+        task_model=student_lm,
+        auto="medium",
+        num_threads=4,
     )
 
-    compiled_generator = teleprompter.compile(module, trainset=trainset)
+    compiled_generator = teleprompter.compile(
+        module,
+        trainset=trainset,
+        valset=valset,
+        requires_permission_to_run=False,
+    )
+
+    # Report improvement over baseline before persisting.
+    print("  Evaluating compiled module…")
+    with dspy.context(lm=student_lm):
+        compiled_eval = dspy.Evaluate(
+            devset=valset,
+            metric=answer_metric,
+            num_threads=4,
+            display_progress=True,
+        )
+        compiled_score = _eval_to_float(compiled_eval(compiled_generator))
+    print(f"  Compiled score: {compiled_score:.3f}  (Δ {compiled_score - baseline_score:+.3f})")
 
     # Save the compiled module
     base_dir = Path(__file__).resolve().parent.parent.parent
@@ -624,5 +691,5 @@ def load_synthetic_rewriter_data() -> list[dspy.Example]:
 
 
 if __name__ == "__main__":
-    compile_rewriter()
+    # compile_re writer()
     compile_generator()
