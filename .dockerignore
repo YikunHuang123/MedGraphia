@@ -1,0 +1,52 @@
+# ============================================================
+# MedGraphia — Docker build context exclusions
+# ============================================================
+
+# Git history (not needed in image, and can be huge)
+.git/
+.gitignore
+.gitattributes
+
+# Python artefacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# Virtual environments
+.venv/
+venv/
+env/
+.conda/
+
+# Secrets — never send to build daemon
+.env
+.env.*
+!.env.example
+!.env.lite.example
+
+# Large data directories — mount as volumes at runtime
+data/
+my_thoughts/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*.orig
+
+# macOS
+.DS_Store
+**/.DS_Store

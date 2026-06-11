@@ -2,13 +2,14 @@ version: "3.9"
 
 # ============================================================================
 # MedGraphia — Full Stack
-# Usage:  docker compose up --build
+# Usage:  cp .env.example .env  &&  docker compose up --build
+# Services: neo4j · qdrant · redis · api (8058) · worker · ui (8501)
 # ============================================================================
 
 services:
 
   # --------------------------------------------------------------------------
-  # Neo4j 5.x
+  # Neo4j 5.x — knowledge graph database
   # --------------------------------------------------------------------------
   neo4j:
     image: neo4j:5.20-community
@@ -19,9 +20,9 @@ services:
       - "7687:7687"
     environment:
       NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:-neo4j}"
-      NEO4J_server_memory_pagecache_size: "${NEO4J_PAGE_CACHE:-1G}"
-      NEO4J_server_memory_heap_initial__size: "${NEO4J_HEAP_INITIAL:-512M}"
-      NEO4J_server_memory_heap_max__size: "${NEO4J_HEAP_MAX:-1G}"
+      NEO4J_server_memory_pagecache_size: "${NEO4J_PAGE_CACHE:-2G}"
+      NEO4J_server_memory_heap_initial__size: "${NEO4J_HEAP_INITIAL:-1G}"
+      NEO4J_server_memory_heap_max__size: "${NEO4J_HEAP_MAX:-2G}"
       NEO4J_PLUGINS: '["apoc"]'
     volumes:
       - neo4j_data:/data
@@ -34,7 +35,7 @@ services:
       start_period: 60s
 
   # --------------------------------------------------------------------------
-  # Qdrant — vector store
+  # Qdrant — vector store (dense + sparse hybrid)
   # --------------------------------------------------------------------------
   qdrant:
     image: qdrant/qdrant:v1.9.0
@@ -52,6 +53,7 @@ services:
       interval: 20s
       timeout: 5s
       retries: 5
+      start_period: 20s
 
   # --------------------------------------------------------------------------
   # Redis 7 — NER result cache + Arq task-queue broker
@@ -64,20 +66,22 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
   # --------------------------------------------------------------------------
-  # API — FastAPI application
+  # API — FastAPI application (uvicorn, 2 workers)
   # --------------------------------------------------------------------------
   api:
     build:
       context: .
       dockerfile: docker/Dockerfile.api
+    image: medgraphia-api:latest
     container_name: medgraphia_api
     restart: unless-stopped
     ports:
@@ -87,6 +91,9 @@ services:
       NEO4J_URI: "bolt://neo4j:7687"
       QDRANT_URL: "http://qdrant:6333"
       REDIS_URL: "redis://redis:6379/0"
+    volumes:
+      # DSPy compiled programs (data/dspy/) and MeSH data are read at runtime
+      - ./data:/app/data:ro
     depends_on:
       neo4j:
         condition: service_healthy
@@ -99,14 +106,17 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 60s
 
   # --------------------------------------------------------------------------
-  # Worker — Arq pipeline worker (Redis-backed task queue)
+  # Worker — Arq pipeline worker (Redis-backed, max 2 concurrent jobs)
+  # Trigger a build:  docker compose exec worker python scripts/pipeline/build_graph.py
   # --------------------------------------------------------------------------
   worker:
     build:
       context: .
       dockerfile: docker/Dockerfile.worker
+    image: medgraphia-worker:latest
     container_name: medgraphia_worker
     restart: unless-stopped
     env_file: .env
@@ -114,6 +124,9 @@ services:
       NEO4J_URI: "bolt://neo4j:7687"
       QDRANT_URL: "http://qdrant:6333"
       REDIS_URL: "redis://redis:6379/0"
+    volumes:
+      # Pipeline writes raw/processed docs and DSPy programs here
+      - ./data:/app/data
     depends_on:
       neo4j:
         condition: service_healthy
@@ -123,12 +136,13 @@ services:
         condition: service_healthy
 
   # --------------------------------------------------------------------------
-  # Streamlit UI
+  # Streamlit UI — chat · graph explorer · pipeline monitor · admin
   # --------------------------------------------------------------------------
   ui:
     build:
       context: .
       dockerfile: docker/Dockerfile.ui
+    image: medgraphia-ui:latest
     container_name: medgraphia_ui
     restart: unless-stopped
     ports:

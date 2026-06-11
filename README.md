@@ -25,7 +25,7 @@ traceable clinical AI brain.
 - [Knowledge Graph Schema](#-knowledge-graph-schema)
 - [Tech Stack](#-tech-stack)
 - [How It Works](#️-how-it-works)
-- [Deployment Modes](#-deployment-modes)
+- [Deployment](#-deployment)
 - [Installation](#-installation)
 - [Usage](#-usage)
 - [Evaluation](#-evaluation)
@@ -437,31 +437,25 @@ The system executes a concurrent retrieval plan:
 
 ---
 
-## 🚀 Deployment Modes
+## 🚀 Deployment
 
-MedGraphia supports two deployment configurations that share the same codebase. Switch between them by selecting the Docker Compose file and the corresponding `.env` template.
+MedGraphia is a single unified stack. Scale it by adjusting `.env` values (Neo4j memory, LLM provider, dataset size) without changing the compose file or code path.
 
-| | Enterprise Mode | Lite Mode |
+| Dimension | Small / Laptop | Server / Production |
 |---|---|---|
-| **Target** | Production server / cloud | 16 GB Mac / PC (M1/M2 or RTX 3060+) |
-| **Data scope** | Full multi-domain corpus | Single domain (e.g. T2DM), 100–500 abstracts + 50 drug labels |
-| **Knowledge Base** | MeSH (Full Multilingual Index) | MeSH (Selected Descriptors) |
-| **Vector DB** | Qdrant (dense + sparse hybrid) | Qdrant (dense + sparse hybrid, reduced memory footprint) |
-| **Neo4j memory** | 16 GB+ page cache | 1–2 GB page cache (< 100K nodes / 500K edges) |
-| **LLM** | vLLM/SGLang self-hosted 70B + cloud routed | Ollama 7B 4-bit GGUF or DeepSeek/Qwen API |
-| **Auth** | Keycloak SSO + OPA role-based ACL | API key invite flow |
-| **Observability** | Langfuse (GDPR-safe tracing) | Langfuse only |
-| **Compose file** | `docker-compose.yml` | `docker-compose.lite.yml` |
-
-> **Architecture parity**: Lite mode preserves the full code path — graph retrieval, hybrid vector, community summaries, LLM router, citations. Upgrading to enterprise requires only a larger dataset, more memory, and switching compose files.
+| **Hardware** | 16 GB M1/M2 Mac or RTX 3060+ PC | 32 GB+ RAM server |
+| **LLM** | Ollama 7B 4-bit GGUF (local, zero API cost) | Cloud API: DeepSeek / OpenAI / Anthropic |
+| **Data scope** | Single domain, 100–500 abstracts | Multi-domain full corpus |
+| **Neo4j memory** | `NEO4J_PAGE_CACHE=1G` | `NEO4J_PAGE_CACHE=16G+` |
+| **Compose file** | `docker-compose.yml` | `docker-compose.yml` |
 
 ---
 
 ## 📦 Installation
 
-### Option A — Enterprise Mode (Docker Compose)
+### Option A — Docker Compose
 
-Requires Docker Engine + Compose v2. Recommended RAM: 32 GB+.
+Requires Docker Engine + Compose v2.
 
 **1. Clone the repository**
 
@@ -470,44 +464,34 @@ git clone https://github.com/YikunHuang123/MedGraphia.git
 cd MedGraphia
 ```
 
-**2. Create your environment file**
+**2. Configure environment**
 
 ```bash
 cp .env.example .env
+# Edit .env — at minimum set your LLM provider and Neo4j password
 ```
 
-Minimum required settings:
+Key settings to review:
 
 ```bash
-# Neo4j
-NEO4J_URI=bolt://neo4j:7687
-NEO4J_USER=neo4j
+# Neo4j password
 NEO4J_PASSWORD=your-neo4j-password
 
-# Vector store
-VECTOR_STORE=qdrant
-QDRANT_URL=http://qdrant:6333
+# LLM provider — pick one:
+DEFAULT_LLM_PROVIDER=ollama          # local, zero API cost (requires Ollama on host)
+DEFAULT_LLM_MODEL=qwen2.5:7b
+LLM_BASE_URL=http://host.docker.internal:11434
 
-# Embedding (self-hosted BGE-M3 via text-embeddings-inference, or API)
-EMBEDDING_MODEL=BAAI/bge-m3
-EMBEDDING_BASE_URL=http://embedding:8080
+# Or use a cloud provider:
+# DEFAULT_LLM_PROVIDER=deepseek
+# DEFAULT_LLM_MODEL=deepseek-chat
+# DEEPSEEK_API_KEY=sk-...
 
-# LLM (pick a provider)
-DEFAULT_LLM_PROVIDER=deepseek          # deepseek | openai | anthropic | local
-DEEPSEEK_API_KEY=sk-...
+# Tune Neo4j memory to available RAM (laptop: 1G, server: 16G+)
+NEO4J_PAGE_CACHE=1G
+NEO4J_HEAP_MAX=1G
 
-# Safety guardrails
-GUARDRAILS_ENABLED=true
-LLAMA_GUARD_PROVIDER=ollama
-LLAMA_GUARD_MODEL=llama-guard3:1b
-
-# Observability
-LANGFUSE_HOST=http://langfuse:3000
-LANGFUSE_PUBLIC_KEY=pk-...
-LANGFUSE_SECRET_KEY=sk-...
-
-# Auth
-AUTH_STRATEGY=apikey           # none | apikey | oidc (keycloak)
+# Admin key for the API
 ADMIN_BOOTSTRAP_KEY=your-admin-key
 ```
 
@@ -517,18 +501,19 @@ ADMIN_BOOTSTRAP_KEY=your-admin-key
 docker compose up --build
 ```
 
-This starts: `neo4j`, `qdrant`, `api` (port **8058**), `worker`, `ui` (port **8501**), `langfuse`.
+This starts: `neo4j` (7474/7687), `qdrant` (6333), `redis` (6379), `api` (8058), `worker`, `ui` (8501).
 
 **4. Bootstrap the knowledge graph**
 
 ```bash
-# Fetch and index a domain-specific dataset (adjust flags as needed)
+# Create the local data directory (bind-mounted into the worker container)
+mkdir -p data
+
+# Fetch and index a domain-specific dataset
 docker compose exec worker python scripts/pipeline/build_graph.py \
-  --domain cardiovascular \
-  --pubmed-query "cardiovascular drug interactions" \
-  --pubmed-limit 500 \
-  --include-drugbank \
-  --include-ema-smpc
+  --domain t2dm \
+  --pubmed-limit 200 \
+  --drug-limit 30
 
 # Monitor progress in the Streamlit admin panel
 # http://localhost:8501
@@ -540,67 +525,7 @@ Navigate to `http://localhost:8501`. The interactive API docs are at `http://loc
 
 ---
 
-### Option B — Lite Mode (Low-spec Device)
-
-Runs on a 16 GB M1/M2 Mac or a Windows laptop with a mid-range GPU.
-
-**1. Clone and configure**
-
-```bash
-git clone https://github.com/YikunHuang123/MedGraphia.git
-cd MedGraphia
-cp .env.lite.example .env
-```
-
-Key differences from enterprise `.env`:
-
-```bash
-# Use Ollama for local LLM inference (zero API cost after setup)
-DEFAULT_LLM_PROVIDER=ollama
-DEFAULT_LLM_MODEL=qwen2.5:7b            # 4-bit GGUF, ~4 GB VRAM
-LLM_BASE_URL=http://host.docker.internal:11434
-
-EMBEDDING_PROVIDER=ollama
-EMBEDDING_MODEL=nomic-embed-text
-
-# Qdrant for vector storage
-VECTOR_STORE=qdrant
-
-# Reduce Neo4j memory footprint
-NEO4J_PAGE_CACHE=1G
-NEO4J_HEAP_INITIAL=512M
-NEO4J_HEAP_MAX=1G
-
-# Domain restriction (keeps graph < 100K nodes)
-DEFAULT_DOMAIN=t2dm             # Builds only the T2DM sub-graph
-```
-
-**2. Pull Ollama models**
-
-```bash
-ollama pull qwen2.5:7b
-ollama pull nomic-embed-text
-```
-
-**3. Start the lite stack**
-
-```bash
-docker compose -f docker-compose.lite.yml up --build
-```
-
-**4. Bootstrap with a narrow dataset**
-
-```bash
-# Fetch 200 T2DM abstracts + 30 drug labels — completes in minutes
-docker compose -f docker-compose.lite.yml exec worker python scripts/pipeline/build_graph.py \
-  --domain t2dm \
-  --pubmed-limit 200 \
-  --drug-limit 30
-```
-
----
-
-### Option C — Local Development (without Docker)
+### Option B — Local Development (without Docker)
 
 **Prerequisites:** Python 3.12, Conda/uv, running Neo4j 5.x, Qdrant (native dense + sparse hybrid), Ollama (optional).
 
@@ -834,14 +759,12 @@ All settings are loaded from `.env` via Pydantic Settings. Key variables:
 
 ```
 MedGraphia/
-├── docker-compose.yml              # Enterprise stack: neo4j, qdrant, minio, api, worker, ui, langfuse
-├── docker-compose.lite.yml         # Lite stack: neo4j, qdrant, api, ui
+├── docker-compose.yml              # Full stack: neo4j, qdrant, redis, api, worker, ui
 ├── docker/
 │   ├── Dockerfile.api              # FastAPI + Uvicorn (multi-stage)
-│   ├── Dockerfile.worker           # Pipeline worker (Prefect agent)
+│   ├── Dockerfile.worker           # Pipeline worker (Arq async task-queue)
 │   └── Dockerfile.ui               # Streamlit UI
-├── .env.example                    # Enterprise env template
-├── .env.lite.example               # Lite-mode env template
+├── .env.example                    # Environment template
 ├── pyproject.toml
 ├── data/
 │   └── dspy/                   # Compiled DSPy programs (optimized reasoning traces)

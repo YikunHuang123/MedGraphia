@@ -1,27 +1,44 @@
 # ============================================================================
-# MedGraphia — Pipeline worker image (Prefect agent)
-# Includes heavier ML dependencies: torch, transformers, FlagEmbedding
+# MedGraphia — Pipeline worker image (Arq async task-queue worker)
+# Includes heavier ML dependencies: torch, transformers, FlagEmbedding, docling
 # ============================================================================
 
+# ---- Stage 1: builder ------------------------------------------------------
+FROM python:3.12-slim AS builder
+
+WORKDIR /build
+
+# Build deps: C extensions + tesseract for the OCR pipeline stage
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc g++ libxml2-dev libxslt-dev libjpeg-dev zlib1g-dev \
+        tesseract-ocr tesseract-ocr-eng tesseract-ocr-deu tesseract-ocr-chi-sim \
+        git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy both pyproject.toml AND src/ so setuptools can discover the package
+COPY pyproject.toml .
+COPY src/ src/
+
+RUN pip install --no-cache-dir --prefix=/install .
+
+# ---- Stage 2: runtime ------------------------------------------------------
 FROM python:3.12-slim AS runtime
 
 WORKDIR /app
 
+# Runtime system libs (tesseract for pipeline OCR, curl for health probes)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        gcc g++ libxml2-dev libxslt-dev libjpeg-dev zlib1g-dev \
         tesseract-ocr tesseract-ocr-eng tesseract-ocr-deu tesseract-ocr-chi-sim \
-        curl git \
+        libxml2 libxslt1.1 libjpeg62-turbo curl git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml .
-RUN pip install --no-cache-dir .
+COPY --from=builder /install /usr/local
 
-COPY src/ /app/src/
+# Pipeline CLI scripts (used via `docker compose exec worker python scripts/...`)
 COPY scripts/ /app/scripts/
 
-ENV PYTHONPATH=/app/src
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Default: start Arq worker consuming the medgraphia task queue
+# Start the Arq worker; it listens to Redis and runs task_build_pipeline jobs
 CMD ["arq", "medgraphia.worker.WorkerSettings"]
