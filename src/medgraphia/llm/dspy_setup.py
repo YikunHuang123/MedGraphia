@@ -63,16 +63,16 @@ def get_lm(
     api_base = None
 
     # Check for specialized task credentials first
-    if task == "rewriter" and cfg.rewriter_llm_api_key.get_secret_value():
+    if task == "rewriter" and (cfg.rewriter_llm_api_key.get_secret_value() or cfg.rewriter_llm_base_url):
         api_key = cfg.rewriter_llm_api_key.get_secret_value()
         api_base = cfg.rewriter_llm_base_url or None
-    elif task == "extractor" and cfg.extractor_llm_api_key.get_secret_value():
+    elif task == "extractor" and (cfg.extractor_llm_api_key.get_secret_value() or cfg.extractor_llm_base_url):
         api_key = cfg.extractor_llm_api_key.get_secret_value()
         api_base = cfg.extractor_llm_base_url or None
-    elif task == "summarizer" and cfg.summarizer_llm_api_key.get_secret_value():
+    elif task == "summarizer" and (cfg.summarizer_llm_api_key.get_secret_value() or cfg.summarizer_llm_base_url):
         api_key = cfg.summarizer_llm_api_key.get_secret_value()
         api_base = cfg.summarizer_llm_base_url or None
-    elif task == "judge" and cfg.judge_llm_api_key.get_secret_value():
+    elif task == "judge" and (cfg.judge_llm_api_key.get_secret_value() or cfg.judge_llm_base_url):
         api_key = cfg.judge_llm_api_key.get_secret_value()
         api_base = cfg.judge_llm_base_url or None
     else:
@@ -86,6 +86,8 @@ def get_lm(
             api_key = cfg.deepseek_api_key.get_secret_value()
         elif provider == "anthropic":
             api_key = cfg.anthropic_api_key.get_secret_value()
+        elif provider == "ollama":
+            api_base = cfg.llm_base_url or "http://localhost:11434"
 
     try:
         kwargs = {}

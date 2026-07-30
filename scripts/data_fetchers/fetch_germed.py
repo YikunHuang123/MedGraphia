@@ -3,6 +3,8 @@
 CLI tool: download the GERNERMED medical dataset from GitHub.
 
 The script fetches the raw JSON dataset from the frankkramer-lab repository.
+
+over 8000 QA-data
 """
 
 from __future__ import annotations
@@ -34,6 +36,11 @@ def main(out: str) -> None:
     out_path = Path(out)
     out_path.mkdir(parents=True, exist_ok=True)
     target_file = out_path / "GERNERMED_dataset.json"
+
+    if target_file.exists():
+        click.echo(f"Already exists: {target_file}, skipping download.")
+        logger.info("germed_download_skipped", path=str(target_file))
+        return
 
     click.echo(f"Downloading GERNERMED dataset from {GERNERMED_URL}...")
 

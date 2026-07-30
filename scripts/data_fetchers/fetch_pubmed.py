@@ -65,8 +65,8 @@ def main(
             )
             sys.exit(1)
     else:
-        domain_key = cfg.default_domain
-        search_query = DOMAIN_QUERIES.get(domain_key, domain_key)
+        click.echo("Either --domain or --query is required.", err=True)
+        sys.exit(1)
 
     # Resolve output directory
     output_dir = Path(out) if out else Path("data/raw/pubmed") / domain_key

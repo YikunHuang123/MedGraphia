@@ -104,16 +104,82 @@ class MeSHLoader:
         return self._index
 
     def _resolve_entity_type(self, tree_numbers: list[str]) -> EntityType:
-        """Map MeSH tree numbers to MedGraphia EntityTypes."""
+        """Map MeSH tree numbers to MedGraphia EntityTypes.
+
+        Scans ALL tree numbers first, then resolves by priority so that a concept
+        with multiple tree numbers (e.g. Insulin: D12 protein + D06 hormone/drug)
+        gets the most clinically useful type.
+
+        MeSH tree prefixes:
+          C23.888.* → SYMPTOM (Signs and Symptoms only; C23.550=Necrosis → DISEASE)
+          C*, F03.* → DISEASE
+          D12.*  → GENE      (Proteins as gene products; overridden by DRUG if D* also present)
+          D*     → DRUG      (Chemicals and Drugs)
+          E*     → PROCEDURE (Diagnostic and Therapeutic Techniques)
+          G05.*  → GENE      (Genetic Phenomena)
+
+        Priority: DRUG > SYMPTOM > DISEASE > PROCEDURE > GENE > UNKNOWN
+          Rationale: a protein that is also a licensed drug (insulin, antibodies)
+          should be findable as DRUG; C23 (Symptoms) is more specific than C (Diseases).
+        """
+        types_found: set[EntityType] = set()
         for tn in tree_numbers:
-            if tn.startswith("C") or tn.startswith("F03"):
-                return EntityType.DISEASE
-            if tn.startswith("D"):
-                return EntityType.DRUG
-            if tn.startswith("G") or tn.startswith("A"):  # Some genes/proteins are under G or A
-                if "gen" in tn.lower() or "prot" in tn.lower():
-                    return EntityType.GENE
+            if tn.startswith("C23.888"):
+                types_found.add(EntityType.SYMPTOM)
+            elif tn.startswith("C") or tn.startswith("F03"):
+                types_found.add(EntityType.DISEASE)
+            elif tn.startswith("G05"):
+                types_found.add(EntityType.GENE)
+            elif tn.startswith("D12"):
+                types_found.add(EntityType.GENE)
+            elif tn.startswith("D"):
+                types_found.add(EntityType.DRUG)
+            elif tn.startswith("E"):
+                types_found.add(EntityType.PROCEDURE)
+
+        for preferred in (
+            EntityType.DRUG,
+            EntityType.SYMPTOM,
+            EntityType.DISEASE,
+            EntityType.PROCEDURE,
+            EntityType.GENE,
+        ):
+            if preferred in types_found:
+                return preferred
         return EntityType.UNKNOWN
+
+    def load_translations(self, translation_file: str) -> None:
+        """Inject multilingual labels from a TSV file into the loaded concept index.
+
+        Expected TSV format (no header):
+            <CUI>\\t<lang>\\t<label>
+        Example:
+            D009203\\tzh\\t心肌梗死
+            D009203\\tde\\tHerzinfarkt
+
+        The file can be generated from UMLS MRCONSO.RRF:
+            awk -F'|' '$2=="CHI" && $12=="MSH" {print $9"\\tzh\\t"$15}' MRCONSO.RRF > mesh_zh.tsv
+            awk -F'|' '$2=="GER" && $12=="MSH" {print $9"\\tde\\t"$15}' MRCONSO.RRF >> mesh_zh.tsv
+        """
+        path = Path(translation_file)
+        if not path.exists():
+            logger.warning("mesh_translation_missing", path=str(path))
+            return
+
+        loaded = 0
+        with path.open(encoding="utf-8") as f:
+            for line in f:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) != 3:
+                    continue
+                cui, lang, label = parts
+                label = label.strip()
+                if not label or cui not in self._index:
+                    continue
+                self._index[cui].setdefault("lang_labels", {})[lang] = label
+                loaded += 1
+
+        logger.info("mesh_translations_loaded", file=str(path), entries=loaded)
 
     def iter_concepts(self) -> Iterator[dict[str, Any]]:
         yield from self._index.values()
@@ -125,16 +191,28 @@ class MeSHLoader:
 
 
 def _resolve_entity_type(tree_numbers: list[str]) -> str:
-    """
-    Map MeSH tree numbers to EntityType value string.
-    """
+    """Module-level wrapper — delegates to MeSHLoader._resolve_entity_type logic."""
+    types_found: set[EntityType] = set()
     for tn in tree_numbers:
-        if tn.startswith("C") or tn.startswith("F03"):
-            return EntityType.DISEASE.value
-        if tn.startswith("D"):
-            return EntityType.DRUG.value
-        if (tn.startswith("G") or tn.startswith("A")) and (
-            "gen" in tn.lower() or "prot" in tn.lower()
-        ):
-            return EntityType.GENE.value
+        if tn.startswith("C23"):
+            types_found.add(EntityType.SYMPTOM)
+        elif tn.startswith("C") or tn.startswith("F03"):
+            types_found.add(EntityType.DISEASE)
+        elif tn.startswith("G05"):
+            types_found.add(EntityType.GENE)
+        elif tn.startswith("D12"):
+            types_found.add(EntityType.GENE)
+        elif tn.startswith("D"):
+            types_found.add(EntityType.DRUG)
+        elif tn.startswith("E"):
+            types_found.add(EntityType.PROCEDURE)
+    for preferred in (
+        EntityType.DRUG,
+        EntityType.SYMPTOM,
+        EntityType.DISEASE,
+        EntityType.PROCEDURE,
+        EntityType.GENE,
+    ):
+        if preferred in types_found:
+            return preferred.value
     return EntityType.UNKNOWN.value

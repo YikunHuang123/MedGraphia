@@ -20,6 +20,7 @@ Arguments:
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 from pathlib import Path
 
@@ -90,17 +91,27 @@ async def _run(drug_names: list[str], limit: int, out: str, language: Language) 
         click.echo(f"Found {len(filtered)} matching products in EMA index.")
 
         downloaded = 0
+        skipped = 0
         for product in filtered:
             name = product.get("Medicine name", "")
             url = product.get("URL", "") or product.get("Product page", "")
             if not url:
+                continue
+            # Check if already downloaded before making a network request
+            file_name = re.sub(r"[^\w\-]", "_", name) + ".pdf"
+            if (Path(out) / file_name).exists():
+                skipped += 1
+                click.echo(f"  ~ {name} (already exists, skipped)")
                 continue
             doc = await connector.download_smpc(url, name, language)
             if doc:
                 downloaded += 1
                 click.echo(f"  ✓ {name}")
 
-    click.echo(f"Downloaded {downloaded} SmPC documents to {out}/")
+    msg = f"Downloaded {downloaded} SmPC documents to {out}/"
+    if skipped:
+        msg += f" ({skipped} already existed, skipped)"
+    click.echo(msg)
 
 
 if __name__ == "__main__":

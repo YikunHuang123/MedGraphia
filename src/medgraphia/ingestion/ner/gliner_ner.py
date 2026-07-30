@@ -17,7 +17,7 @@ from medgraphia.logger import get_logger
 logger = get_logger(__name__)
 
 try:
-    from gliner import GLiNER as _GLiNERModel  # type: ignore[import]
+    from gliner import GLiNER as _GLiNERModel 
 
     _GLINER_AVAILABLE = True
 except ImportError:
@@ -28,35 +28,31 @@ except ImportError:
 # Label sets
 # ---------------------------------------------------------------------------
 
-# Natural-language labels passed to GLiNER — one per concept type per language.
-# Multilingual labels improve recall for DE / ZH documents processed by the same model.
-_ENTITY_LABELS: dict[EntityType, list[str]] = {
-    EntityType.DISEASE: ["disease", "疾病", "Erkrankung"],
-    EntityType.DRUG: ["drug", "药物", "Medikament"],
-    EntityType.SYMPTOM: ["symptom", "症状", "Symptom"],
-    EntityType.GENE: ["gene", "基因", "Gen"],
-    EntityType.PROCEDURE: ["procedure", "手术", "Operation"],
+# Natural-language labels passed to GLiNER — one per concept per language.
+# Using explicit Language enums ensures type safety and prevents implicit index errors.
+_ENTITY_LABELS: dict[EntityType, dict[Language, str]] = {
+    EntityType.DISEASE: {Language.EN: "disease", Language.ZH: "疾病", Language.DE: "Erkrankung"},
+    EntityType.DRUG: {Language.EN: "drug", Language.ZH: "药物", Language.DE: "Medikament"},
+    EntityType.SYMPTOM: {Language.EN: "symptom", Language.ZH: "症状", Language.DE: "Symptom"},
+    EntityType.GENE: {Language.EN: "gene", Language.ZH: "基因", Language.DE: "Gen"},
+    EntityType.PROCEDURE: {Language.EN: "procedure", Language.ZH: "手术", Language.DE: "Operation"},
 }
 
-_ALL_LABELS: list[str] = [label for labels in _ENTITY_LABELS.values() for label in labels]
-
-# Reverse map: label text → EntityType (built at import time)
+# Reverse map: label text -> EntityType (used to map model output back to domain types)
 _LABEL_TO_TYPE: dict[str, EntityType] = {
-    label: etype for etype, labels in _ENTITY_LABELS.items() for label in labels
+    label: etype 
+    for etype, lang_map in _ENTITY_LABELS.items() 
+    for label in lang_map.values()
 }
 
-# Language-specific subsets keep the label list shorter for focused documents.
-_EN_LABELS = [
-    l
-    for l in _ALL_LABELS
-    if not any("一" <= c <= "鿿" for c in l) and not any(c in "äöüÄÖÜß" for c in l)
-]
-_ZH_LABELS = [l for l in _ALL_LABELS if any("一" <= c <= "鿿" for c in l)] + [
-    l for l in _EN_LABELS[:12]
-]  # keep core English labels too
-_DE_LABELS = [l for l in _ALL_LABELS if any(c in "äöüÄÖÜß" for c in l)] + [
-    l for l in _EN_LABELS[:12]
-]
+# Generate language-specific label lists.
+# For non-English languages, we explicitly append the core English labels to handle
+# mixed-language biomedical texts (e.g., Chinese notes containing "DNA" or "CT").
+_EN_LABELS = [lang_map[Language.EN] for lang_map in _ENTITY_LABELS.values()]
+_ZH_LABELS = [lang_map[Language.ZH] for lang_map in _ENTITY_LABELS.values()] + _EN_LABELS
+_DE_LABELS = [lang_map[Language.DE] for lang_map in _ENTITY_LABELS.values()] + _EN_LABELS
+
+_ALL_LABELS = _EN_LABELS + _ZH_LABELS[:5] + _DE_LABELS[:5] # keep unique values for UNKNOWN fallback
 
 _LABELS_BY_LANG: dict[Language, list[str]] = {
     Language.EN: _EN_LABELS,
@@ -133,6 +129,60 @@ class GLiNERNER:
             spans=len(spans),
         )
         return spans
+
+    def predict_batch(
+        self, texts: list[str], language: Language = Language.EN
+    ) -> list[list[MentionSpan]]:
+        """
+        Batch predict for multiple texts in a single forward pass.
+        Returns one MentionSpan list per input text (same order).
+        Falls back to per-text predict() if the model does not support list input.
+        """
+        if not _GLINER_AVAILABLE or not texts:
+            return [[] for _ in texts]
+
+        try:
+            model = self._load_model()
+        except Exception as exc:
+            logger.warning("gliner_load_failed", error=str(exc))
+            return [[] for _ in texts]
+
+        labels = _LABELS_BY_LANG.get(language, _ALL_LABELS)
+        non_empty = [(i, t) for i, t in enumerate(texts) if t.strip()]
+        if not non_empty:
+            return [[] for _ in texts]
+
+        indices, batch_texts = zip(*non_empty)
+        try:
+            raw_results = model.predict_entities(list(batch_texts), labels, threshold=self._threshold)
+            # GLiNER returns list[dict] for a single string; list[list[dict]] for a list
+            if raw_results and isinstance(raw_results[0], dict):
+                raw_results = [raw_results]
+        except Exception as exc:
+            logger.warning("gliner_predict_failed", error=str(exc))
+            return [[] for _ in texts]
+
+        all_spans: list[list[MentionSpan]] = [[] for _ in texts]
+        for orig_idx, raw_entities in zip(indices, raw_results):
+            spans = []
+            for ent in raw_entities:
+                entity_type = _LABEL_TO_TYPE.get(ent.get("label", ""))
+                if entity_type is None:
+                    continue
+                spans.append(
+                    MentionSpan.from_text(
+                        text=ent["text"],
+                        start=ent["start"],
+                        end=ent["end"],
+                        entity_type=entity_type,
+                        confidence=float(ent.get("score", 1.0)),
+                        source="gliner",
+                    )
+                )
+            all_spans[orig_idx] = spans
+
+        logger.debug("gliner_batch_done", lang=language.value, texts=len(batch_texts))
+        return all_spans
 
     # ------------------------------------------------------------------
 

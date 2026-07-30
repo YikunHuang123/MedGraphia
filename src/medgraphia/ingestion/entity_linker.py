@@ -36,14 +36,6 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 try:
-    from rank_bm25 import BM25Okapi as _BM25  # type: ignore[import]
-
-    _BM25_AVAILABLE = True
-except ImportError:
-    _BM25_AVAILABLE = False
-    logger.warning("rank_bm25_not_installed", msg="pip install rank-bm25 for candidate retrieval")
-
-try:
     import numpy as _np
     from sentence_transformers import SentenceTransformer as _ST  # type: ignore[import]
 
@@ -60,32 +52,12 @@ _MENTION_PREFIX = "MENTION:"
 
 
 # ---------------------------------------------------------------------------
-# Text tokenizer (BM25 tokenization)
-# ---------------------------------------------------------------------------
-
-
-def _tokenize(text: str) -> list[str]:
-    """
-    Tokenize for BM25 indexing.
-    Western text: split on whitespace + punctuation.
-    CJK text:    character-level tokens (each character is a 'term').
-    Mixed:       combine both approaches.
-    """
-    tokens: list[str] = []
-    # Western words (lowercase)
-    tokens.extend(re.findall(r"[a-zA-ZäöüÄÖÜß]+", text.lower()))
-    # CJK characters
-    tokens.extend(re.findall(r"[一-鿿㐀-䶿]", text))
-    return tokens or [text.lower()]
-
-
-# ---------------------------------------------------------------------------
 # MeSH concept index entry
 # ---------------------------------------------------------------------------
 
 
 class _ConceptEntry:
-    __slots__ = ("cui", "label", "synonyms", "entity_type", "lang_labels", "all_tokens")
+    __slots__ = ("cui", "label", "synonyms", "entity_type", "lang_labels")
 
     def __init__(self, concept: dict[str, Any]) -> None:
         self.cui: str = concept["cui"]
@@ -93,10 +65,6 @@ class _ConceptEntry:
         self.synonyms: list[str] = concept.get("synonyms") or []
         self.entity_type: str = concept.get("entity_type") or "Unknown"
         self.lang_labels: dict[str, str] = concept.get("lang_labels") or {}
-
-        # Pre-tokenized corpus string used by BM25
-        all_text = " ".join([self.label] + self.synonyms + list(self.lang_labels.values()))
-        self.all_tokens: list[str] = _tokenize(all_text)
 
 
 # ---------------------------------------------------------------------------
@@ -124,23 +92,24 @@ class EntityLinker:
     def __init__(
         self,
         concept_index: dict[str, Any] | None = None,
-        bm25_top_k: int = 50,
         link_threshold: float = 0.70,
         sapbert_model: str = "cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR",
         sapbert_threshold: float = 0.75,
     ) -> None:
 
         self._raw_index: dict[str, Any] = concept_index or {}
-        self._bm25_top_k = bm25_top_k
         self._link_threshold = link_threshold
         self._sapbert_model_name = sapbert_model
         self._sapbert_threshold = sapbert_threshold
 
         # Built lazily
         self._entries: list[_ConceptEntry] = []
-        self._bm25: Any = None
         self._sapbert: Any = None
+        self._concept_embs: Any = None
         self._built = False
+
+        # Global cache to prevent redundant cross-batch computations
+        self._global_link_cache: dict[tuple[str, EntityType], tuple[str, str, dict[str, str], float] | None] = {}
 
     # ------------------------------------------------------------------
     # Factory helpers
@@ -153,9 +122,18 @@ class EntityLinker:
         limit: int | None = None,
         sapbert_model: str | None = None,
         sapbert_threshold: float | None = None,
+        translation_file: str | None = None,
         **kwargs: Any,
     ) -> EntityLinker:
-        """Load MeSH data and return a ready-to-use EntityLinker."""
+        """Load MeSH data and return a ready-to-use EntityLinker.
+
+        Args:
+            translation_file: Optional TSV file with multilingual labels.
+                Format: <CUI>\\t<lang>\\t<label>  (e.g. D009203\\tzh\\t心肌梗死)
+                Generate from UMLS MRCONSO.RRF:
+                  awk -F'|' '$2=="CHI"&&$12=="MSH"{print $9"\\tzh\\t"$15}' MRCONSO.RRF > mesh_translations.tsv
+                  awk -F'|' '$2=="GER"&&$12=="MSH"{print $9"\\tde\\t"$15}' MRCONSO.RRF >> mesh_translations.tsv
+        """
         from medgraphia.data.mesh import MeSHLoader
 
         loader = MeSHLoader(storage_dir=mesh_dir)
@@ -166,10 +144,13 @@ class EntityLinker:
             logger.warning("el_mesh_load_failed", error=str(exc))
             index = {}
 
+        if translation_file:
+            loader.load_translations(translation_file)
+
         # Use provided sapbert settings or fall back to defaults
-        if sapbert_model:
+        if sapbert_model is not None:
             kwargs["sapbert_model"] = sapbert_model
-        if sapbert_threshold:
+        if sapbert_threshold is not None:
             kwargs["sapbert_threshold"] = sapbert_threshold
 
         return cls(concept_index=index, **kwargs)
@@ -181,10 +162,10 @@ class EntityLinker:
         cfg = get_settings()
         return cls.from_mesh(
             mesh_dir=cfg.mesh_dir,
-            bm25_top_k=cfg.el_bm25_top_k,
             link_threshold=cfg.el_link_threshold,
             sapbert_model=cfg.el_sapbert_model,
             sapbert_threshold=cfg.el_sapbert_threshold,
+            translation_file=cfg.el_translation_file or None,
         )
 
     # ------------------------------------------------------------------
@@ -193,7 +174,7 @@ class EntityLinker:
 
     def build_index(self) -> None:
         """
-        Build the BM25 (and optionally SapBERT) index from the MeSH concept map.
+        Build the SapBERT index from the MeSH concept map.
         Idempotent — does nothing if already built.
         """
         if self._built:
@@ -205,12 +186,35 @@ class EntityLinker:
             return
 
         logger.info("el_building_index", concepts=len(self._raw_index))
-        self._entries = [_ConceptEntry(c) for c in self._raw_index.values()]
+        base_entries = [_ConceptEntry(c) for c in self._raw_index.values()]
 
-        if _BM25_AVAILABLE and self._entries:
-            corpus = [e.all_tokens for e in self._entries]
-            self._bm25 = _BM25(corpus)
-            logger.info("el_bm25_built", terms=len(corpus))
+        # Build a flat (entry, label) list covering English + all available lang_labels.
+        # SapBERT all-lang model embeds multilingual text into the same space, so a
+        # Chinese mention "心肌梗死" will directly match the Chinese dictionary entry
+        # for D009203 without any cross-lingual model inference.
+        index_pairs: list[tuple[_ConceptEntry, str]] = []
+        for entry in base_entries:
+            index_pairs.append((entry, entry.label))          # English always included
+            for label in entry.lang_labels.values():
+                if label and label != entry.label:
+                    index_pairs.append((entry, label))        # zh / de / etc.
+
+        self._entries = [pair[0] for pair in index_pairs]    # parallel list of entries
+        all_labels   = [pair[1] for pair in index_pairs]
+
+        n_base = len(base_entries)
+        n_total = len(self._entries)
+        logger.info("el_index_multilingual", base=n_base, total=n_total,
+                    extra=n_total - n_base)
+
+        if _SAPBERT_AVAILABLE and self._entries:
+            self._load_sapbert()
+            logger.info("el_sapbert_precomputing_dictionary")
+            self._concept_embs = self._sapbert.encode(
+                all_labels, normalize_embeddings=True, show_progress_bar=True,
+                batch_size=256, convert_to_tensor=True
+            )
+            logger.info("el_sapbert_dictionary_ready")
 
         self._built = True
 
@@ -242,7 +246,12 @@ class EntityLinker:
                 linked.append(entity)
                 continue
 
-            mention_text = entity.cui[len(_MENTION_PREFIX) :]
+            raw_mention = entity.cui[len(_MENTION_PREFIX) :]
+            if ":" in raw_mention:
+                _, mention_text = raw_mention.split(":", 1)
+            else:
+                mention_text = raw_mention
+                
             best = self._find_best_match(mention_text, entity.entity_type)
             if best:
                 cui, label, lang_labels, confidence = best
@@ -254,6 +263,8 @@ class EntityLinker:
                         lang_labels=lang_labels,
                         confidence=min(entity.confidence, confidence),
                         source_ids=entity.source_ids,
+                        start_char=entity.start_char,
+                        end_char=entity.end_char,
                     )
                 )
                 logger.debug(
@@ -264,7 +275,6 @@ class EntityLinker:
                     score=f"{confidence:.3f}",
                 )
             else:
-                # Keep provisional CUI — downstream can still index the mention
                 linked.append(entity)
                 logger.debug("el_unlinked", mention=mention_text)
 
@@ -276,6 +286,134 @@ class EntityLinker:
             return chunk
         linked = self.link_entities(chunk.entities)
         return chunk.model_copy(update={"entities": linked})
+
+    def link_chunks_batch(self, chunks: list[Chunk]) -> list[Chunk]:
+        """
+        Link all entities across all chunks using a single SapBERT encode call.
+
+        Deduplicates by (mention_text, entity_type) so identical surface forms
+        appearing in multiple chunks are encoded only once.
+        """
+        if not self._built:
+            self.build_index()
+        if not self._entries:
+            return chunks
+
+        unique_mentions: set[tuple[str, EntityType]] = set()
+        
+        for chunk in chunks:
+            for entity in chunk.entities:
+                if not entity.cui.startswith(_MENTION_PREFIX):
+                    continue
+                raw = entity.cui[len(_MENTION_PREFIX):]
+                _, mention_text = raw.split(":", 1) if ":" in raw else ("", raw)
+                key = (mention_text, entity.entity_type)
+                
+                if key in self._global_link_cache:
+                    continue
+                    
+                unique_mentions.add(key)
+
+        if unique_mentions:
+            if _SAPBERT_AVAILABLE and self._sapbert is not None:
+                self._batch_sapbert_link(list(unique_mentions), self._global_link_cache)
+            else:
+                # SapBERT unavailable — fall back to string rerank against full entry list
+                for key in unique_mentions:
+                    mention_text, entity_type = key
+                    sr = self._string_rerank(mention_text, self._entries)
+                    self._global_link_cache[key] = sr if (sr and sr[3] >= self._link_threshold) else None
+
+        result: list[Chunk] = []
+        for chunk in chunks:
+            if not chunk.entities:
+                result.append(chunk)
+                continue
+            linked_entities: list[Entity] = []
+            for entity in chunk.entities:
+                if not entity.cui.startswith(_MENTION_PREFIX):
+                    linked_entities.append(entity)
+                    continue
+                raw = entity.cui[len(_MENTION_PREFIX):]
+                _, mention_text = raw.split(":", 1) if ":" in raw else ("", raw)
+                best = self._global_link_cache.get((mention_text, entity.entity_type))
+                if best:
+                    cui, label, lang_labels, confidence = best
+                    linked_entities.append(
+                        Entity(
+                            cui=cui,
+                            label=label,
+                            entity_type=entity.entity_type,
+                            lang_labels=lang_labels,
+                            confidence=min(entity.confidence, confidence),
+                            source_ids=entity.source_ids,
+                            start_char=entity.start_char,
+                            end_char=entity.end_char,
+                        )
+                    )
+                    logger.debug("el_linked", mention=mention_text, cui=cui, score=f"{confidence:.3f}")
+                else:
+                    linked_entities.append(entity)
+                    logger.debug("el_unlinked", mention=mention_text)
+            result.append(chunk.model_copy(update={"entities": linked_entities}))
+
+        return result
+
+    def _batch_sapbert_link(
+        self,
+        unique_mentions: list[tuple[str, EntityType]],
+        link_cache: dict[tuple[str, EntityType], tuple[str, str, dict[str, str], float] | None],
+    ) -> None:
+        """Encode mentions and perform GPU matrix multiplication against pre-computed concept dict."""
+        import torch
+        mention_texts = [k[0] for k in unique_mentions]
+
+        try:
+            mention_embs = self._sapbert.encode(
+                mention_texts, normalize_embeddings=True, show_progress_bar=False, batch_size=256, convert_to_tensor=True
+            )
+
+            scores = torch.matmul(mention_embs, self._concept_embs.T)
+            topk_scores, topk_idxs = torch.topk(scores, k=50, dim=1)
+
+            topk_scores = topk_scores.cpu().tolist()
+            topk_idxs = topk_idxs.cpu().tolist()
+
+            for i, key in enumerate(unique_mentions):
+                mention_text, required_type = key
+                cands = []
+                for idx, score in zip(topk_idxs[i], topk_scores[i]):
+                    entry = self._entries[idx]
+                    if entry.entity_type == required_type.value:
+                        cands.append((entry, score))
+
+                if not cands:
+                    # Fallback: if no candidates match the required type, use the raw top 50
+                    for idx, score in zip(topk_idxs[i], topk_scores[i]):
+                        cands.append((self._entries[idx], score))
+
+                if not cands:
+                    link_cache[key] = None
+                    continue
+
+                best_entry, best_score = cands[0]
+
+                if best_score >= self._sapbert_threshold:
+                    link_cache[key] = (best_entry.cui, best_entry.label, best_entry.lang_labels, best_score)
+                elif not mention_text.isascii() and best_score >= self._link_threshold:
+                    # Cross-script query (Chinese, German umlauts, etc.): string rerank is
+                    # meaningless across different writing systems, so accept the SapBERT
+                    # match if it clears the relaxed link_threshold.
+                    link_cache[key] = (best_entry.cui, best_entry.label, best_entry.lang_labels, best_score)
+                else:
+                    cand_entries = [c[0] for c in cands]
+                    sr = self._string_rerank(mention_text, cand_entries)
+                    link_cache[key] = sr if (sr and sr[3] >= self._link_threshold) else None
+
+        except Exception as exc:
+            logger.warning("el_batch_sapbert_failed", error=str(exc))
+            for key in unique_mentions:
+                link_cache[key] = None
 
     # ------------------------------------------------------------------
     # Neo4j write (graceful degradation)
@@ -314,93 +452,44 @@ class EntityLinker:
     ) -> tuple[str, str, dict[str, str], float] | None:
         """
         Return (cui, label, lang_labels, score) for the best UMLS match, or None.
+        (Used mainly as a fallback for 1-by-1 linking)
         """
-        if not self._entries:
+        if not self._entries or self._concept_embs is None:
             return None
 
-        candidates = self._bm25_candidates(mention)
-        if not candidates:
+        # Dense retrieval for single mention
+        import torch
+        emb = self._sapbert.encode([mention], normalize_embeddings=True, convert_to_tensor=True)
+        scores = torch.matmul(emb, self._concept_embs.T)[0]
+        topk_scores, topk_idxs = torch.topk(scores, k=50)
+
+        topk_scores = topk_scores.cpu().tolist()
+        topk_idxs = topk_idxs.cpu().tolist()
+
+        cands = []
+        for idx, score in zip(topk_idxs, topk_scores):
+            entry = self._entries[idx]
+            if entry.entity_type == entity_type.value:
+                cands.append((entry, score))
+
+        if not cands:
+            # Fallback: no type-matched candidates in top-50, use all top-50
+            cands = [(self._entries[idx], score) for idx, score in zip(topk_idxs, topk_scores)]
+
+        if not cands:
             return None
 
-        # Type filter: prefer same-type concepts but fall back to any type if none match
-        typed = [e for e in candidates if e.entity_type == entity_type.value]
-        pool = typed if typed else candidates
+        best_entry, best_score = cands[0]
+        if best_score >= self._sapbert_threshold:
+            return best_entry.cui, best_entry.label, best_entry.lang_labels, float(best_score)
 
-        return self._score_and_rank(mention, pool)
+        if not mention.isascii() and best_score >= self._link_threshold:
+            # Cross-script query: string rerank is meaningless across different writing
+            # systems, so accept the SapBERT match if it clears the relaxed link_threshold.
+            return best_entry.cui, best_entry.label, best_entry.lang_labels, float(best_score)
 
-    def _bm25_candidates(self, mention: str) -> list[_ConceptEntry]:
-        """Return top-K BM25 candidates for a mention string."""
-        query_tokens = _tokenize(mention)
-
-        if self._bm25 is not None and _BM25_AVAILABLE:
-            scores = self._bm25.get_scores(query_tokens)
-            top_k_idx = _top_k_indices(scores, self._bm25_top_k)
-            return [self._entries[i] for i in top_k_idx if scores[i] > 0]
-
-        # Fallback: linear scan with string containment
-        mention_lower = mention.lower()
-        results = []
-        for entry in self._entries:
-            if mention_lower in entry.label.lower():
-                results.append(entry)
-            elif any(mention_lower in syn.lower() for syn in entry.synonyms):
-                results.append(entry)
-            if len(results) >= self._bm25_top_k:
-                break
-        return results
-
-    def _score_and_rank(
-        self,
-        mention: str,
-        candidates: list[_ConceptEntry],
-    ) -> tuple[str, str, dict[str, str], float] | None:
-        """
-        Re-rank candidates using SapBERT (if available) or string similarity.
-        Returns best (cui, label, lang_labels, score) if score >= threshold, else None.
-        """
-        if not candidates:
-            return None
-
-        if _SAPBERT_AVAILABLE:
-            self._load_sapbert()
-
-        if self._sapbert is not None:
-            return self._sapbert_rerank(mention, candidates)
-        else:
-            return self._string_rerank(mention, candidates)
-
-    def _sapbert_rerank(
-        self,
-        mention: str,
-        candidates: list[_ConceptEntry],
-    ) -> tuple[str, str, dict[str, str], float] | None:
-        """SapBERT cosine similarity re-ranking."""
-        try:
-            cand_labels = [e.label for e in candidates]
-            all_texts = [mention] + cand_labels
-            embeddings = self._sapbert.encode(
-                all_texts, normalize_embeddings=True, show_progress_bar=False
-            )
-            mention_emb = embeddings[0]
-            cand_embs = embeddings[1:]
-            scores = (cand_embs @ mention_emb).tolist()
-
-            best_idx = int(_np.argmax(scores))
-            best_score = float(scores[best_idx])
-
-            if best_score < self._sapbert_threshold:
-                # Below SapBERT threshold — try string fallback
-                string_result = self._string_rerank(mention, candidates)
-                if string_result and string_result[3] >= self._link_threshold:
-                    return string_result
-                return None
-
-            best = candidates[best_idx]
-            return best.cui, best.label, best.lang_labels, best_score
-
-        except Exception as exc:
-            logger.warning("el_sapbert_rerank_failed", error=str(exc))
-            return self._string_rerank(mention, candidates)
+        cand_entries = [c[0] for c in cands]
+        return self._string_rerank(mention, cand_entries)
 
     def _string_rerank(
         self,

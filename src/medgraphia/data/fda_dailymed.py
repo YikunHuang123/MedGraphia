@@ -64,10 +64,16 @@ class FDADailyMedConnector:
         """Download and parse the SPL XML for a given set_id."""
         assert self._session is not None
         try:
+            out_path = self._output_dir / f"{set_id}.xml"
+            if out_path.exists():
+                xml_content = out_path.read_bytes()
+                doc = _parse_spl_xml(xml_content, set_id, drug_name)
+                doc.file_path = str(out_path)
+                logger.info("fda_label_skipped", set_id=set_id, drug=drug_name)
+                return doc
             xml_content = await self._download_xml(set_id)
             doc = _parse_spl_xml(xml_content, set_id, drug_name)
             # Persist raw XML for provenance
-            out_path = self._output_dir / f"{set_id}.xml"
             out_path.write_bytes(xml_content)
             doc.file_path = str(out_path)
             logger.info("fda_label_fetched", set_id=set_id, drug=drug_name)

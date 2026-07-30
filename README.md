@@ -60,7 +60,28 @@ traceable clinical AI brain.
 
 ### 🚀 Technical Deep Dives
 
-#### **1. Cross-Lingual Ontology Alignment**
+#### **1. Ingestion Pipeline**
+
+The ingestion pipeline orchestrates the offline knowledge-graph build process, transforming raw documents into a structured, query-ready graph and vector database. It consists of 8 distinct stages:
+
+*   **1. Load**: Reads raw data from the local file system (`data/raw`), including structured JSON data (e.g., PubMed, FDA, DrugBank, GerMed) and unstructured local PDF files (e.g., EMA SmPC), converting them into internal `RawDocument` objects.
+    *   *Key Aspect*: Utilizes specialized parsers (`StructuredParser`) to uniformly handle heterogeneous, multi-source medical data across different languages and formats, providing a standardized foundation for downstream tasks.
+*   **2. Parse**: Transforms unstructured documents into structured content. For complex formats like PDFs, it uses parsers like `DoclingParser` to extract content while preserving layouts.
+    *   *Key Aspect*: Overcomes the layout analysis challenges of complex medical PDFs, extracting "layout-aware" data that preserves hierarchical structures (titles, paragraphs, tables) to avoid destroying semantic context through brute-force splitting.
+*   **3. Chunk**: Performs "section-aware" text chunking of structured documents via `MedicalChunker` and normalizes medical terminology using `MedicalNormalizer`, concurrently writing document and chunk nodes to Neo4j.
+    *   *Key Aspect*: Optimizes performance by utilizing CPU-bound multi-threading for chunking (bypassing the Python GIL) combined with highly concurrent async I/O for safe Neo4j node writing, drastically improving ingestion throughput.
+*   **4. NER (Named Entity Recognition)**: Extracts key medical entities (e.g., drugs, diseases, symptoms) from text chunks using a multilingual approach, primarily relying on the GLiNER model and supplemented by language specific medical BERT model for high-precision filtering.
+    *   *Key Aspect*: Leverages GLiNER's zero-shot/few-shot flexibility to adapt to complex medical entity types, and implements a chunk-level degradation and retry mechanism for batch failures to ensure pipeline robustness.
+*   **5. Link (Entity Linking)**: Maps extracted entities to standard medical knowledge bases (MeSH). It uses BM25 for coarse candidate recall and the SapBERT model for semantic re-ranking and alignment.
+    *   *Key Aspect*: The critical step for disambiguating entities and normalizing the knowledge graph. The dual-path architecture balances alignment accuracy with computational efficiency.
+*   **6. Extract (Relation Extraction)**: A schema-guided process based on LLMs that analyzes logical and medical associations between entities, extracting relation triplets and writing these edges concurrently to Neo4j.
+    *   *Key Aspect*: By injecting a predefined medical relation schema into the LLM, it strips out logically sound medical relation triplets (e.g., "Drug-TREATS-Disease") from unstructured text.
+*   **7. Embed**: Uses the BGE-M3 model to generate dense and sparse vector representations for each text chunk, upserting them into the Qdrant vector database.
+    *   *Key Aspect*: Generating hybrid vectors (dense for deep semantics, sparse for precise keyword matching) is the core foundation enabling high-quality Hybrid RAG for subsequent retrieval.
+*   **8. Community (Community Detection)**: Applies the Leiden algorithm to the entity-relation graph to detect communities, then invokes an LLM to generate summaries for these clusters and writes them back to Neo4j.
+    *   *Key Aspect*: Inspired by GraphRAG, partitioning the knowledge graph into hierarchical semantic communities empowers the system to handle macro-level medical queries requiring a global perspective.
+
+#### **2. Cross-Lingual Ontology Alignment**
 The system achieves deep cross-lingual alignment (ZH, EN, DE) through a unified MeSH ontology and a parallel multi-language retrieval mechanism:
 *   **Offline Entity Unification:** During ingestion, a two-stage Cascade NER pipeline (GLiNER + language-specific BERT) extracts medical entities. The `EntityLinker` then utilizes **SapBERT-XLMR** to map diverse surface forms (e.g., *"心肌梗死"*, *"myocardial infarction"*, *"Myokardinfarkt"*) to a single, globally unique **MeSH CUI** (Concept Unique Identifier). The Neo4j Knowledge Graph stores edges based on these language-agnostic CUIs, allowing relations extracted from German or English documents to be directly connected to Chinese nodes.
 *   **Online Parallel Retrieval:** During the query phase, the `QueryTranslator` asynchronously translates the user's input into all supported corpus languages. The pipeline then executes parallel hybrid vector searches (dense + sparse via BGE-M3) on Qdrant, enforcing a per-language retrieval quota. This ensures that sparse vector matching (which relies on exact token overlap) functions correctly across language boundaries before merging the candidates via RRF.
@@ -479,7 +500,7 @@ NEO4J_PASSWORD=your-neo4j-password
 
 # LLM provider — pick one:
 DEFAULT_LLM_PROVIDER=ollama          # local, zero API cost (requires Ollama on host)
-DEFAULT_LLM_MODEL=qwen2.5:7b
+DEFAULT_LLM_MODEL=qwen2.5:14b
 LLM_BASE_URL=http://host.docker.internal:11434
 
 # Or use a cloud provider:
@@ -525,32 +546,90 @@ Navigate to `http://localhost:8501`. The interactive API docs are at `http://loc
 
 ---
 
-### Option B — Local Development (without Docker)
+### Option B — Local Development 
 
-**Prerequisites:** Python 3.12, Conda/uv, running Neo4j 5.x, Qdrant (native dense + sparse hybrid), Ollama (optional).
+#### 0. Start Ollama
+
+Ollama is required for local LLM inference. 
+
+Install Ollama from [ollama.com](https://ollama.com), then pull the models and start the service:
 
 ```bash
-git clone https://github.com/YikunHuang123/MedGraphia.git
-cd MedGraphia
+# Pull the inference model (used by extractor / rewriter / generator / summarizer)
+ollama pull qwen2.5:14b
 
-# Create environment
-conda create -n medgraphia python=3.12 -y
-conda activate medgraphia
-pip install -e ".[dev]"
+# Pull the safety guard model
+ollama pull llama-guard3:1b
 
-# Configure
-cp .env.lite.example .env
-# Edit .env with your local service addresses
-
-# Start API server
-uvicorn medgraphia.api:create_app --factory --host 0.0.0.0 --port 8058 --reload
-
-# Start pipeline worker (separate terminal)
-arq medgraphia.worker.WorkerSettings
-
-# Start Streamlit UI (separate terminal)
-streamlit run src/medgraphia/ui/streamlit_app.py
+# Ollama starts automatically on install; if not running, start it manually:
+ollama serve
 ```
+
+Then set the following in your `.env`:
+
+```bash
+DEFAULT_LLM_PROVIDER=ollama
+DEFAULT_LLM_MODEL=qwen2.5:14b
+LLM_BASE_URL=http://localhost:11434
+
+LLAMA_GUARD_PROVIDER=ollama
+LLAMA_GUARD_MODEL=llama-guard3:1b
+```
+
+> **Note:** The first API startup will automatically pull `llama-guard3:1b` if it is not already present locally.
+
+#### 1. Dataset Download
+If you are running the project locally and want to construct the knowledge graph from scratch, you need to fetch the raw data first. We provide several scripts to download English, Chinese, and German medical datasets.
+
+**a. English Dataset (PubMed)**
+Fetch clinical abstracts from PubMed. Due to NCBI limits, large downloads are automatically split by month. You must provide a date range using `--from` and `--to` when your limit exceeds 9,999.
+```bash
+python scripts/data_fetchers/fetch_pubmed.py \
+  --query "Humans[MeSH] AND Drug Therapy[MeSH]" \
+  --from "2024/01/01" \
+  --to "2026/12/31" \
+  --limit 200000 \
+  --out data/raw/pubmed/clinical_general
+```
+
+**b. Chinese Dataset (Huatuo QA)**
+Fetch the Chinese medical QA dataset from HuggingFace.
+```bash
+python scripts/data_fetchers/fetch_chinese_qa.py --limit 177703
+```
+*Note: 177,703 items is max of Huatuo QA.*
+
+**c. German Dataset (GERNERMED)**
+Fetch the German clinical dataset from GitHub (over 8000 German QA-data).
+```bash
+python scripts/data_fetchers/fetch_germed.py
+```
+
+#### 2. Foundation: MeSH Ontology Import
+Before processing any documents or clinical data, you **must** import the MeSH (Medical Subject Headings) ontology. This establishes the standard cross-lingual medical vocabulary (over 30,000 entities) in the Neo4j Knowledge Graph.
+
+Run this script to automatically download the 31MB MeSH ASCII file and import all standard concepts into your database:
+```bash
+python scripts/data_fetchers/import_mesh.py
+```
+*(Note: Do not use `--limit` here to ensure the complete medical dictionary is built).*
+
+#### 3. Start Prefect Server & Pipeline Observability (Optional)
+The data ingestion pipeline uses Prefect 3 to orchestrate tasks. To monitor the pipeline execution, view logs, and track task progress, you can start a persistent local Prefect server before running the pipeline.
+
+**Open a new terminal window, activate your environment**, and start the server:
+```bash
+prefect server start
+```
+The UI dashboard will be available at [http://127.0.0.1:4200](http://127.0.0.1:4200).
+
+#### 4. Execute the Graph Build Pipeline
+Once you have fetched your desired datasets and imported the MeSH ontology, you can execute the main pipeline to process documents, chunk texts, run multi-language NER, and build the Knowledge Graph in Neo4j.
+
+```bash
+python scripts/pipeline/build_graph.py
+```
+*(This orchestration script handles loading, parsing, chunking, entity extraction, linking, and embedding. It leverages multi-core concurrency and batching to optimize large-scale offline graph construction.)*
 
 ---
 

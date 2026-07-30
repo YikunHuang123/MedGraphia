@@ -62,26 +62,48 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # LLM
     # ------------------------------------------------------------------
-    # default_llm_provider: Literal["deepseek", "openai", "anthropic", "gemini", "groq", "ollama", "local"] = "ollama"
-    default_llm_provider: Literal[
-        "deepseek", "openai", "anthropic", "gemini", "groq", "ollama", "local"
-    ] = "groq"
-    default_llm_model: str = "llama-3.1-8b-instant"
-    # default_llm_model: str = "qwen2.5:3b"
-    llm_base_url: str = ""
+    deepseek_api_key: SecretStr = SecretStr("")
+    openai_api_key: SecretStr = SecretStr("")
+    openai_base_url: str = "https://api.openai.com/v1"
+    anthropic_api_key: SecretStr = SecretStr("")
+    gemini_api_key: SecretStr = SecretStr("")
+    groq_api_key: SecretStr = SecretStr("")
+
+
+    # Global default LLM.
+    # Directly used (no per-task override available):
+    #   - llm/client.py (LLMClient.from_settings) : provider is always this value
+    # Fallback when no task-specific override is set:
+    #   - llm/client.py (make_llm_client)  : provider_override or default
+    #   - llm/gateway.py (from_settings)   : provider_override or default
+    #   - llm/dspy_setup.py                : provider_override or default
+    #   - generation/llm_router.py         : each tier's provider/model attr or default
+    default_llm_provider: Literal["deepseek", "openai", "anthropic", "gemini", "groq", "ollama", "local"] = "ollama"
+    default_llm_model: str = "qwen3:14b"
+    llm_base_url: str = "http://localhost:11434"
     llm_max_tokens: int = 2048
     llm_temperature: float = 0.1
+
+    # Extract relations of nodes in Neo4j
+    extractor_llm_provider: str = "ollama"
+    extractor_llm_model: str = "Qwen3.5:9b"
+    extractor_llm_api_key: SecretStr = SecretStr("")
+    extractor_llm_base_url: str = "http://localhost:11434"
+    # extractor_llm_provider: str = "openai"
+    # extractor_llm_model: str = "deepseek-ai/DeepSeek-V4-Flash"
+    # extractor_llm_api_key: SecretStr = SecretStr("sk-......")
+    # extractor_llm_base_url: str = "https://api.siliconflow.com/v1"
+
+    # Model used for community summary generation; defaults to default_llm_model if empty
+    community_summary_llm: str = ""
+    community_min_size: int = 3
+    community_resolution: float = 1.0
 
     # Task-specific LLM overrides
     rewriter_llm_provider: str = "openai"
     rewriter_llm_model: str = "Qwen/Qwen2.5-7B-Instruct"
     rewriter_llm_api_key: SecretStr = SecretStr("")
     rewriter_llm_base_url: str = ""
-
-    extractor_llm_provider: str = "openai"
-    extractor_llm_model: str = "Qwen/Qwen2.5-7B-Instruct"
-    extractor_llm_api_key: SecretStr = SecretStr("")
-    extractor_llm_base_url: str = ""
 
     summarizer_llm_provider: str = "groq"
     summarizer_llm_model: str = "llama-3.1-8b-instant"
@@ -100,35 +122,24 @@ class Settings(BaseSettings):
     judge_llm_api_key: SecretStr = SecretStr("")
     judge_llm_base_url: str = ""
 
-    deepseek_api_key: SecretStr = SecretStr("")
-    openai_api_key: SecretStr = SecretStr("")
-    openai_base_url: str = "https://api.openai.com/v1"
-    anthropic_api_key: SecretStr = SecretStr("")
-    gemini_api_key: SecretStr = SecretStr("")
-    groq_api_key: SecretStr = SecretStr("")
 
     # ------------------------------------------------------------------
     # LLM Router — per-tier model configuration
     # ------------------------------------------------------------------
     # Each tier maps to a (provider, model) pair.  Falls back to default_llm_provider /
     # default_llm_model when not explicitly set.
-    # llm_small_provider: str = "ollama"        # e.g. "ollama"
-    # llm_small_model: str = "qwen2.5:3b"           # e.g. "qwen2.5:7b"
-    # llm_medium_provider: str = "ollama"       # e.g. "deepseek"
-    # llm_medium_model: str = "qwen2.5:3b"          # e.g. "deepseek-chat"
-    # llm_large_provider: str = "ollama"        # e.g. "openai"
-    # llm_large_model: str = "qwen2.5:3b"           # e.g. "gpt-4o"
-    llm_small_provider: str = "deepseek"  # e.g. "ollama"
-    llm_small_model: str = "deepseek-v4-flash"  # e.g. "qwen2.5:7b"
-    llm_medium_provider: str = "deepseek"  # e.g. "deepseek"
-    llm_medium_model: str = "deepseek-v4-pro"  # e.g. "deepseek-chat"
-    llm_large_provider: str = "openai"  # e.g. "openai"
-    llm_large_model: str = "gpt-5.1"  # e.g. "gpt-4opseek"
-
-    # Model used for community summary generation; defaults to default_llm_model if empty
-    community_summary_llm: str = ""
-    community_min_size: int = 3
-    community_resolution: float = 1.0
+    llm_small_provider: str = "ollama"        # e.g. "ollama"
+    llm_small_model: str = "Qwen3.5:4b"           # e.g. "qwen2.5:7b"
+    llm_medium_provider: str = "ollama"       # e.g. "deepseek"
+    llm_medium_model: str = "Qwen3.5:9b"          # e.g. "deepseek-chat"
+    llm_large_provider: str = "ollama"        # e.g. "openai"
+    llm_large_model: str = "qwen3:14b"           # e.g. "gpt-4o"
+    # llm_small_provider: str = "deepseek"  # e.g. "ollama"
+    # llm_small_model: str = "deepseek-v4-flash"  # e.g. "qwen2.5:7b"
+    # llm_medium_provider: str = "deepseek"  # e.g. "deepseek"
+    # llm_medium_model: str = "deepseek-v4-pro"  # e.g. "deepseek-chat"
+    # llm_large_provider: str = "openai"  # e.g. "openai"
+    # llm_large_model: str = "gpt-5.1"  # e.g. "gpt-4opseek"
 
     # ------------------------------------------------------------------
     # Safety guardrails
@@ -171,7 +182,6 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Pipeline / data ingestion
     # ------------------------------------------------------------------
-    default_domain: str = "t2dm"
     pubmed_max_results: int = 20000
     pubmed_email: str = "user@example.com"
     pubmed_api_key: str = ""
@@ -188,30 +198,32 @@ class Settings(BaseSettings):
     multilingual_retrieval_enabled: bool = True
     multilingual_per_lang_quota: int = 12
 
+
+    # ------------------------------------------------------------------
+    # NER
+    # ------------------------------------------------------------------
     ner_gliner_model: str = "urchade/gliner_mediumv2.1"
     ner_gliner_threshold: float = 0.30  # lowered further
     ner_bert_en_model: str = "d4data/biomedical-ner-all"
-    ner_bert_zh_model: str = (
-        "iioSnail/bert-base-chinese-medical-ner"  # High-quality Chinese medical NER
-    )
-    ner_bert_de_model: str = ""
+    ner_bert_zh_model: str = "Adapting/bert-base-chinese-finetuned-NER-biomedical"
+    ner_bert_de_model: str = "BachelorThesis/GerMedBERT_NER_V01_BRONCO_CARDIO"
     ner_confidence_threshold: float = 0.25
 
     # ------------------------------------------------------------------
-    # Entity Linking (EL)
+    # Entity Linking 
     # ------------------------------------------------------------------
     el_sapbert_model: str = "cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR"
     el_bm25_top_k: int = 50  # BM25 candidate pool size
     el_link_threshold: float = 0.70  # minimum score to accept a CUI match
     el_sapbert_threshold: float = 0.75  # minimum SapBERT cosine to consider confident
     mesh_dir: str = "data/mesh"  # path to MeSH d2024.bin
+    el_translation_file: str = ""  # TSV: <CUI>\t<lang>\t<label>, e.g. data/mesh/mesh_translations.tsv
 
     # ------------------------------------------------------------------
     # Redis — optional cache + task-queue broker
     # ------------------------------------------------------------------
     # Leave unset (or empty) to run without Redis.
     # When set, enables:
-    #   • NER result caching
     #   • Arq task queue for durable build-pipeline execution
     # redis_url: str | None = None
     redis_url: str | None = "redis://localhost:6379/0"

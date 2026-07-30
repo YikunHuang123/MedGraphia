@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-CLI tool: download the Huatuo-Lite (Chinese medical QA) dataset from Hugging Face.
+CLI tool: download the Huatuo-Lite (Chinese medical QA) dataset from Hugging Face. （177703 total
 
 Usage:
-  python scripts/data_fetchers/fetch_chinese_qa.py --limit 20000
+  python scripts/data_fetchers/fetch_chinese_qa.py --limit 177,703
 """
 
 from __future__ import annotations
@@ -42,24 +42,42 @@ def main(limit: int, out: str) -> None:
     out_path.mkdir(parents=True, exist_ok=True)
     target_file = out_path / "huatuo_lite.jsonl"
 
-    click.echo(f"Downloading {DATASET_NAME} from Hugging Face...")
+    # Count already-downloaded records
+    existing_count = 0
+    if target_file.exists():
+        with open(target_file, "r", encoding="utf-8") as f:
+            existing_count = sum(1 for _ in f)
+
+    if existing_count >= limit:
+        click.echo(f"Already have {existing_count} items (>= {limit}), skipping download.")
+        logger.info("huatuo_download_skipped", path=str(target_file), existing=existing_count)
+        return
+
+    if existing_count > 0:
+        click.echo(f"Found {existing_count} existing items, downloading {limit - existing_count} more...")
+    else:
+        click.echo(f"Downloading {DATASET_NAME} from Hugging Face...")
 
     try:
         # Load the dataset (Huatuo26M-Lite usually has a 'train' split)
         dataset = load_dataset(DATASET_NAME, split="train", streaming=True)
 
-        click.echo(f"Exporting top {limit} items to {target_file}...")
+        need = limit - existing_count
+        click.echo(f"Exporting items {existing_count + 1}–{limit} to {target_file}...")
 
         count = 0
-        with open(target_file, "w", encoding="utf-8") as f:
-            for item in dataset:
+        with open(target_file, "a", encoding="utf-8") as f:
+            for i, item in enumerate(dataset):
+                if i < existing_count:
+                    continue  # skip already-saved records
                 f.write(json.dumps(item, ensure_ascii=False) + "\n")
                 count += 1
-                if count >= limit:
+                if count >= need:
                     break
 
-        click.echo(f"Successfully exported {count} items.")
-        logger.info("huatuo_download_complete", path=str(target_file), count=count)
+        total = existing_count + count
+        click.echo(f"Successfully exported {count} new items ({total} total).")
+        logger.info("huatuo_download_complete", path=str(target_file), new=count, total=total)
 
     except Exception as e:
         click.echo(f"Error: {str(e)}")

@@ -122,6 +122,61 @@ async def link_entity_to_chunk(cui: str, entity_type: str, chunk_id: str) -> Non
         await session.run(cypher, cui=cui, chunk_id=chunk_id)
 
 
+async def batch_upsert_entities_and_links(chunks: list[Chunk]) -> None:
+    """
+    High-performance UNWIND batch insertion for Entities and MENTIONED_IN links.
+    Groups entities by their EntityType to process each label dynamically.
+    Reduces N+1 queries from hundreds of thousands down to a few queries per batch.
+    """
+    from collections import defaultdict
+
+    # Group payload by entity type because Neo4j UNWIND doesn't support dynamic labels
+    payload_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    
+    for chunk in chunks:
+        for ent in chunk.entities:
+            # Derive mention surface form from NER span if available.
+            # Stored on the MENTIONED_IN edge so RE training can reconstruct exact
+            # marker positions without re-scanning chunk text.
+            mention_text = ""
+            if ent.start_char is not None and ent.end_char is not None:
+                mention_text = chunk.text[ent.start_char:ent.end_char]
+
+            payload_by_type[ent.entity_type.value].append(
+                {
+                    "cui": ent.cui,
+                    "label": ent.label,
+                    "lang_zh": ent.lang_labels.get("zh", ""),
+                    "lang_de": ent.lang_labels.get("de", ""),
+                    "confidence": ent.confidence,
+                    "chunk_id": chunk.chunk_id,
+                    "mention_text": mention_text,
+                    "start_char": ent.start_char if ent.start_char is not None else -1,
+                    "end_char": ent.end_char if ent.end_char is not None else -1,
+                }
+            )
+
+    async with get_session() as session:
+        for label, payload in payload_by_type.items():
+            if label == "Unknown":
+                continue  # Never persist UNKNOWN entities to the graph
+            cypher = f"""
+            UNWIND $payload AS row
+            MERGE (e:{label} {{cui: row.cui}})
+            SET e.label      = row.label,
+                e.lang_zh    = row.lang_zh,
+                e.lang_de    = row.lang_de,
+                e.confidence = row.confidence
+            WITH e, row
+            MATCH (c:Chunk {{chunk_id: row.chunk_id}})
+            MERGE (e)-[r:MENTIONED_IN]->(c)
+            SET r.mention_text = row.mention_text,
+                r.start_char   = row.start_char,
+                r.end_char     = row.end_char
+            """
+            await session.run(cypher, payload=payload)
+
+
 async def get_all_entities() -> list[dict[str, Any]]:
     """
     Query Neo4j for all entity nodes and return them as plain dicts.
@@ -159,7 +214,7 @@ async def get_all_entities() -> list[dict[str, Any]]:
     return entities
 
 
-async def get_chunks_from_db(limit: int = 5000) -> list[Chunk]:
+async def get_chunks_from_db(limit: int | None = None) -> list[Chunk]:
     """
     Fetch stored chunks and their associated entities from Neo4j.
     Enables resuming the pipeline at the Relation Extraction stage.
@@ -168,11 +223,14 @@ async def get_chunks_from_db(limit: int = 5000) -> list[Chunk]:
 
     cypher = """
     MATCH (c:Chunk)
+    WHERE c.relations_extracted IS NULL
     OPTIONAL MATCH (c)-[:FROM_DOC]->(d:Document)
     OPTIONAL MATCH (e)-[:MENTIONED_IN]->(c)
     RETURN c, d, collect(e) AS entities
-    LIMIT $limit
     """
+    if limit is not None:
+        cypher += " LIMIT $limit"
+        
     chunks: list[Chunk] = []
     async with get_session() as session:
         result = await session.run(cypher, limit=limit)
@@ -226,6 +284,19 @@ async def get_chunks_from_db(limit: int = 5000) -> list[Chunk]:
 
     logger.info("chunks_fetched_from_db", count=len(chunks), with_entities=True)
     return chunks
+
+
+async def mark_chunks_extracted(chunk_ids: list[str]) -> None:
+    """Mark chunks as having their relations extracted to support resuming."""
+    if not chunk_ids:
+        return
+    cypher = """
+    UNWIND $chunk_ids AS cid
+    MATCH (c:Chunk {chunk_id: cid})
+    SET c.relations_extracted = true
+    """
+    async with get_session() as session:
+        await session.run(cypher, chunk_ids=chunk_ids)
 
 
 # ---------------------------------------------------------------------------

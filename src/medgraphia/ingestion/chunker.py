@@ -26,6 +26,29 @@ _DEFAULT_MAX_TOKENS: int = 300  # GLiNER model can only handle 384 tokens max
 _DEFAULT_OVERLAP: int = 50
 
 
+def is_junk_text(text: str) -> bool:
+    """
+    Determine if a chunk of text is considered "junk" (meanlingless sentences) based on length heuristics.
+    """
+    if not text:
+        return True
+
+    # Remove all punctuation, whitespace, and numbers
+    cleaned_text = re.sub(r"[^\w\s]", "", text)
+    cleaned_text = re.sub(r"\s+", "", cleaned_text)
+    cleaned_text = re.sub(r"\d+", "", cleaned_text)
+
+    # Check if text contains Chinese characters
+    has_chinese = bool(re.search(r"[\u4e00-\u9fff]", cleaned_text))
+
+    if has_chinese:
+        # For Chinese, a valid chunk should generally have more than 8 meaningful characters
+        return len(cleaned_text) < 8
+    else:
+        # For English/German, a valid chunk should generally have more than 20 meaningful letters (e.g. 3-4 words)
+        return len(cleaned_text) < 20
+
+
 class MedicalChunker:
     """
     Splits a RawDocument into Chunk objects preserving section_path provenance.
@@ -65,13 +88,19 @@ class MedicalChunker:
             for section_name, text in text_parts:
                 chunks.extend(self._chunk_plain_text(text, doc, section_path=section_name))
 
-        logger.info(
+        logger.debug(
             "chunking_complete",
             doc_id=doc.doc_id,
             sections=len(doc.sections),
             chunks=len(chunks),
         )
-        return chunks
+
+        # Filter out junk chunks
+        valid_chunks = [c for c in chunks if not is_junk_text(c.text)]
+        if len(chunks) - len(valid_chunks) > 0:
+            logger.debug("dropped_junk_chunks", count=len(chunks) - len(valid_chunks))
+
+        return valid_chunks
 
     # ------------------------------------------------------------------
     # Section-based chunking

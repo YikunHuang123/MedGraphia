@@ -4,11 +4,16 @@ Master pipeline script: orchestrates the full offline knowledge-graph build.
 All logic resides in src/medgraphia/ingestion/pipeline.py.
 """
 
-# python scripts/pipeline/build_graph.py --domain t2dm --pubmed-limit 5
+# python scripts/pipeline/build_graph.py
 
-# python scripts/pipeline/build_graph.py --skip-fetch --skip-parse --skip-chunk --skip-ner --skip-link --skip-extract --skip-community
+# Direction-scoped build (Tier 1): fetch a domain online, merge with data/raw
+# python scripts/pipeline/build_graph.py --domain t2dm --pubmed-limit 200
 
-# python scripts/pipeline/build_graph.py --skip-fetch --skip-parse --skip-chunk --skip-ner --skip-link --include-drugbank
+# Start from NER
+# python scripts/pipeline/build_graph.py --skip-load --skip-parse --skip-chunk
+
+# Skip expensive AI embedding and community detection for a quick test:
+# python scripts/pipeline/build_graph.py --skip-embed --skip-community
 
 from __future__ import annotations
 
@@ -26,14 +31,15 @@ from medgraphia.logger import configure_logging
 
 
 @click.command()
-@click.option("--domain", default=None, help="Domain key (t2dm, cardiovascular...)")
-@click.option("--pubmed-query", default=None, help="Custom PubMed query")
+@click.option("--domain", default=None, help="Direction to fetch online (e.g. t2dm, or free text)")
+@click.option("--pubmed-query", default=None, help="Custom PubMed query (overrides --domain)")
 @click.option("--pubmed-limit", default=200, show_default=True)
 @click.option("--drug-limit", default=30, show_default=True)
 @click.option("--include-ema-smpc", is_flag=True, help="Include local EMA SmPC PDFs")
 @click.option("--include-drugbank", is_flag=True, help="Include DrugBank XML")
 @click.option("--drugbank-xml", default=None, type=click.Path(), help="Path to DrugBank XML")
-@click.option("--skip-fetch", is_flag=True)
+@click.option("--skip-fetch", is_flag=True, help="Skip the direction-scoped online fetch stage")
+@click.option("--skip-load", is_flag=True, help="Skip loading local data from data/raw")
 @click.option("--skip-parse", is_flag=True)
 @click.option("--skip-chunk", is_flag=True)
 @click.option("--skip-ner", is_flag=True)
@@ -41,21 +47,17 @@ from medgraphia.logger import configure_logging
 @click.option("--skip-extract", is_flag=True)
 @click.option("--skip-embed", is_flag=True)
 @click.option("--skip-community", is_flag=True)
+@click.option("--recovery-limit", type=int, default=None, help="Max chunks to load when recovering from DB (default: all)")
 def main(**kwargs: object) -> None:
     """Run the knowledge graph build pipeline."""
     cfg = get_settings()
     configure_logging(cfg.log_level)
 
-    # 1. Map CLI arguments to BuildConfig
-    # We strip 'domain' if it's None to use the default from settings
-    if kwargs.get("domain") is None:
-        kwargs["domain"] = cfg.default_domain
-
     build_cfg = BuildConfig(**kwargs)  # type: ignore[arg-type]
 
     click.echo(f"\n{'=' * 60}")
     click.echo("  MedGraphia — Build Graph Pipeline")
-    click.echo(f"  Domain:  {build_cfg.domain}")
+    click.echo(f"  Scope: {build_cfg.domain or 'Global'}")
     click.echo(f"{'=' * 60}\n")
 
     # 2. Delegate to business layer

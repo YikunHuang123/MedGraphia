@@ -37,6 +37,23 @@ class PubMedFetchConfig:
     batch_size: int = 100  # eFetch batch size (NCBI limit: 10 000)
 
 
+def _split_date_range(start: date, end: date) -> list[tuple[date, date]]:
+    from datetime import timedelta
+    ranges = []
+    curr = start
+    while curr <= end:
+        if curr.month == 12:
+            next_month = date(curr.year + 1, 1, 1)
+        else:
+            next_month = date(curr.year, curr.month + 1, 1)
+        last_day = next_month - timedelta(days=1)
+        if last_day > end:
+            last_day = end
+        ranges.append((curr, last_day))
+        curr = next_month
+    return ranges
+
+
 class PubMedConnector:
     """Fetches PubMed abstracts via NCBI E-utilities (authorized, rate-limited)."""
 
@@ -63,6 +80,41 @@ class PubMedConnector:
 
     async def fetch(self, config: PubMedFetchConfig) -> list[RawDocument]:
         """Download up to config.max_results abstracts matching the query."""
+        if config.max_results > 9999:
+            if not config.date_from or not config.date_to:
+                raise ValueError(
+                    "To fetch more than 9999 results from PubMed, you must specify a date range "
+                    "(using --from and --to) so the query can be automatically partitioned by month. "
+                    "NCBI E-utilities enforces a strict limit of 9999 results for a single search query."
+                )
+
+            # Split date range and fetch month-by-month
+            ranges = _split_date_range(config.date_from, config.date_to)
+            logger.info("pubmed_split_fetch_start", query=config.query, total_months=len(ranges))
+            docs: list[RawDocument] = []
+
+            for start_d, end_d in ranges:
+                if len(docs) >= config.max_results:
+                    break
+                sub_config = PubMedFetchConfig(
+                    query=config.query,
+                    max_results=config.max_results - len(docs),
+                    date_from=start_d,
+                    date_to=end_d,
+                    min_citations=config.min_citations,
+                    rettype=config.rettype,
+                    batch_size=config.batch_size,
+                )
+                logger.info("pubmed_month_fetch", start=str(start_d), end=str(end_d))
+                month_docs = await self._fetch_single_range(sub_config)
+                docs.extend(month_docs)
+
+            logger.info("pubmed_split_fetch_complete", total=len(docs))
+            return docs[:config.max_results]
+        else:
+            return await self._fetch_single_range(config)
+
+    async def _fetch_single_range(self, config: PubMedFetchConfig) -> list[RawDocument]:
         pmids = await self._search(config)
         if not pmids:
             logger.info("pubmed_no_results", query=config.query)
@@ -84,6 +136,36 @@ class PubMedConnector:
 
     async def stream(self, config: PubMedFetchConfig) -> AsyncIterator[RawDocument]:
         """Yield documents one by one — memory-efficient for large corpora."""
+        if config.max_results > 9999:
+            if not config.date_from or not config.date_to:
+                raise ValueError(
+                    "To stream more than 9999 results from PubMed, you must specify a date range "
+                    "(using --from and --to) so the query can be automatically partitioned by month."
+                )
+            ranges = _split_date_range(config.date_from, config.date_to)
+            yielded = 0
+            for start_d, end_d in ranges:
+                if yielded >= config.max_results:
+                    break
+                sub_config = PubMedFetchConfig(
+                    query=config.query,
+                    max_results=config.max_results - yielded,
+                    date_from=start_d,
+                    date_to=end_d,
+                    min_citations=config.min_citations,
+                    rettype=config.rettype,
+                    batch_size=config.batch_size,
+                )
+                async for doc in self._stream_single_range(sub_config):
+                    yield doc
+                    yielded += 1
+                    if yielded >= config.max_results:
+                        break
+        else:
+            async for doc in self._stream_single_range(config):
+                yield doc
+
+    async def _stream_single_range(self, config: PubMedFetchConfig) -> AsyncIterator[RawDocument]:
         pmids = await self._search(config)
         for i in range(0, len(pmids), config.batch_size):
             batch = pmids[i : i + config.batch_size]
@@ -97,29 +179,52 @@ class PubMedConnector:
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
     async def _search(self, config: PubMedFetchConfig) -> list[str]:
-        """Run esearch and return a list of PubMed IDs."""
-        params: dict[str, str | int] = {
-            "db": "pubmed",
-            "term": config.query,
-            "retmax": config.max_results,
-            "retmode": "json",
-            "email": self._email,
-            "sort": "relevance",
-        }
-        if self._api_key:
-            params["api_key"] = self._api_key
-        if config.date_from:
-            params["mindate"] = config.date_from.strftime("%Y/%m/%d")
-        if config.date_to:
-            params["maxdate"] = config.date_to.strftime("%Y/%m/%d")
-            params["datetype"] = "pdat"
+        """Run esearch and return a list of PubMed IDs (paginated if max_results > 9999)."""
+        all_ids: list[str] = []
+        retstart = 0
+        limit = config.max_results
 
-        assert self._session is not None
-        async with self._session.get(f"{_BASE_URL}/esearch.fcgi", params=params) as resp:
-            resp.raise_for_status()
-            data = await resp.json()
+        while retstart < limit:
+            retmax = min(9999, limit - retstart)
+            params: dict[str, str | int] = {
+                "db": "pubmed",
+                "term": config.query,
+                "retmax": retmax,
+                "retstart": retstart,
+                "retmode": "json",
+                "email": self._email,
+                "sort": "relevance",
+            }
+            if self._api_key:
+                params["api_key"] = self._api_key
+            if config.date_from:
+                params["mindate"] = config.date_from.strftime("%Y/%m/%d")
+            if config.date_to:
+                params["maxdate"] = config.date_to.strftime("%Y/%m/%d")
+                params["datetype"] = "pdat"
 
-        return data.get("esearchresult", {}).get("idlist", [])
+            assert self._session is not None
+            async with self._session.get(f"{_BASE_URL}/esearch.fcgi", params=params) as resp:
+                resp.raise_for_status()
+                try:
+                    import json
+                    data = await resp.json(loads=lambda s: json.loads(s, strict=False))
+                except Exception as exc:
+                    body = await resp.text()
+                    logger.error("pubmed_search_json_error", body=body[:500], error=str(exc))
+                    raise ValueError(f"Failed to parse JSON response from PubMed. Body: {body[:500]}") from exc
+
+            ids = data.get("esearchresult", {}).get("idlist", [])
+            if not ids:
+                break
+            all_ids.extend(ids)
+            if len(ids) < retmax:
+                break
+            retstart += len(ids)
+            # Sleep slightly between requests to respect rate limits
+            await asyncio.sleep(0.12 if self._api_key else 0.4)
+
+        return all_ids
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
     async def _fetch_batch(self, pmids: list[str]) -> list[RawDocument]:

@@ -226,13 +226,10 @@ class GenerationPipeline:
                     if missing:
                         ans_text += " " + "".join([f"[{c}]" for c in missing])
 
-                # Stream the answer character by character (or chunk) to satisfy UI expectations
-                # In a real high-perf scenario, we'd use dspy's underlying LM for true streaming
-                # but to guarantee Compiled Rigor, we follow the compiled path.
                 chunk_size = 4
                 for i in range(0, len(ans_text), chunk_size):
                     yield ans_text[i : i + chunk_size]
-                    await asyncio.sleep(0.01)  # Small delay for UI feel
+                    await asyncio.sleep(0.01)
 
         except Exception as exc:
             logger.error("stream_generation_failed", error=str(exc))

@@ -14,13 +14,13 @@ from medgraphia.domain import EntityType
 class MentionSpan:
     """An entity mention span extracted from text by an NER model."""
 
-    text: str  # Surface form (exact text from source)
+    text: str  # Surface form
     normalized: str  # Lower-stripped form used for deduplication / BM25 query
     start: int  # Inclusive char offset in source text
     end: int  # Exclusive char offset
     entity_type: EntityType
     confidence: float = 1.0
-    source: str = "unknown"  # "gliner" | "bert" | "regex"
+    source: str = "unknown"  # "gliner" | "bert"
 
     # ------------------------------------------------------------------
     # Factories

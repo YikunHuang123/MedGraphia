@@ -18,6 +18,8 @@ class Entity(BaseModel):
     )  # {"zh": "心肌梗死", "de": "Myokardinfarkt"}
     source_ids: list[str] = Field(default_factory=list)
     confidence: float = 1.0
+    start_char: int | None = None
+    end_char: int | None = None
 
 
 class Relation(BaseModel):

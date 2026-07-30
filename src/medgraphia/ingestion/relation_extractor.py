@@ -30,8 +30,9 @@ class RelationExtractor:
         """
         Extract relations from a single chunk using DSPy.
         """
-        linked = [e for e in chunk.entities if not e.cui.startswith("MENTION:")]
-        if len(linked) < 2:
+        # to allow relation extraction on novel/unlinked concepts.
+        entities = chunk.entities
+        if len(entities) < 2:
             return []
 
         import dspy
@@ -43,7 +44,7 @@ class RelationExtractor:
 
         # Prepare labels/types context
         entity_info = "\n".join(
-            [f"- {e.label} (CUI: {e.cui}, Type: {e.entity_type.value})" for e in linked]
+            [f"- {e.label} (CUI: {e.cui}, Type: {e.entity_type.value})" for e in entities]
         )
         allowed_relations = ", ".join([rt.value for rt in RelationType])
 
@@ -51,7 +52,10 @@ class RelationExtractor:
             with dspy.context(lm=lm):
                 # Use the centralized extractor program (supports compiled few-shots)
                 program = get_extractor()
-                prediction = program(
+                
+                # Use dspy.asyncify to safely offload to a thread while preserving dspy.context(lm=lm).
+                async_program = dspy.asyncify(program)
+                prediction = await async_program(
                     text_content=chunk.text,
                     entities=entity_info,
                     allowed_relations=allowed_relations,
@@ -112,9 +116,12 @@ class RelationExtractor:
             return
         try:
             from medgraphia.graph.queries import create_relation
+            import asyncio
 
-            for rel in relations:
-                await create_relation(rel)
+            # Concurrently write relations to avoid sequential N+1 network delay
+            tasks = [create_relation(rel) for rel in relations]
+            await asyncio.gather(*tasks)
+            
             logger.info("re_neo4j_written", count=len(relations))
         except Exception as exc:
             logger.warning("re_neo4j_write_failed", count=len(relations), error=str(exc))
@@ -124,7 +131,9 @@ class RelationExtractor:
         from medgraphia.config import get_settings
 
         cfg = get_settings()
+        provider = cfg.extractor_llm_provider or cfg.default_llm_provider
+        model = cfg.extractor_llm_model or cfg.default_llm_model
         return cls(
             min_confidence=0.50,
-            extracted_by=f"{cfg.default_llm_provider}/{cfg.default_llm_model}",
+            extracted_by=f"{provider}/{model}",
         )

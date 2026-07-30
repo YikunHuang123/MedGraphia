@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 .DS_Store
+.idea/
 
 medgraphia.egg-info/
 
@@ -19,3 +20,8 @@ data/processed/*
 
 ./eval_output.log
 ./eval_results.csv
+
+.claude/
+.agent/
+
+Readme_ZH.md

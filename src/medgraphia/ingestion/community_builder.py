@@ -52,10 +52,11 @@ class CommunityBuilder:
             communities=len(partition),
         )
 
-        communities: list[Community] = []
-        for member_cuis in partition:
+        import asyncio
+
+        async def process_community(member_cuis: set[str]) -> Community | None:
             if len(member_cuis) < self._min_size:
-                continue
+                return None
 
             subgraph_relations = [
                 r for r in relations if r.source_cui in member_cuis and r.target_cui in member_cuis
@@ -64,15 +65,16 @@ class CommunityBuilder:
             summary_text = await self._summarise(member_cuis, subgraph_relations, entity_map)
 
             comm_id = _stable_community_id(member_cuis)
-            communities.append(
-                Community(
-                    community_id=comm_id,
-                    members=list(member_cuis),
-                    summary=summary_text,
-                    level=0,
-                )
+            return Community(
+                community_id=comm_id,
+                members=list(member_cuis),
+                summary=summary_text,
+                level=0,
             )
-        return communities
+
+        tasks = [process_community(p) for p in partition]
+        results = await asyncio.gather(*tasks)
+        return [c for c in results if c is not None]
 
     def _partition(self, graph: nx.Graph) -> list[set[str]]:
         if HAS_LEIDEN:
@@ -83,14 +85,15 @@ class CommunityBuilder:
                 part = leidenalg.find_partition(
                     g_ig,
                     leidenalg.RBConfigurationVertexPartition,
+                    weights="weight",
                     resolution_parameter=self._resolution,
                 )
-                return [set(graph.nodes)[set(p)] for p in part if p]
+                return [{g_ig.vs[v]["_nx_name"] for v in p} for p in part if p]
             except Exception:
                 pass
         from networkx.algorithms.community import louvain_communities
 
-        return louvain_communities(graph, resolution=self._resolution)
+        return louvain_communities(graph, weight="weight", resolution=self._resolution)
 
     async def _summarise(
         self, member_cuis: set[str], relations: list[Relation], entity_map: dict[str, Entity]
@@ -110,7 +113,7 @@ class CommunityBuilder:
             with dspy.context(lm=lm):
                 # Use the centralized summarizer program (supports compiled few-shots)
                 program = get_summarizer()
-                prediction = program(concepts=concept_lines, relations=relation_lines)
+                prediction = await dspy.asyncify(program)(concepts=concept_lines, relations=relation_lines)
             data = prediction.result
             return f"{data.summary} {data.explanation} {data.clinical_relevance}"
         except Exception as exc:
@@ -147,6 +150,7 @@ def _build_graph(relations: list[Relation]) -> nx.Graph:
             rel.source_cui,
             rel.target_cui,
             relation_type=rel.relation_type.value,
+            weight=rel.confidence,
             confidence=rel.confidence,
         )
     return graph

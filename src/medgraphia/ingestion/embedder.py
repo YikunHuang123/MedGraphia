@@ -20,6 +20,7 @@ Typical usage (entity embedding)::
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 
@@ -117,7 +118,7 @@ class MedicalEmbedder:
         self._model = BGEM3FlagModel(self._model_name, **kwargs)
         logger.info("embedder_loaded", model=self._model_name)
 
-    def embed_texts(
+    async def embed_texts(
         self,
         texts: list[str],
     ) -> tuple[list[list[float]], list[dict[int, float]]]:
@@ -136,7 +137,8 @@ class MedicalEmbedder:
         with tqdm(total=len(texts), desc="Embedding chunks", unit="chk", leave=False) as pbar:
             for start in range(0, len(texts), self._batch_size):
                 batch = texts[start : start + self._batch_size]
-                output = self._model.encode(
+                output = await asyncio.to_thread(
+                    self._model.encode,
                     batch,
                     batch_size=len(batch),
                     max_length=512,
@@ -151,7 +153,7 @@ class MedicalEmbedder:
 
         return dense_vecs, sparse_vecs
 
-    def embed_chunks(self, chunks: list[Chunk]) -> list[Chunk]:
+    async def embed_chunks(self, chunks: list[Chunk]) -> list[Chunk]:
         """
         Embed all chunks in batch.
         Returns new Chunk objects with .embedding and .sparse_embedding set.
@@ -162,7 +164,7 @@ class MedicalEmbedder:
 
         # Do not catch exceptions here; let them bubble up to the pipeline
         # so the user knows WHY it failed (e.g., OOM or missing dependency).
-        dense_vecs, sparse_vecs = self.embed_texts([c.text for c in chunks])
+        dense_vecs, sparse_vecs = await self.embed_texts([c.text for c in chunks])
 
         result = [
             chunk.model_copy(update={"embedding": d, "sparse_embedding": s})
@@ -270,8 +272,11 @@ class EntityEmbedder:
                 batch = entities[start : start + self._batch_size]
                 labels = [e["label"] for e in batch]
 
-                embeddings = self._model.encode(
-                    labels, normalize_embeddings=True, show_progress_bar=False
+                embeddings = await asyncio.to_thread(
+                    self._model.encode,
+                    labels, 
+                    normalize_embeddings=True, 
+                    show_progress_bar=False
                 )
 
                 entity_points = [
@@ -310,7 +315,7 @@ def _sparse_to_int_keys(lexical_weights: dict) -> dict[int, float]:
         w = float(weight)
         if w <= 0:
             continue
-        token_id = token if isinstance(token, int) else abs(hash(str(token))) % (2**31)
+        token_id = int(token)
         if token_id not in result or result[token_id] < w:
             result[token_id] = w
     return result

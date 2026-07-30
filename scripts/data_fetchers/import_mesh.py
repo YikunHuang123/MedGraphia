@@ -4,7 +4,7 @@ CLI tool: download MeSH data and import into Neo4j.
 Replaces the old UMLS-based import logic with a fully automated, open-source flow.
 
 Usage:
-  python scripts/import_mesh.py --limit 10000
+  python scripts/import_mesh.py
 """
 
 from __future__ import annotations

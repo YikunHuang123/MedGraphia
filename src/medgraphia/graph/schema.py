@@ -67,6 +67,10 @@ _CONSTRAINTS: list[tuple[str, str]] = [
         "unique_procedure_cui",
         "CREATE CONSTRAINT unique_procedure_cui IF NOT EXISTS FOR (n:Procedure) REQUIRE n.cui IS UNIQUE",
     ),
+    (
+        "unique_unknown_cui",
+        "CREATE CONSTRAINT unique_unknown_cui IF NOT EXISTS FOR (n:Unknown) REQUIRE n.cui IS UNIQUE",
+    ),
     # Chunk and Document use UUID-based IDs
     (
         "unique_chunk_id",
@@ -152,6 +156,18 @@ _INDEXES: list[tuple[str, str]] = [
     (
         "idx_proc_de",
         "CREATE INDEX idx_proc_de       IF NOT EXISTS FOR (n:Procedure) ON (n.lang_de)",
+    ),
+    (
+        "idx_unknown_label",
+        "CREATE INDEX idx_unknown_label IF NOT EXISTS FOR (n:Unknown)   ON (n.label)",
+    ),
+    (
+        "idx_unknown_zh",
+        "CREATE INDEX idx_unknown_zh    IF NOT EXISTS FOR (n:Unknown)   ON (n.lang_zh)",
+    ),
+    (
+        "idx_unknown_de",
+        "CREATE INDEX idx_unknown_de    IF NOT EXISTS FOR (n:Unknown)   ON (n.lang_de)",
     ),
     (
         "idx_chunk_section",

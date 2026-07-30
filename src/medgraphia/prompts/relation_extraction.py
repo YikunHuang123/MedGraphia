@@ -24,10 +24,15 @@ class ExtractMedicalRelations(dspy.Signature):
     """You are a medical knowledge graph expert specialising in pharmacology and clinical medicine.
     Your task is to extract semantic relations between pairs of medical entities from the provided text.
     ONLY include relations explicitly supported by the text.
-    NO SELF-LOOPS: source_cui must not equal target_cui."""
+    NO SELF-LOOPS: source_cui must not equal target_cui.
+    You MUST output a JSON object starting with the { character. Your JSON object must contain a key named 'relations' which holds the array. NEVER start your output with [. Do NOT include introductory text.
+    """
+
+
+
 
     text_content: str = dspy.InputField(desc="Raw medical text to analyze")
     entities: str = dspy.InputField(desc="Identified entities with CUIs and types")
     allowed_relations: str = dspy.InputField(desc="Comma-separated list of allowed relation types")
 
-    relations: list[ExtractedRelation] = dspy.OutputField(desc="JSON list of extracted relations")
+    relations: str = dspy.OutputField(desc="Output ONLY a raw JSON string of a list of relations. Example: [{'source_cui': 'D123', 'target_cui': 'D456', 'relation_type': 'TREATS', 'evidence_text': '...', 'confidence': 0.9}]")

@@ -15,6 +15,8 @@ Deduplication rule when spans from both stages overlap:
 
 from __future__ import annotations
 
+import re
+
 from medgraphia.domain import Chunk, Entity, EntityType, Language
 from medgraphia.ingestion.ner._types import MentionSpan
 from medgraphia.ingestion.ner.bert_ner import BertNER
@@ -25,6 +27,44 @@ logger = get_logger(__name__)
 
 # Provisional CUI prefix — replaced by entity_linker with real UMLS CUIs
 _MENTION_PREFIX = "MENTION:"
+
+# ---------------------------------------------------------------------------
+# Span validity filter
+# ---------------------------------------------------------------------------
+
+_RE_PURE_NUMBER = re.compile(r"^\d+(\.\d+)?$")
+_RE_DOSAGE = re.compile(r"^\d+[\s]?(mg|ml|g|kg|ug|mcg|mmol|ng|iu|u|%)\b", re.IGNORECASE)
+# Pure punctuation / symbols (no CJK, no ASCII word chars)
+_RE_PURE_PUNCT = re.compile(r"^[^\w一-鿿]+$")
+# Characters that are never valid entity-start markers (added ‘)’ for truncated spans like ‘) and’)
+_INVALID_START = frozenset("()'\"\u201c\u201d\u2018\u2019`-+,;./\\")
+
+
+def _is_valid_span(span: MentionSpan) -> bool:
+    """Return False for spans that are structural noise and should never be linked.
+
+    Filters:
+    - length < 2 after stripping
+    - pure numbers (dosage fragments like "500", "19")
+    - pure punctuation / symbols
+    - starts with characters that mark parenthetical/quote/operator fragments:
+        ( ' " " ' ` - + , ; . / \\
+    - ends with a sentence-boundary punctuation that indicates a truncated span
+    """
+    text = span.text.strip()
+    if len(text) < 2:
+        return False
+    if _RE_PURE_NUMBER.match(text):
+        return False
+    if _RE_DOSAGE.match(text):
+        return False
+    if _RE_PURE_PUNCT.match(text):
+        return False
+    if text[0] in _INVALID_START:
+        return False
+    if text[-1] in (',', ';'):
+        return False
+    return True
 
 
 class MedicalNERPipeline:
@@ -69,19 +109,59 @@ class MedicalNERPipeline:
         spans = self._run(chunk.text, chunk.language)
         entities = self._spans_to_entities(spans, chunk)
 
-        if entities:
-            logger.info(
-                "ner_chunk_done",
-                chunk_id=chunk.chunk_id,
-                lang=chunk.language.value,
-                entities=len(entities),
-            )
+        # if entities:
+        #     logger.info(
+        #         "ner_chunk_done",
+        #         chunk_id=chunk.chunk_id,
+        #         lang=chunk.language.value,
+        #         entities=len(entities),
+        #     )
 
         return chunk.model_copy(update={"entities": entities})
 
     def extract_batch(self, chunks: list[Chunk]) -> list[Chunk]:
-        """Process a list of chunks.  Returns new chunks with entities populated."""
-        return [self.extract(c) for c in chunks]
+        """
+        Batch NER across all chunks, grouped by language for efficient GPU inference.
+        GLiNER and BERT each make one forward pass per language group instead of
+        one pass per chunk.
+        """
+        if not chunks:
+            return chunks
+
+        # Group chunk indices by language so each batch uses a consistent label set
+        by_lang: dict[Language, list[int]] = {}
+        for i, chunk in enumerate(chunks):
+            if chunk.text.strip():
+                by_lang.setdefault(chunk.language, []).append(i)
+
+        results: list[Chunk] = list(chunks)
+
+        for language, indices in by_lang.items():
+            texts = [chunks[i].text for i in indices]
+            gliner_spans_list = self._gliner.predict_batch(texts, language)
+            bert_spans_list = self._bert.predict_batch(texts, language)
+
+            for j, orig_idx in enumerate(indices):
+                chunk = chunks[orig_idx]
+                combined = _merge_spans(gliner_spans_list[j], bert_spans_list[j])
+                final = self._merge_adjacent_spans(combined, chunk.text)
+                filtered = [
+                    s for s in final
+                    if s.confidence >= self._min_confidence and _is_valid_span(s)
+                ]
+                entities = self._spans_to_entities(filtered, chunk)
+
+                # if entities:
+                #     logger.info(
+                #         "ner_chunk_done",
+                #         chunk_id=chunk.chunk_id,
+                #         lang=chunk.language.value,
+                #         entities=len(entities),
+                #     )
+
+                results[orig_idx] = chunk.model_copy(update={"entities": entities})
+
+        return results
 
     # ------------------------------------------------------------------
     # Internal
@@ -95,12 +175,15 @@ class MedicalNERPipeline:
         combined = _merge_spans(gliner_spans, bert_spans)
 
         # Final pass: merge adjacent fragments (handle subword splitting)
-        final_merged = self._merge_adjacent_spans(combined)
+        final_merged = self._merge_adjacent_spans(combined, text)
 
-        filtered = [s for s in final_merged if s.confidence >= self._min_confidence]
+        filtered = [
+            s for s in final_merged
+            if s.confidence >= self._min_confidence and _is_valid_span(s)
+        ]
         return filtered
 
-    def _merge_adjacent_spans(self, spans: list[MentionSpan]) -> list[MentionSpan]:
+    def _merge_adjacent_spans(self, spans: list[MentionSpan], original_text: str) -> list[MentionSpan]:
         if not spans:
             return []
         # Sort by start offset
@@ -111,8 +194,8 @@ class MedicalNERPipeline:
         for next_span in sorted_spans[1:]:
             # If spans are of same type and very close (0 or 1 char gap)
             if next_span.entity_type == current.entity_type and next_span.start <= current.end + 1:
-                # Merge them
-                new_text = current.text + next_span.text
+                # Merge them using the original text to preserve spaces/hyphens
+                new_text = original_text[current.start : next_span.end]
                 current = MentionSpan.from_text(
                     text=new_text,
                     start=current.start,
@@ -135,21 +218,26 @@ class MedicalNERPipeline:
         if the same surface form appears multiple times, the highest-confidence
         instance is kept.
         """
-        seen: dict[tuple[str, EntityType], float] = {}  # key → best confidence
+        seen: set[tuple[str, EntityType]] = set()
         result: list[Entity] = []
 
-        for span in spans:
-            key = (span.normalized, span.entity_type)
-            if key in seen and seen[key] >= span.confidence:
-                continue
-            seen[key] = span.confidence
+        # Sort spans descending by confidence so we process the best ones first
+        spans_sorted = sorted(spans, key=lambda s: s.confidence, reverse=True)
 
-            # Build a provisional CUI that entity_linker.py will replace
-            prov_cui = f"{_MENTION_PREFIX}{span.normalized}"
+        for span in spans_sorted:
+            key = (span.normalized, span.entity_type)
+            if key in seen:
+                continue
+            seen.add(key)
 
             # Ensure the entity_type matches the domain's expected string case
             # (e.g., "drug" -> "Drug")
             etype = span.entity_type
+
+            # Build a provisional CUI that entity_linker.py will replace
+            # CRITICAL: Scope by entity_type to prevent Graph DB node collisions
+            # (e.g., "cold" as Disease vs "cold" as Symptom)
+            prov_cui = f"{_MENTION_PREFIX}{etype.value}:{span.normalized}"
 
             result.append(
                 Entity(
@@ -158,6 +246,8 @@ class MedicalNERPipeline:
                     entity_type=etype,
                     confidence=span.confidence,
                     source_ids=[chunk.source.source_id],
+                    start_char=span.start,
+                    end_char=span.end,
                 )
             )
 
@@ -182,8 +272,8 @@ def _merge_spans(
     if not all_spans:
         return []
 
-    # Sort by (start, -confidence) so higher-confidence comes first for same start
-    all_spans.sort(key=lambda s: (s.start, -s.confidence))
+    # Sort by (-confidence, start) so the globally highest-confidence span comes first
+    all_spans.sort(key=lambda s: (-s.confidence, s.start))
 
     kept: list[MentionSpan] = []
     for candidate in all_spans:

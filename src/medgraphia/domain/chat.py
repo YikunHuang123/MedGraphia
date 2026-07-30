@@ -39,7 +39,7 @@ class Session(BaseModel):
     session_id: str = Field(default_factory=lambda: str(uuid4()))
     user_id: str = "anonymous"
     language: Language = Language.EN
-    domain: str = ""
-    messages: list[Message] = Field(default_factory=list)
+    title: str = "New Session"
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    messages: list[Message] = Field(default_factory=list)

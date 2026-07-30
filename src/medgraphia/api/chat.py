@@ -166,7 +166,6 @@ async def chat(
         input=body.message,
         metadata={
             "language": language.value,
-            "domain": body.domain or "",
             "request_id": request_id,
         },
         tags=["sync"],

@@ -66,7 +66,8 @@ _EN_FREQ_RULES: list[_FreqRule] = [
     *_compile_freq(
         FHIR_BID,
         [
-            r"\b(?:twice|[22])\s+(?:a\s+)?(?:day|daily)\b",
+            r"\b(?:twice|two\s+times?|2\s+times?)\s+(?:a\s+)?(?:day|daily)\b",
+            r"\b2\s+(?:a\s+day|daily)\b",
             r"\b2\s*[×xX]\s*(?:daily|(?:a\s+)?day)\b",
             r"\bq\.?12\.?h(?:rs?|ours?)?\b",
             r"\bevery\s+12\s*h(?:rs?|ours?)?\b",
@@ -77,7 +78,8 @@ _EN_FREQ_RULES: list[_FreqRule] = [
     *_compile_freq(
         FHIR_TID,
         [
-            r"\b(?:three|[33])\s+times\s+(?:a\s+)?(?:day|daily)\b",
+            r"\b(?:three|3\s+times?)\s+(?:a\s+)?(?:day|daily)\b",
+            r"\b3\s+(?:a\s+day|daily)\b",
             r"\b3\s*[×xX]\s*(?:daily|(?:a\s+)?day)\b",
             r"\bq\.?8\.?h(?:rs?|ours?)?\b",
             r"\bevery\s+8\s*h(?:rs?|ours?)?\b",
@@ -88,7 +90,8 @@ _EN_FREQ_RULES: list[_FreqRule] = [
     *_compile_freq(
         FHIR_QID,
         [
-            r"\b(?:four|[44])\s+times\s+(?:a\s+)?(?:day|daily)\b",
+            r"\b(?:four|4\s+times?)\s+(?:a\s+)?(?:day|daily)\b",
+            r"\b4\s+(?:a\s+day|daily)\b",
             r"\b4\s*[×xX]\s*(?:daily|(?:a\s+)?day)\b",
             r"\bq\.?6\.?h(?:rs?|ours?)?\b",
             r"\bevery\s+6\s*h(?:rs?|ours?)?\b",
@@ -99,7 +102,8 @@ _EN_FREQ_RULES: list[_FreqRule] = [
     *_compile_freq(
         FHIR_QD,
         [
-            r"\b(?:once|[11])\s+(?:a\s+)?(?:day|daily)\b",
+            r"\b(?:once|one\s+time|1\s+time)\s+(?:a\s+)?(?:day|daily)\b",
+            r"\b1\s+(?:a\s+day|daily)\b",
             r"\b1\s*[×xX]\s*(?:daily|(?:a\s+)?day)\b",
             r"\bq\.?(?:1d|24\.?h)(?:rs?|ours?)?\b",
             r"\bq\.?d\.?\b",
@@ -108,9 +112,8 @@ _EN_FREQ_RULES: list[_FreqRule] = [
             r"\bdaily\b",
         ],
     ),
-    # Flex qXh (q4h, q6h, etc.)
+    # Flex qXh (q4h only; every-6h / q6h are already mapped to qid above)
     *_compile_freq("q4h", [r"\bevery\s+4\s*h(?:rs?|ours?)?\b", r"\bq\.?4\.?h\b"]),
-    *_compile_freq("q6h", [r"\bevery\s+6\s*h(?:rs?|ours?)?\b", r"\bq\.?6\.?h\b"]),
     # prn (as needed)
     *_compile_freq(FHIR_PRN, [r"\bas\s+needed\b", r"\bp\.?r\.?n\.?\b", r"\bwhen\s+required\b"]),
     # qhs (at bedtime / hora somni)
@@ -131,7 +134,6 @@ _DE_FREQ_RULES: list[_FreqRule] = [
             r"\b2\s*(?:mal|×|x)\s+(?:pro\s+)?Tag\b",
             r"\bjeden\s+12\.\s*Stunden?\b",
             r"\balle\s+12\s*Stunden?\b",
-            r"\bbis\s+die\b",
         ],
     ),
     *_compile_freq(
@@ -230,7 +232,7 @@ _DOSAGE_UNIT_PATTERN = re.compile(
     r"|units?|U\b"
     r"|nanograms?|ng|纳克"
     r"|percent|%"
-    r")",
+    r")(?![a-zA-Z])",
     re.IGNORECASE,
 )
 
@@ -265,12 +267,17 @@ _UNIT_MAP: dict[str, str] = {
     "nanograms": "ng",
     "nanogram": "ng",
     "纳克": "ng",
+    "iu": "IU",
+    "u": "U",
+    "gr": "g",
+    "l": "L",
+    "ml": "mL",
 }
 
 
 def _normalise_unit(raw: str) -> str:
     """Return the canonical unit string for a raw dosage unit."""
-    return _UNIT_MAP.get(raw.lower(), raw.lower() if raw not in ("IU", "mL", "U") else raw)
+    return _UNIT_MAP.get(raw.lower(), raw.lower())
 
 
 def _normalise_dosage_units(text: str) -> str:
