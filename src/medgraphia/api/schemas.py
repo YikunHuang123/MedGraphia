@@ -20,7 +20,6 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4096)
     session_id: str | None = None
     language: Language = Language.EN
-    domain: str | None = None
     stream: bool = False
 
 
@@ -67,7 +66,9 @@ class PipelineStatusResponse(BaseModel):
 
 
 class PipelineTriggerRequest(BaseModel):
-    domain: str
+    # domain=None triggers a global build from whatever is already in data/raw.
+    # domain set triggers a direction-scoped online fetch (Tier 1) merged with data/raw.
+    domain: str | None = None
     pubmed_query: str | None = None
     pubmed_limit: int = 200
     include_drugbank: bool = False

@@ -67,18 +67,23 @@ async def trigger_pipeline(
     """
     global _pipeline_task
 
+    # domain=None means "global build from whatever is in data/raw"; a real
+    # direction scopes the status/concurrency key so different directions
+    # can be tracked (and polled) independently.
+    scope = body.domain or "global"
+
     # ── Concurrency Check (Distributed) ──────────────────────────────────
     # Check the database to see if a run is already active anywhere
-    current = await get_pipeline_status(body.domain)
+    current = await get_pipeline_status(scope)
     if current and current.get("stage") == "running":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"A pipeline run for domain '{body.domain}' is already in progress.",
+            detail=f"A pipeline run for '{scope}' is already in progress.",
         )
 
     logger.info(
         "pipeline_trigger_requested",
-        domain=body.domain,
+        domain=scope,
         triggered_by=principal.get("id", "admin"),
     )
 
@@ -90,7 +95,7 @@ async def trigger_pipeline(
         "finished_at": None,
         "error": None,
     }
-    await upsert_pipeline_status(body.domain, init_status)
+    await upsert_pipeline_status(scope, init_status)
 
     # ── Execution strategy ────────────────────────────────────────────────
     # Prefer Arq (durable, isolated worker process) when Redis is available;
@@ -101,30 +106,30 @@ async def trigger_pipeline(
     if arq_pool is not None:
         job = await arq_pool.enqueue_job(
             "task_build_pipeline",
-            domain=body.domain,
+            domain=scope,
             pubmed_query=body.pubmed_query or "",
             pubmed_limit=body.pubmed_limit,
             include_drugbank=body.include_drugbank,
             include_ema_smpc=body.include_ema_smpc,
         )
-        logger.info("pipeline_enqueued", job_id=job.job_id, domain=body.domain)
+        logger.info("pipeline_enqueued", job_id=job.job_id, domain=scope)
         return {
             "status": "accepted",
             "job_id": job.job_id,
-            "message": f"Pipeline queued for domain '{body.domain}'.",
+            "message": f"Pipeline queued for '{scope}'.",
         }
 
     # Lite / no-Redis fallback
     global _pipeline_task
     _pipeline_task = asyncio.create_task(
         _run_pipeline_background(body),
-        name=f"pipeline_{body.domain}",
+        name=f"pipeline_{scope}",
     )
-    logger.info("pipeline_task_created", domain=body.domain, mode="in_process_no_redis")
+    logger.info("pipeline_task_created", domain=scope, mode="in_process_no_redis")
     return {
         "status": "accepted",
         "job_id": None,
-        "message": f"Pipeline started for domain '{body.domain}' (in-process mode).",
+        "message": f"Pipeline started for '{scope}' (in-process mode).",
     }
 
 
@@ -138,7 +143,7 @@ async def trigger_pipeline(
     summary="Current pipeline run status",
 )
 async def pipeline_status(
-    domain: str = "t2dm",
+    domain: str = "global",
     principal: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     """Return the persistent state of the most recent pipeline execution."""
@@ -231,8 +236,10 @@ async def delete_api_key(
 async def _run_pipeline_background(body: PipelineTriggerRequest) -> None:
     """Execute the build pipeline and update persistent status."""
 
+    scope = body.domain or "global"
+
     async def _update_db(**kwargs: Any) -> None:
-        await upsert_pipeline_status(body.domain, kwargs)
+        await upsert_pipeline_status(scope, kwargs)
 
     try:
         from medgraphia.ingestion.pipeline import BuildConfig, build_graph_flow

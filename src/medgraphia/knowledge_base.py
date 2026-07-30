@@ -15,6 +15,9 @@ DOMAIN_QUERIES: dict[str, str] = {
     ),
     "oncology": "neoplasms[MeSH] AND drug therapy[MeSH] AND English[Language]",
     "hypertension": ("hypertension[MeSH] AND antihypertensive agents[MeSH] AND English[Language]"),
+    "drug_interaction": (
+        "drug interactions[MeSH] AND (adverse effects OR toxicity) AND English[Language]"
+    ),
 }
 
 DOMAIN_DRUGS: dict[str, list[str]] = {

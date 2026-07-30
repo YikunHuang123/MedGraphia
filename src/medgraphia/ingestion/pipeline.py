@@ -69,7 +69,8 @@ class BuildConfig:
     but is usable programmatically.
     """
 
-    domain: str = "t2dm"
+    # Direction-scoped online fetch (Tier 1: on-demand build for a user-specified direction)
+    domain: str | None = None
     pubmed_query: str | None = None
     pubmed_limit: int = 200
     drug_limit: int = 30
@@ -79,6 +80,7 @@ class BuildConfig:
 
     # Stage-skip flags
     skip_fetch: bool = False
+    skip_load: bool = False
     skip_parse: bool = False
     skip_chunk: bool = False
     skip_ner: bool = False
@@ -86,6 +88,9 @@ class BuildConfig:
     skip_extract: bool = False
     skip_embed: bool = False
     skip_community: bool = False
+
+    # Max chunks to load from DB when recovering (None = unlimited)
+    recovery_limit: int | None = None
 
     # Extra metadata attached to Prefect run tags
     tags: list[str] = field(default_factory=list)
@@ -98,13 +103,15 @@ class BuildConfig:
 
 @task(name="fetch", retries=2, retry_delay_seconds=30)
 async def fetch_task(cfg: BuildConfig) -> list[Any]:
-    """Download data from PubMed / FDA DailyMed / EMA SmPC / DrugBank."""
+    """Direction-scoped online fetch: PubMed / FDA DailyMed / DrugBank / EMA SmPC."""
     from medgraphia.data.pubmed import PubMedConnector, PubMedFetchConfig
     from medgraphia.knowledge_base import DOMAIN_DRUGS, DOMAIN_QUERIES
 
     docs: list[Any] = []
 
-    query = cfg.pubmed_query or DOMAIN_QUERIES.get(cfg.domain, cfg.domain)
+    # DOMAIN_QUERIES.get() falls back to the raw domain text, so an arbitrary
+    # user-typed direction (e.g. "breast cancer") works as a free-text query.
+    query = cfg.pubmed_query or DOMAIN_QUERIES.get(cfg.domain or "", cfg.domain or "")
     async with PubMedConnector() as pubmed:
         pubmed_docs = await pubmed.fetch(
             PubMedFetchConfig(query=query, max_results=cfg.pubmed_limit)
@@ -115,7 +122,7 @@ async def fetch_task(cfg: BuildConfig) -> list[Any]:
     if cfg.drug_limit > 0:
         from medgraphia.data.fda_dailymed import FDADailyMedConnector
 
-        drug_names = DOMAIN_DRUGS.get(cfg.domain, [])[: cfg.drug_limit]
+        drug_names = DOMAIN_DRUGS.get(cfg.domain or "", [])[: cfg.drug_limit]
         async with FDADailyMedConnector() as fda:
             for drug_name in drug_names:
                 fda_docs = await fda.fetch_by_drug_name(drug_name, limit=2)
@@ -130,7 +137,6 @@ async def fetch_task(cfg: BuildConfig) -> list[Any]:
         docs.extend(db_docs)
         logger.info("fetch_drugbank_done", count=len(db_docs))
 
-    # 3. EMA SmPC (Local PDFs)
     if cfg.include_ema_smpc:
         from datetime import datetime
         from pathlib import Path
@@ -149,6 +155,61 @@ async def fetch_task(cfg: BuildConfig) -> list[Any]:
                 )
                 docs.append(RawDocument(source=source, file_path=str(pdf_path), format="pdf"))
             logger.info("fetch_ema_local_done", count=len(ema_pdfs))
+
+    return docs
+
+
+@task(name="load", retries=0)
+async def load_task(cfg: BuildConfig) -> list[Any]:
+    """Load pre-downloaded data from local data/raw directory."""
+    from pathlib import Path
+    from datetime import datetime
+    from medgraphia.domain import RawDocument, SourceMeta, Language
+
+    docs: list[Any] = []
+    base_dir = Path("data/raw")
+    if not base_dir.exists():
+        logger.warning("data_raw_missing", msg="Directory data/raw/ does not exist. No files loaded.")
+        return docs
+
+    json_count = 0
+    from medgraphia.ingestion.parsers.structured_parser import StructuredParser
+    parser = StructuredParser()
+
+    # 1. Load all pre-downloaded JSON documents (PubMed, FDA, DrugBank, GerMed, etc.)
+    for path in base_dir.rglob("*.json"):
+        if "germed" in path.parts:
+            docs.extend(list(parser.parse_germed(path)))
+            json_count += 1
+            continue
+        
+        try:
+            doc = RawDocument.model_validate_json(path.read_text(encoding="utf-8"))
+            docs.append(doc)
+            json_count += 1
+        except Exception as exc:
+            logger.warning("failed_to_parse_json", path=str(path), error=str(exc))
+
+    for path in base_dir.rglob("*.jsonl"):
+        if "huatuo" in path.parts:
+            docs.extend(list(parser.parse_huatuo(path)))
+            json_count += 1
+
+    logger.info("load_local_json_done", count=json_count)
+
+    # 2. Load EMA SmPC (Local PDFs)
+    ema_dir = base_dir / "ema_smpc"
+    if ema_dir.exists():
+        ema_pdfs = list(ema_dir.glob("*.pdf"))
+        for pdf_path in ema_pdfs:
+            source = SourceMeta(
+                source_id=f"ema_local:{pdf_path.stem}",
+                source_title=pdf_path.stem.replace("_", " "),
+                retrieved_at=datetime.fromtimestamp(pdf_path.stat().st_mtime),
+                language=Language.EN,
+            )
+            docs.append(RawDocument(source=source, file_path=str(pdf_path), format="pdf"))
+        logger.info("load_ema_local_done", count=len(ema_pdfs))
 
     return docs
 
@@ -181,24 +242,57 @@ async def chunk_task(docs: list[Any]) -> list[Any]:
     from medgraphia.ingestion.chunker import MedicalChunker
     from medgraphia.ingestion.normalizer import MedicalNormalizer
 
+    import asyncio
+    from concurrent.futures import ProcessPoolExecutor
+
     chunker = MedicalChunker()
     normalizer = MedicalNormalizer()
     all_chunks: list[Any] = []
 
-    for doc in docs:
-        chunks = chunker.chunk(doc)
-        chunks = [normalizer.normalize_chunk(c) for c in chunks]
-        all_chunks.extend(chunks)
+    # and use asyncio.gather for concurrent DB writes (8 cores).
 
+    db_sem = asyncio.Semaphore(50)  # Safe concurrent limit for Neo4j
+
+    async def process_doc_db(doc, chunks):
         try:
             from medgraphia.graph.queries import create_chunk, upsert_document
-
-            await upsert_document(doc)
-            for chunk in chunks:
-                await create_chunk(chunk)
+            async with db_sem:
+                await upsert_document(doc)
+            
+            async def write_chunk(chunk):
+                async with db_sem:
+                    await create_chunk(chunk)
+                    
+            await asyncio.gather(*[write_chunk(c) for c in chunks])
         except Exception as exc:
             logger.warning("chunk_neo4j_failed", doc_id=doc.doc_id[:8], error=str(exc))
 
+    def cpu_bound_chunking(batch_docs):
+        batch_results = []
+        for d in batch_docs:
+            c_list = chunker.chunk(d)
+            c_norm = [normalizer.normalize_chunk(c) for c in c_list]
+            batch_results.append((d, c_norm))
+        return batch_results
+
+    from tqdm import tqdm
+
+    batch_size = 1000
+    total_batches = (len(docs) + batch_size - 1) // batch_size
+    for i in tqdm(range(0, len(docs), batch_size), total=total_batches, desc="Chunking & Ingesting", unit="batch"):
+        batch = docs[i:i + batch_size]
+        
+        # 1. CPU-bound chunking in thread pool (frees event loop, allows concurrent C-extensions)
+        processed_batch = await asyncio.to_thread(cpu_bound_chunking, batch)
+        
+        # 2. IO-bound concurrent DB writes
+        db_tasks = []
+        for d, c_list in processed_batch:
+            all_chunks.extend(c_list)
+            db_tasks.append(process_doc_db(d, c_list))
+            
+        await asyncio.gather(*db_tasks)
+        
     logger.info("chunk_done", count=len(all_chunks))
     return all_chunks
 
@@ -207,15 +301,31 @@ async def chunk_task(docs: list[Any]) -> list[Any]:
 async def ner_task(chunks: list[Any]) -> list[Any]:
     """Multi-language NER: GLiNER + optional BERT precision pass."""
     from medgraphia.ingestion.ner import build_pipeline_from_settings
+    from tqdm import tqdm
 
     pipeline = build_pipeline_from_settings()
+    batch_size = 1000
     result: list[Any] = []
-    for chunk in chunks:
-        try:
-            result.append(pipeline.extract(chunk))
-        except Exception as exc:
-            logger.warning("ner_chunk_failed", chunk_id=chunk.chunk_id[:8], error=str(exc))
-            result.append(chunk)
+    
+    try:
+        for i in tqdm(range(0, len(chunks), batch_size), desc="Extracting Entities (NER)", unit="batch"):
+            batch = chunks[i:i+batch_size]
+            batch_res = await asyncio.to_thread(pipeline.extract_batch, batch)
+            result.extend(batch_res)
+    except Exception as exc:
+        logger.warning("ner_batch_failed", error=str(exc))
+        
+        def fallback() -> list[Any]:
+            res = []
+            for chunk in chunks:
+                try:
+                    res.append(pipeline.extract(chunk))
+                except Exception as chunk_exc:
+                    logger.warning("ner_chunk_failed", chunk_id=chunk.chunk_id[:8], error=str(chunk_exc))
+                    res.append(chunk)
+            return res
+            
+        result = await asyncio.to_thread(fallback)
 
     n_entities = sum(len(c.entities) for c in result)
     logger.info("ner_done", chunks=len(result), entities=n_entities)
@@ -227,26 +337,38 @@ async def link_task(chunks: list[Any]) -> list[Any]:
     """Entity linking: BM25 candidate retrieval + SapBERT re-ranking."""
     from medgraphia.config import get_settings
     from medgraphia.ingestion.entity_linker import EntityLinker
+    from tqdm import tqdm
 
     cfg = get_settings()
     linker = EntityLinker.from_mesh(
         mesh_dir=cfg.mesh_dir,
-        bm25_top_k=cfg.el_bm25_top_k,
         link_threshold=cfg.el_link_threshold,
         sapbert_model=cfg.el_sapbert_model,
         sapbert_threshold=cfg.el_sapbert_threshold,
     )
     linker.build_index()
 
+    batch_size = 500
     result: list[Any] = []
-    for chunk in chunks:
-        try:
-            linked = linker.link_chunk(chunk)
-            await linker.write_entities_to_neo4j(linked)
-            result.append(linked)
-        except Exception as exc:
-            logger.warning("link_chunk_failed", chunk_id=chunk.chunk_id[:8], error=str(exc))
-            result.append(chunk)
+    
+    try:
+        for i in tqdm(range(0, len(chunks), batch_size), desc="Linking Entities to MeSH", unit="batch"):
+            batch = chunks[i:i+batch_size]
+            batch_res = await asyncio.to_thread(linker.link_chunks_batch, batch)
+            result.extend(batch_res)
+    except Exception as exc:
+        logger.warning("link_batch_failed", error=str(exc))
+        
+        def fallback() -> list[Any]:
+            return [linker.link_chunk(c) for c in chunks]
+            
+        result = await asyncio.to_thread(fallback)
+
+    from medgraphia.graph.queries import batch_upsert_entities_and_links
+    
+    write_batch_size = 500
+    for j in tqdm(range(0, len(result), write_batch_size), desc="Writing Entities to Neo4j", unit="batch"):
+        await batch_upsert_entities_and_links(result[j:j+write_batch_size])
 
     linked_count = sum(1 for c in result for e in c.entities if not e.cui.startswith("MENTION:"))
     logger.info("link_done", linked=linked_count)
@@ -261,6 +383,10 @@ async def extract_task(chunks: list[Any]) -> list[Any]:
     extractor = RelationExtractor.from_settings()
     relations = await extractor.extract_batch(chunks)
     await extractor.write_relations_to_neo4j(relations)
+    
+    from medgraphia.graph.queries import mark_chunks_extracted
+    await mark_chunks_extracted([c.chunk_id for c in chunks])
+    
     logger.info("extract_done", relations=len(relations))
     return relations
 
@@ -282,7 +408,7 @@ async def embed_task(chunks: list[Any]) -> list[Any]:
             vector_size=embedder.dense_dim,
             sparse=True,
         )
-        embedded = embedder.embed_chunks(chunks)
+        embedded = await embedder.embed_chunks(chunks)
         written = await store.upsert_chunks(cfg.qdrant_collection_chunks, embedded)
         logger.info("embed_done", chunks=written, collection=cfg.qdrant_collection_chunks)
         return embedded
@@ -316,19 +442,34 @@ async def community_task(
 # ---------------------------------------------------------------------------
 
 
-@flow(name="MedGraphia Build Pipeline", log_prints=True)
-async def build_graph_flow(cfg: BuildConfig) -> dict[str, Any]:
+@flow(name="MedGraphia Build Pipeline")
+async def build_graph_flow(cfg: Any = None) -> dict[str, Any]:
     """
-    Full offline knowledge-graph build pipeline.
-
-    Returns a summary dict with counts for each stage.
+    Main orchestration flow.
     """
-    summary: dict[str, Any] = {"domain": cfg.domain}
+    if cfg is None:
+        from medgraphia.config import get_settings
+        cfg = get_settings()
 
-    # Stage 1: Fetch
+    logger.info("flow_started", mode="build_graph")
+
+    # Ensure Neo4j constraints and indexes exist before writing anything
+    from medgraphia.graph.schema import apply_schema
+    await apply_schema()
+
+    summary: dict[str, Any] = {"scope": cfg.domain or "global"}
+
+    # Stage 0: Fetch — only runs for a direction-scoped build (Tier 1 on-demand
+    # ingestion). Global/local-only builds (no domain set) skip this entirely.
     raw_docs: list[Any] = []
-    if not cfg.skip_fetch:
+    if not cfg.skip_fetch and (cfg.domain or cfg.pubmed_query):
         raw_docs = await fetch_task(cfg)
+    summary["fetched_docs"] = len(raw_docs)
+
+    # Stage 1: Load — pre-downloaded local data/raw content, merged with
+    # whatever Stage 0 just fetched.
+    if not cfg.skip_load:
+        raw_docs = raw_docs + await load_task(cfg)
     summary["raw_docs"] = len(raw_docs)
 
     # Stage 2: Parse
@@ -351,14 +492,23 @@ async def build_graph_flow(cfg: BuildConfig) -> dict[str, Any]:
         and cfg.skip_embed
         and cfg.skip_community
     ):
-        from medgraphia.graph.queries import get_chunks_from_db
+        # 1. Try loading fully-NER'd chunks from cache (Redis or Disk)
+        if not cfg.skip_ner:
+            cached_chunks = _load_ner_cache()
+            if cached_chunks:
+                chunks = cached_chunks
+                cfg.skip_ner = True  # We successfully loaded NER results, skip the NER stage
 
-        chunks = await get_chunks_from_db(limit=5000)
-        logger.info("pipeline_recovered_from_db", count=len(chunks))
+        # 2. If no cache found, fall back to DB recovery (which provides chunks without entities)
+        if not chunks:
+            from medgraphia.graph.queries import get_chunks_from_db
+            chunks = await get_chunks_from_db(limit=cfg.recovery_limit)
+            logger.info("pipeline_recovered_from_db", count=len(chunks), limit=cfg.recovery_limit)
 
     # Stage 4: NER
     if not cfg.skip_ner and chunks:
         chunks = await ner_task(chunks)
+        _save_ner_cache(chunks)
     summary["entities"] = sum(len(c.entities) for c in chunks)
 
     # Stage 5: Entity linking
@@ -396,3 +546,39 @@ async def build_graph_flow(cfg: BuildConfig) -> dict[str, Any]:
 def run_pipeline(cfg: BuildConfig) -> dict[str, Any]:
     """Synchronous wrapper — useful for scripts and testing."""
     return asyncio.run(build_graph_flow(cfg))
+
+# ---------------------------------------------------------------------------
+# Caching Utilities
+# ---------------------------------------------------------------------------
+
+def _save_ner_cache(chunks_to_save: list[Any]) -> None:
+    import pickle
+    from pathlib import Path
+    
+    try:
+        cache_dir = Path(".cache")
+        cache_dir.mkdir(exist_ok=True)
+        cache_path = cache_dir / "ner_backup.pkl"
+        
+        # Write massive payloads directly to high-speed NVMe SSD
+        with open(cache_path, "wb") as f:
+            pickle.dump(chunks_to_save, f)
+        logger.info("disk_saved_ner_chunks", count=len(chunks_to_save), path=str(cache_path))
+    except Exception as e:
+        logger.warning("disk_save_ner_chunks_failed", error=str(e))
+
+def _load_ner_cache() -> list[Any] | None:
+    import pickle
+    from pathlib import Path
+    
+    cache_path = Path(".cache/ner_backup.pkl")
+    if cache_path.exists():
+        try:
+            with open(cache_path, "rb") as f:
+                chunks = pickle.load(f)
+            logger.info("disk_loaded_ner_chunks", count=len(chunks), path=str(cache_path))
+            return chunks
+        except Exception as e:
+            logger.warning("disk_load_failed", error=str(e))
+            
+    return None

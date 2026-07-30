@@ -4,8 +4,7 @@ CLI tool: fetch PubMed abstracts and save them as JSON to data/raw/pubmed/.
 
 Usage:
   python scripts/fetch_pubmed.py --domain t2dm --limit 200
-  python3 scripts/data_fetchers/fetch_pubmed.py --query "Humans[MeSH] AND Drug Therapy[MeSH] AND 2024:2026[DP]" --limit 20000 --out data/raw/pubmed/clinical_general
-
+  python scripts/data_fetchers/fetch_pubmed.py --query "Humans[MeSH] AND Drug Therapy[MeSH]" --from 2024-01-01 --to 2026-12-31 --limit 200000 --out data/raw/pubmed/clinical_general
 Arguments:
   --domain   Predefined domain keyword set (t2dm, cardiovascular, oncology, …)
   --query    Override with an arbitrary PubMed search query
@@ -29,26 +28,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from medgraphia.config import get_settings
 from medgraphia.data.pubmed import PubMedConnector, PubMedFetchConfig
+from medgraphia.knowledge_base import DOMAIN_QUERIES
 from medgraphia.logger import configure_logging, get_logger
-
-# ---------------------------------------------------------------------------
-# Predefined domain → PubMed query mappings
-# ---------------------------------------------------------------------------
-DOMAIN_QUERIES: dict[str, str] = {
-    "t2dm": (
-        "type 2 diabetes mellitus[MeSH] AND "
-        "(drug therapy[MeSH] OR treatment[MeSH]) AND "
-        "English[Language]"
-    ),
-    "cardiovascular": (
-        "cardiovascular diseases[MeSH] AND drug therapy[MeSH] AND English[Language]"
-    ),
-    "oncology": ("neoplasms[MeSH] AND drug therapy[MeSH] AND English[Language]"),
-    "drug_interaction": (
-        "drug interactions[MeSH] AND (adverse effects OR toxicity) AND English[Language]"
-    ),
-    "hypertension": ("hypertension[MeSH] AND antihypertensive agents[MeSH] AND English[Language]"),
-}
 
 
 @click.command()
@@ -97,7 +78,7 @@ def main(
 
     fetch_cfg = PubMedFetchConfig(
         query=search_query,
-        max_results=min(limit, cfg.pubmed_max_results),
+        max_results=limit,
         date_from=df,
         date_to=dt,
     )
@@ -114,13 +95,20 @@ async def _fetch_and_save(config: PubMedFetchConfig, output_dir: Path) -> None:
         docs = await connector.fetch(config)
 
     saved = 0
+    skipped = 0
     for doc in docs:
         doc_id = doc.source.source_id.replace(":", "_")
         out_path = output_dir / f"{doc_id}.json"
+        if out_path.exists():
+            skipped += 1
+            continue
         out_path.write_text(doc.model_dump_json(indent=2), encoding="utf-8")
         saved += 1
 
-    click.echo(f"Saved {saved} documents to {output_dir}/")
+    msg = f"Saved {saved} documents to {output_dir}/"
+    if skipped:
+        msg += f" ({skipped} already existed, skipped)"
+    click.echo(msg)
 
 
 if __name__ == "__main__":

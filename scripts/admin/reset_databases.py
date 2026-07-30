@@ -24,9 +24,22 @@ async def reset_neo4j() -> None:
     click.echo("  → Wiping Neo4j data…")
     try:
         async with get_session() as session:
-            # Delete all nodes and relationships
-            await session.run("MATCH (n) DETACH DELETE n")
-        click.echo("  ✓ Neo4j is now empty.")
+            # Batch the delete: a single DETACH DELETE over millions of nodes
+            # can exceed transaction memory and silently roll back. Deleting
+            # in bounded chunks and consuming each result avoids that.
+            total_deleted = 0
+            while True:
+                result = await session.run(
+                    "MATCH (n) WITH n LIMIT 20000 DETACH DELETE n RETURN count(n) AS c"
+                )
+                record = await result.single()
+                deleted = record["c"] if record else 0
+                total_deleted += deleted
+                if deleted == 0:
+                    break
+            check = await session.run("MATCH (n) RETURN count(n) AS c")
+            remaining = (await check.single())["c"]
+        click.echo(f"  ✓ Neo4j is now empty (deleted {total_deleted} nodes, {remaining} remain).")
     except Exception as exc:
         click.echo(f"  ❌ Neo4j reset failed: {exc}")
 
