@@ -199,7 +199,7 @@ class Settings(BaseSettings):
     multilingual_per_lang_quota: int = 12
 
     # ------------------------------------------------------------------
-    # Query-time knowledge graph completion (Tier 3)
+    # Query-time knowledge graph completion
     # ------------------------------------------------------------------
     gap_completion_enabled: bool = True
     gap_completion_max_tool_calls: int = 2  # per generation request

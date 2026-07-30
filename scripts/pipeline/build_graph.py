@@ -6,8 +6,13 @@ All logic resides in src/medgraphia/ingestion/pipeline.py.
 
 # python scripts/pipeline/build_graph.py
 
-# Direction-scoped build (Tier 1): fetch a domain online, merge with data/raw
+# Direction-scoped build: fetch a domain online, merge with data/raw
 # python scripts/pipeline/build_graph.py --domain t2dm --pubmed-limit 200
+
+# Frontier entity expansion runs automatically for direction-scoped builds;
+# to turn it off or tune it:
+# python scripts/pipeline/build_graph.py --domain t2dm --skip-frontier-expand
+# python scripts/pipeline/build_graph.py --domain t2dm --frontier-max-entities 3
 
 # Start from NER
 # python scripts/pipeline/build_graph.py --skip-load --skip-parse --skip-chunk
@@ -45,6 +50,9 @@ from medgraphia.logger import configure_logging
 @click.option("--skip-ner", is_flag=True)
 @click.option("--skip-link", is_flag=True)
 @click.option("--skip-extract", is_flag=True)
+@click.option("--skip-frontier-expand", is_flag=True, help="Skip frontier entity expansion")
+@click.option("--frontier-min-mentions", default=2, show_default=True, help="Mention count at/below which an entity counts as frontier")
+@click.option("--frontier-max-entities", default=8, show_default=True, help="Max frontier entities expanded per build")
 @click.option("--skip-embed", is_flag=True)
 @click.option("--skip-community", is_flag=True)
 @click.option("--recovery-limit", type=int, default=None, help="Max chunks to load when recovering from DB (default: all)")

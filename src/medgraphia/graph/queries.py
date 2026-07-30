@@ -286,6 +286,24 @@ async def get_chunks_from_db(limit: int | None = None) -> list[Chunk]:
     return chunks
 
 
+async def get_entity_mention_counts(cuis: list[str]) -> dict[str, int]:
+    """Return each CUI's total MENTIONED_IN count across the whole graph."""
+    if not cuis:
+        return {}
+    cypher = """
+    UNWIND $cuis AS cui
+    MATCH (e {cui: cui})
+    OPTIONAL MATCH (e)-[r:MENTIONED_IN]->(:Chunk)
+    RETURN cui, count(r) AS mention_count
+    """
+    counts: dict[str, int] = {}
+    async with get_session() as session:
+        result = await session.run(cypher, cuis=cuis)
+        async for record in result:
+            counts[record["cui"]] = record["mention_count"]
+    return counts
+
+
 async def mark_chunks_extracted(chunk_ids: list[str]) -> None:
     """Mark chunks as having their relations extracted to support resuming."""
     if not chunk_ids:

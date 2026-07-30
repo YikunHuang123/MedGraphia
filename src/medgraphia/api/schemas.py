@@ -67,7 +67,7 @@ class PipelineStatusResponse(BaseModel):
 
 class PipelineTriggerRequest(BaseModel):
     # domain=None triggers a global build from whatever is already in data/raw.
-    # domain set triggers a direction-scoped online fetch (Tier 1) merged with data/raw.
+    # domain set triggers a direction-scoped online fetch merged with data/raw.
     domain: str | None = None
     pubmed_query: str | None = None
     pubmed_limit: int = 200

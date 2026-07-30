@@ -69,7 +69,7 @@ class BuildConfig:
     but is usable programmatically.
     """
 
-    # Direction-scoped online fetch (Tier 1: on-demand build for a user-specified direction)
+    # Direction-scoped online fetch for a user-specified topic
     domain: str | None = None
     pubmed_query: str | None = None
     pubmed_limit: int = 200
@@ -77,6 +77,10 @@ class BuildConfig:
     include_ema_smpc: bool = False
     include_drugbank: bool = False
     drugbank_xml: str | None = None
+
+    # Light supplementary fetch for entities under-covered by this build's own data
+    frontier_min_mentions: int = 2  # entities mentioned at most this often are "frontier"
+    frontier_max_entities: int = 8  # cap per build, keeps cost bounded
 
     # Stage-skip flags
     skip_fetch: bool = False
@@ -86,6 +90,7 @@ class BuildConfig:
     skip_ner: bool = False
     skip_link: bool = False
     skip_extract: bool = False
+    skip_frontier_expand: bool = False
     skip_embed: bool = False
     skip_community: bool = False
 
@@ -391,6 +396,65 @@ async def extract_task(chunks: list[Any]) -> list[Any]:
     return relations
 
 
+@task(name="frontier_expand", retries=1)
+async def frontier_expand_task(
+    cfg: BuildConfig, chunks: list[Any], relations: list[Any]
+) -> tuple[list[Any], list[Any]]:
+    """Fetch a few extra PubMed abstracts for entities barely covered in the graph so far."""
+    from medgraphia.data.pubmed import PubMedConnector, PubMedFetchConfig
+    from medgraphia.graph.queries import (
+        batch_upsert_entities_and_links,
+        get_entity_mention_counts,
+        mark_chunks_extracted,
+    )
+    from medgraphia.ingestion.lightweight_extract import docs_to_relations, get_relation_extractor
+
+    if not relations:
+        return [], []
+
+    label_map: dict[str, str] = {}
+    for c in chunks:
+        for e in c.entities:
+            if not e.cui.startswith("MENTION:"):
+                label_map[e.cui] = e.label
+
+    involved_cuis = list({r.source_cui for r in relations} | {r.target_cui for r in relations})
+    global_mention_counts = await get_entity_mention_counts(involved_cuis)
+    frontier_cuis = [
+        cui for cui in involved_cuis if global_mention_counts.get(cui, 0) <= cfg.frontier_min_mentions
+    ][: cfg.frontier_max_entities]
+
+    if not frontier_cuis:
+        logger.info("frontier_expand_none")
+        return [], []
+
+    all_docs: list[Any] = []
+    async with PubMedConnector() as pubmed:
+        for cui in frontier_cuis:
+            label = label_map.get(cui, cui)
+            docs = await pubmed.fetch(PubMedFetchConfig(query=label, max_results=5))
+            all_docs.extend(docs)
+
+    if not all_docs:
+        logger.info("frontier_expand_no_docs", entities=len(frontier_cuis))
+        return [], []
+
+    new_chunks, new_relations = await docs_to_relations(all_docs, extracted_by="frontier_expansion")
+    if new_chunks:
+        await batch_upsert_entities_and_links(new_chunks)
+        await mark_chunks_extracted([c.chunk_id for c in new_chunks])
+    if new_relations:
+        await get_relation_extractor().write_relations_to_neo4j(new_relations)
+
+    logger.info(
+        "frontier_expand_done",
+        entities=len(frontier_cuis),
+        new_chunks=len(new_chunks),
+        new_relations=len(new_relations),
+    )
+    return new_chunks, new_relations
+
+
 @task(name="embed")
 async def embed_task(chunks: list[Any]) -> list[Any]:
     """BGE-M3 chunk embedding (dense + sparse) → Qdrant collection."""
@@ -459,8 +523,7 @@ async def build_graph_flow(cfg: Any = None) -> dict[str, Any]:
 
     summary: dict[str, Any] = {"scope": cfg.domain or "global"}
 
-    # Stage 0: Fetch — only runs for a direction-scoped build (Tier 1 on-demand
-    # ingestion). Global/local-only builds (no domain set) skip this entirely.
+    # Stage 0: Fetch — only runs when a domain/query is set; global builds skip it.
     raw_docs: list[Any] = []
     if not cfg.skip_fetch and (cfg.domain or cfg.pubmed_query):
         raw_docs = await fetch_task(cfg)
@@ -523,6 +586,15 @@ async def build_graph_flow(cfg: Any = None) -> dict[str, Any]:
     if not cfg.skip_extract and chunks:
         relations = await extract_task(chunks)
     summary["relations"] = len(relations)
+
+    # Stage 6.5: expand frontier entities for direction-scoped builds, folding
+    # any new chunks/relations into the main lists before embedding.
+    if not cfg.skip_frontier_expand and cfg.domain and relations:
+        frontier_chunks, frontier_relations = await frontier_expand_task(cfg, chunks, relations)
+        chunks = chunks + frontier_chunks
+        relations = relations + frontier_relations
+        summary["frontier_chunks"] = len(frontier_chunks)
+        summary["relations"] = len(relations)
 
     # Stage 7: Embedding — BGE-M3 dense + sparse → Qdrant
     if not cfg.skip_embed:
