@@ -50,6 +50,7 @@ class RerankedResult:
     query_type: QueryType = QueryType.PATIENT_FAQ
     linked_cuis: list[str] = field(default_factory=list)
     unlinked_mentions: list[str] = field(default_factory=list)
+    entity_labels: dict[str, str] = field(default_factory=dict)  # cui -> label, linked entities only
     complexity_tier: ModelTier | None = None
 
     def texts(self) -> list[str]:

@@ -45,7 +45,8 @@ traceable clinical AI brain.
 | 🌐 Multilingual (ZH / EN / DE) align                            | All surface forms of the same concept ("心肌梗死 / myocardial infarction / Myokardinfarkt") are aligned to a single CUI (MeSH ID) via SapBERT-XLMR for graph retrieval. At query time, **multilingual expansion** (Step 0.5) translates the query into all three corpus languages via `QueryTranslator` and runs parallel per-language Qdrant searches with quota-based merging                                                                                                                                                                                                                                                                                                                |
 | 🔬️ DSPy-driven Prompt Optimization                    | Use **DSPy** to manage and optimize prompts. Optimization strategies include:<br>• **Automated Prompt Compilation**: Using `BootstrapFewShot` and `MIPROv2` to automatically select and inject the best reasoning traces (CoT) into the prompt.<br>• **Synthetic Data Factory**: Built-in pipeline to reverse-engineer high-quality, multilingual QA pairs from grounded graph chunks.<br>• **Adversarial Tuning**: Defending against false pronouns and hallucinated knowledge via explicitly negative training examples.<br>• **Clinical Tiering**: The Rewriter is trained to simultaneously condense queries and classify their clinical complexity (SMALL/MEDIUM/LARGE) for the LLM Router. |
 | ⏳ Long-Short Term Memory System                                 | • **Short-Term:** LLM-based Contextual Query Rewriting resolves pronouns across recent chat turns into standalone queries. <br>• **Long-Term:** Async Neo4j updates build cross-session user profiles with an **exponential time-decay algorithm** graph edge, enabling language-agnostic personalization.                                                                                                                                                                                                                                                                                                                                                                                 |
-| 🏥 Two-Stage Cascade NER & Entity Linking                       | GLiNER zero-shot multilingual coarse pass + language-specific BERT precision pass (biomedical-ner-all EN, DE / bert-base-chinese-medical-ner ZH) → SapBERT-XLMR linking to CUI (MeSH ID)                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 🕵️ Agentic Query-Time Graph Completion                          | A LangGraph tool-calling loop: before answering, the LLM judges whether the retrieved evidence is missing a relation between key entities, and if so calls a tool that fires a targeted PubMed search and re-runs the offline NER / entity-linking / relation-extraction stack to patch the graph on the fly before generation continues. |
+| 🏥 Two-Stage Cascade NER & Entity Linking                       | GLiNER zero-shot multilingual coarse pass + language-specific BERT precision pass (`biomedical-ner-all` EN, `Adapting/bert-base-chinese-finetuned-NER-biomedical` ZH, `GerMedBERT_NER_V01_BRONCO_CARDIO` DE) → SapBERT-XLMR dense retrieval linking to CUI (MeSH ID)                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ⚡ Schema-Constrained LLM Relation Extraction                    | LLM relation extraction limited to a closed medical schema (TREATS, CAUSES, INTERACTS_WITH, DOSAGE_FOR…) — no hallucinated relationship types                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | 🏗️ Section-aware Chunking                                      | Text is split based on structural hierarchy (Section → Sub-section → Paragraph) rather than fixed token counts. Each chunk carries a metadata section_path, ensuring contextual grounding during retrieval.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 🔀 Multi-Model LLM Router                                       | Automatically divide user problems into three levels according to the complexity, and call different llm models                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -72,8 +73,8 @@ The ingestion pipeline orchestrates the offline knowledge-graph build process, t
     *   *Key Aspect*: Optimizes performance by utilizing CPU-bound multi-threading for chunking (bypassing the Python GIL) combined with highly concurrent async I/O for safe Neo4j node writing, drastically improving ingestion throughput.
 *   **4. NER (Named Entity Recognition)**: Extracts key medical entities (e.g., drugs, diseases, symptoms) from text chunks using a multilingual approach, primarily relying on the GLiNER model and supplemented by language specific medical BERT model for high-precision filtering.
     *   *Key Aspect*: Leverages GLiNER's zero-shot/few-shot flexibility to adapt to complex medical entity types, and implements a chunk-level degradation and retry mechanism for batch failures to ensure pipeline robustness.
-*   **5. Link (Entity Linking)**: Maps extracted entities to standard medical knowledge bases (MeSH). It uses BM25 for coarse candidate recall and the SapBERT model for semantic re-ranking and alignment.
-    *   *Key Aspect*: The critical step for disambiguating entities and normalizing the knowledge graph. The dual-path architecture balances alignment accuracy with computational efficiency.
+*   **5. Link (Entity Linking)**: Maps extracted entities to standard medical knowledge bases (MeSH). Uses a dense SapBERT retrieval index precomputed over the entire multilingual MeSH dictionary to find the best CUI match by semantic similarity.
+    *   *Key Aspect*: The critical step for disambiguating entities and normalizing the knowledge graph. The precomputed dense index balances alignment accuracy with computational efficiency.
 *   **6. Extract (Relation Extraction)**: A schema-guided process based on LLMs that analyzes logical and medical associations between entities, extracting relation triplets and writing these edges concurrently to Neo4j.
     *   *Key Aspect*: By injecting a predefined medical relation schema into the LLM, it strips out logically sound medical relation triplets (e.g., "Drug-TREATS-Disease") from unstructured text.
 *   **7. Embed**: Uses the BGE-M3 model to generate dense and sparse vector representations for each text chunk, upserting them into the Qdrant vector database.
@@ -162,7 +163,7 @@ MedGraphia leverages Large Language Models across the entire data lifecycle, fro
 └─────────────────────┘          └───────────────────────┘                    │
                                                                               │
                     ┌─────────────────────────────────────────────────────────▼──────────┐
-                    │  Entity Linking: SapBERT-XLMR + BM25 candidates → MeSH ID          │
+                    │  Entity Linking: SapBERT-XLMR dense retrieval → MeSH ID            │
                     │  ZH / EN / DE surface forms → MeSH ID (e.g. D009203 = MI)          │
                     └─────────────────────────────────────┬──────────────────────────────┘
                                                           │
@@ -244,6 +245,12 @@ MedGraphia leverages Large Language Models across the entire data lifecycle, fro
           │  LLM Router — tier-based model selection               │
           │  - Tier: SMALL (FAQ) / MEDIUM (Inter.) / LARGE (Decis.)│
           │  - Infrastructure: LiteLLM + LangGraph                 │
+          └──────────────────────────┬─────────────────────────────┘
+                                     │
+          ┌──────────────────────────▼─────────────────────────────┐
+          │  Agentic Gap Completion (LangGraph)                    │
+          │  - LLM judges whether evidence is missing a relation   │
+          │  - If so: tool call → targeted fetch + NER/link/extract│
           └──────────────────────────┬─────────────────────────────┘
                                      │
           ┌──────────────────────────▼─────────────────────────────┐
@@ -339,8 +346,8 @@ Directed edges between two **Medical Entities**, derived from text evidence.
 | **Graph Database** | Neo4j 5.x                                                                                                                                     | Nodes and relationships                                                                                                                                              |
 | **Vector Store** | Qdrant                                                                                                                                        | Native dense + sparse hybrid                                                                                                                                         |
 | **Embedding** | BGE-M3 (BAAI)                                                                                                                                 | Dense + sparse                                                                                                                                                       |
-| **Entity NER** | GLiNER (`gliner_mediumv2.1`) · `biomedical-ner-all` (EN / DE) · `bert-base-chinese-medical-ner` (ZH) | Multi-lang, domain-specialized                                                                                                                                       |
-| **Entity Linking** | SapBERT-XLMR + BM25                                                                                                                           | Cross-lingual → MeSH ID                                                                                                                                              |
+| **Entity NER** | GLiNER (`gliner_mediumv2.1`) · `biomedical-ner-all` (EN) · `Adapting/bert-base-chinese-finetuned-NER-biomedical` (ZH) · `GerMedBERT_NER_V01_BRONCO_CARDIO` (DE) | Multi-lang, domain-specialized                                                                                                                                       |
+| **Entity Linking** | SapBERT-XLMR (dense retrieval)                                                                                                                           | Cross-lingual → MeSH ID                                                                                                                                              |
 | **Relation Extraction** | Schema-guided LLM                                                                                                                       | Zero-shot extraction constrained to closed medical ontology                                                                                                          |
 | **Reranker** | bge-reranker-v2-m3                                                                                                                            | Cross-encoder, multilingual                                                                                                                                          |
 | **Community Detection** | Leiden algorithm                                                                                                                              | Graph clustering for global QA                                                                                                                                       |
@@ -397,15 +404,14 @@ A two-stage pipeline extracts medical entities (`EntityType.DISEASE`, `EntityTyp
 1. **Coarse pass**: GLiNER (`gliner_mediumv2.1`) performs zero-shot multilingual entity detection across EN, ZH, and DE.
 2. **Fine pass**: Language-specific BERT models refine candidate spans for higher precision.
     - **English**: `biomedical-ner-all`.
-    - **Chinese**: `bert-base-chinese-medical-ner`.
-    - **German**: Multilingual coarse pass only (fine pass model configurable).
+    - **Chinese**: `Adapting/bert-base-chinese-finetuned-NER-biomedical`.
+    - **German**: `GerMedBERT_NER_V01_BRONCO_CARDIO`.
 
 **Stage 5 — Entity Linking to MeSH ID**
 
 Provisional mentions are resolved to global **MeSH CUIs**:
-1. **BM25 retrieval**: Finds top-K lexical candidates from the MeSH index.
-2. **SapBERT-XLMR**: Cross-lingual semantic re-ranking to find the best CUI match.
-3. **Graph Write**: Linked entities and `MENTIONED_IN` relationships are written to Neo4j.
+1. **SapBERT-XLMR dense retrieval**: The entire multilingual MeSH dictionary is encoded into a vector index ahead of time; mentions are matched via GPU cosine similarity to find the best CUI.
+2. **Graph Write**: Linked entities and `MENTIONED_IN` relationships are written to Neo4j.
 
 **Stage 6 — Relation Extraction**
 
@@ -914,7 +920,7 @@ MedGraphia/
     │   │   ├── bert_ner.py         # Unified BERT precision pass: EN / ZH / DE in one module
     │   │   ├── pipeline.py         # MedicalNERPipeline: combines GLiNER + BERT, deduplicates spans
     │   │   └── _types.py           # Internal MentionSpan type
-    │   ├── entity_linker.py        # SapBERT-XLMR + BM25 → MeSH ID cross-lingual alignment
+    │   ├── entity_linker.py        # SapBERT-XLMR dense retrieval → MeSH ID cross-lingual alignment
     │   ├── relation_extractor.py   # LLM schema-guided RE (closed relation type set)
     │   ├── community_builder.py    # Leiden algorithm + LLM community summary generation
     │   └── embedder.py             # BGE-M3: dense + sparse (100+ languages) → Qdrant
@@ -1012,7 +1018,7 @@ MedGraphia/
 
 ## 🔮 Roadmap
 
-- [ ] **Adaptive Context Injection**: Dynamically adjust context window based on LLM's uncertainty.
+No items currently scheduled.
 
 ---
 

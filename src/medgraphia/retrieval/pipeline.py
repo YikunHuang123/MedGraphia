@@ -298,6 +298,9 @@ class RetrievalPipeline:
         final_result.query_type = plan.query_type
         final_result.linked_cuis = plan.linked_cuis
         final_result.unlinked_mentions = plan.query_entities.unlinked_mentions
+        final_result.entity_labels = {
+            e.cui: e.label for e in plan.query_entities.entities if not e.cui.startswith("MENTION:")
+        }
         final_result.complexity_tier = complexity_tier
 
         logger.info(

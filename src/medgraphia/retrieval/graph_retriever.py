@@ -128,6 +128,18 @@ RETURN
   rels AS top_relations
 """
 
+# Shortest-path existence check between two seed CUIs, ignoring structural
+# edges. Independent of the hop-limited retrieval above, so it can see
+# further than whatever `hops` the caller's retrieval used.
+# Cypher requires the variable-length range bound to be a literal, not a
+# parameter, hence the {max_hops} placeholder filled in at call time.
+_CYPHER_PATH_EXISTS = """
+MATCH p = shortestPath((a {{cui: $cui_a}})-[*..{max_hops}]-(b {{cui: $cui_b}}))
+WHERE NONE(r IN relationships(p) WHERE type(r) IN ['MENTIONED_IN', 'FROM_DOC'])
+RETURN p IS NOT NULL AS found
+LIMIT 1
+"""
+
 # 2-hop query: follows intermediaries with optional user interest boost
 _CYPHER_2_HOP = """
 MATCH (start {cui: $cui})-[r1]-(mid)-[r2]-(leaf)
@@ -290,6 +302,25 @@ class GraphRetriever:
             logger.warning("graph_expand_failed", cui=cui, error=str(exc))
 
         return triples
+
+    async def check_path_exists(self, cui_a: str, cui_b: str, max_hops: int = 3) -> bool:
+        """
+        Return True if a real (non-structural) path connects two CUIs within
+        max_hops. Used as a cheap idempotency guard before firing a query-time
+        completion fetch — no point re-searching PubMed for a pair that's
+        already connected.
+        """
+        try:
+            from medgraphia.graph.client import get_session
+
+            cypher = _CYPHER_PATH_EXISTS.format(max_hops=max(1, max_hops))
+            async with get_session() as session:
+                result = await session.run(cypher, cui_a=cui_a, cui_b=cui_b)
+                record = await result.single()
+                return bool(record and record["found"])
+        except Exception as exc:
+            logger.warning("check_path_exists_failed", cui_a=cui_a, cui_b=cui_b, error=str(exc))
+            return False
 
     # ------------------------------------------------------------------
     # Sync convenience wrapper (for use in sync contexts)

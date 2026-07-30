@@ -51,11 +51,14 @@ class GenerationPipeline:
         history: list[Message] | None = None,
         language: Language = Language.EN,
         complexity_tier: ModelTier | None = None,
+        entity_labels: dict[str, str] | None = None,
+        unlinked_mentions: list[str] | None = None,
     ) -> GenerationResult:
         """
         Run the full generation flow:
           1. Build numbered context from retrieved items
           2. Route to the optimal model (DSPy tier preferred, static table as fallback)
+          2.5. Agentic gap completion — may augment context with new evidence
           3. Predict the answer using the DSPy signature
           4. Post-process citations
         """
@@ -78,6 +81,11 @@ class GenerationPipeline:
             task="default",
             provider_override=routing.provider.value,
             model_override=routing.model_name,
+        )
+
+        # 2.5. Agentic gap completion — same lm as final generation, runs before it
+        context_str = await self._maybe_complete_gaps(
+            question, context_str, entity_labels or {}, unlinked_mentions or [], lm
         )
 
         target_lang = language.full_name if language else Language.EN.full_name
@@ -108,7 +116,7 @@ class GenerationPipeline:
             program = get_generator()
 
             with dspy.context(lm=lm):
-                prediction = program(
+                prediction = await dspy.asyncify(program)(
                     system_instruction=get_system_prompt(query_type, language),
                     context=context_str,
                     history=history_str,
@@ -158,6 +166,8 @@ class GenerationPipeline:
         history: list[Message] | None = None,
         language: Language = Language.EN,
         complexity_tier: ModelTier | None = None,
+        entity_labels: dict[str, str] | None = None,
+        unlinked_mentions: list[str] | None = None,
     ) -> AsyncIterator[str]:
         """
         Streaming version of generate().
@@ -185,6 +195,10 @@ class GenerationPipeline:
             model_override=routing.model_name,
         )
 
+        context_str = await self._maybe_complete_gaps(
+            question, context_str, entity_labels or {}, unlinked_mentions or [], lm
+        )
+
         target_lang = language.full_name if language else Language.EN.full_name
 
         history_str = "No history."
@@ -209,7 +223,7 @@ class GenerationPipeline:
             program = get_generator()
             with dspy.context(lm=lm):
                 # Use the compiled program (which includes the optimized few-shot demos)
-                prediction = program(
+                prediction = await dspy.asyncify(program)(
                     system_instruction=get_system_prompt(query_type, language),
                     context=context_str,
                     history=history_str,
@@ -234,6 +248,46 @@ class GenerationPipeline:
         except Exception as exc:
             logger.error("stream_generation_failed", error=str(exc))
             yield "I encountered an error during streaming generation."
+
+    async def _maybe_complete_gaps(
+        self,
+        question: str,
+        context_str: str,
+        entity_labels: dict[str, str],
+        unlinked_mentions: list[str],
+        lm: Any,
+    ) -> str:
+        """
+        Let an agent decide whether the context is missing a relation
+        between two entities mentioned in the question, and if so fetch and
+        merge evidence before the final answer is generated.
+        """
+        from medgraphia.config import get_settings
+
+        cfg = get_settings()
+        if not cfg.gap_completion_enabled:
+            return context_str
+
+        candidate_labels = list(entity_labels.values()) + unlinked_mentions
+        if len(candidate_labels) < 2:
+            return context_str
+
+        from medgraphia.generation.agentic_completion import run_gap_completion
+
+        cui_map = {label: cui for cui, label in entity_labels.items()}
+        evidence = await run_gap_completion(
+            question=question,
+            context=context_str,
+            entity_labels=candidate_labels,
+            entity_cui_map=cui_map,
+            lm=lm,
+            max_tool_calls=cfg.gap_completion_max_tool_calls,
+        )
+        if not evidence:
+            return context_str
+
+        logger.info("gap_completion_applied", count=len(evidence))
+        return context_str + "\n\n[Additional evidence found for this query]\n" + "\n".join(evidence)
 
     def get_streaming_components(self, query_type: QueryType, language: Language) -> dict[str, str]:
         """Return the system prompt and disclaimer for streaming."""

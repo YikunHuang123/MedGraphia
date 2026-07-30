@@ -198,6 +198,13 @@ class Settings(BaseSettings):
     multilingual_retrieval_enabled: bool = True
     multilingual_per_lang_quota: int = 12
 
+    # ------------------------------------------------------------------
+    # Query-time knowledge graph completion (Tier 3)
+    # ------------------------------------------------------------------
+    gap_completion_enabled: bool = True
+    gap_completion_max_tool_calls: int = 2  # per generation request
+    gap_completion_pubmed_limit: int = 5  # abstracts fetched per tool call
+
 
     # ------------------------------------------------------------------
     # NER

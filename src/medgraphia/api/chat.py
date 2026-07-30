@@ -338,6 +338,8 @@ async def chat_stream(
                         history=session.messages,
                         language=language,
                         complexity_tier=complexity_tier,
+                        entity_labels=getattr(reranked, "entity_labels", {}),
+                        unlinked_mentions=getattr(reranked, "unlinked_mentions", []),
                     ):
                         accumulated.append(token)
                         yield _sse({"type": "chunk", "content": token})
@@ -471,6 +473,8 @@ async def _run_full_pipeline(
             history=history,
             language=language,
             complexity_tier=complexity_tier,
+            entity_labels=getattr(reranked, "entity_labels", {}),
+            unlinked_mentions=getattr(reranked, "unlinked_mentions", []),
         )
         model_used = gen_result.routing.model_name if gen_result.routing else ""
         span.end(output=gen_result.answer[:200])
