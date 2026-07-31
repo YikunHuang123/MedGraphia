@@ -41,14 +41,14 @@ traceable clinical AI brain.
 
 | Feature                                                         | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 |-----------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 🧠 Advanced GraphRAG Engine | A deep implementation of GraphRAG principles: <br>• **Local Search**: NER-driven subgraph traversal (1-2 hops) for precise clinical triples.<br>• **Global Search**: **Leiden algorithm** community detection + LLM-generated hierarchical summaries for cross-corpus synthesis.<br>• **Hybrid RRF**: Merging graph traversal, dense/sparse vector search, and community insights via Reciprocal Rank Fusion.<br>• **Semantic Glue**: All data is anchored to MeSH CUIs, enabling the graph to act as a cross-lingual and cross-document relational bridge.                                                                                                                                |
+| 🧠 Advanced GraphRAG Engine | A deep implementation of GraphRAG principles: <br>• **Local Search**: Bipartite entity-chunk graph + Neo4j GDS **Personalized PageRank** for structural multi-hop reasoning — no LLM relation extraction needed.<br>• **Global Search**: **Leiden algorithm** community detection over entity co-occurrence + LLM-generated hierarchical summaries for cross-corpus synthesis.<br>• **Hybrid RRF**: Merging PPR-ranked chunks, dense/sparse vector search, and community insights via Reciprocal Rank Fusion.<br>• **Semantic Glue**: All data is anchored to MeSH CUIs, enabling the graph to act as a cross-lingual and cross-document relational bridge.                                                                                                                                |
 | 🌐 Multilingual (ZH / EN / DE) align                            | All surface forms of the same concept ("心肌梗死 / myocardial infarction / Myokardinfarkt") are aligned to a single CUI (MeSH ID) via SapBERT-XLMR for graph retrieval. At query time, **multilingual expansion** (Step 0.5) translates the query into all three corpus languages via `QueryTranslator` and runs parallel per-language Qdrant searches with quota-based merging                                                                                                                                                                                                                                                                                                                |
 | 🔬️ DSPy-driven Prompt Optimization                    | Use **DSPy** to manage and optimize prompts. Optimization strategies include:<br>• **Automated Prompt Compilation**: Using `BootstrapFewShot` and `MIPROv2` to automatically select and inject the best reasoning traces (CoT) into the prompt.<br>• **Synthetic Data Factory**: Built-in pipeline to reverse-engineer high-quality, multilingual QA pairs from grounded graph chunks.<br>• **Adversarial Tuning**: Defending against false pronouns and hallucinated knowledge via explicitly negative training examples.<br>• **Clinical Tiering**: The Rewriter is trained to simultaneously condense queries and classify their clinical complexity (SMALL/MEDIUM/LARGE) for the LLM Router. |
 | ⏳ Long-Short Term Memory System                                 | • **Short-Term:** LLM-based Contextual Query Rewriting resolves pronouns across recent chat turns into standalone queries. <br>• **Long-Term:** Async Neo4j updates build cross-session user profiles with an **exponential time-decay algorithm** graph edge, enabling language-agnostic personalization.                                                                                                                                                                                                                                                                                                                                                                                 |
-| 🕵️ Agentic Query-Time Graph Completion                          | A LangGraph tool-calling loop: before answering, the LLM judges whether the retrieved evidence is missing a relation between key entities, and if so calls a tool that fires a targeted PubMed search and re-runs the offline NER / entity-linking / relation-extraction stack to patch the graph on the fly before generation continues. |
-| 🌱 Build-Time Frontier Entity Expansion                          | During a domain-scoped build, entities that surface in a newly extracted relation but stay under-covered in the graph trigger a small supplementary PubMed fetch through the same NER / linking / extraction path, keeping the graph connected without a full re-crawl. |
+| 🕵️ Agentic Query-Time Graph Completion                          | A LangGraph tool-calling loop: before answering, the LLM judges whether the retrieved evidence is missing a connection between key entities, and if so calls a tool that fires a targeted PubMed search and re-runs the offline NER / entity-linking stack to ingest new chunks on the fly, strengthening graph connectivity before generation continues. |
+| 🌱 Build-Time Frontier Entity Expansion                          | During a domain-scoped build, entities that stay under-covered in the graph trigger a small supplementary PubMed fetch through the same NER / linking path, keeping the graph connected without a full re-crawl. |
 | 🏥 Two-Stage Cascade NER & Entity Linking                       | GLiNER zero-shot multilingual coarse pass + language-specific BERT precision pass (`biomedical-ner-all` EN, `Adapting/bert-base-chinese-finetuned-NER-biomedical` ZH, `GerMedBERT_NER_V01_BRONCO_CARDIO` DE) → SapBERT-XLMR dense retrieval linking to CUI (MeSH ID)                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ⚡ Schema-Constrained LLM Relation Extraction                    | LLM relation extraction limited to a closed medical schema (TREATS, CAUSES, INTERACTS_WITH, DOSAGE_FOR…) — no hallucinated relationship types                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 🕸️ Relation-Free Multi-Hop Retrieval (PPR)                     | Instead of costly, unstable LLM relation extraction, multi-hop reasoning comes from graph *connectivity*: entities co-occurring in the same chunk form an implicit bipartite graph, and a transient Neo4j GDS in-memory projection + Personalized PageRank ranks the most relevant chunks for a query — no relation edges are ever written or read. |
 | 🏗️ Section-aware Chunking                                      | Text is split based on structural hierarchy (Section → Sub-section → Paragraph) rather than fixed token counts. Each chunk carries a metadata section_path, ensuring contextual grounding during retrieval.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 🔀 Multi-Model LLM Router                                       | Automatically divide user problems into three levels according to the complexity, and call different llm models                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | 👁️ Multilingual PDF files support (Multi-Engine Parsing & OCR) | Hybrid pipeline using Docling (EN/DE) and MinerU (ZH) for structural layout analysis (tables/formulas). Integrated Tesseract 5 + PaddleOCR fallback for scanned medical records.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -64,7 +64,7 @@ traceable clinical AI brain.
 
 #### **1. Ingestion Pipeline**
 
-The ingestion pipeline orchestrates the offline knowledge-graph build process, transforming raw documents into a structured, query-ready graph and vector database. It consists of 8 distinct stages:
+The ingestion pipeline orchestrates the offline knowledge-graph build process, transforming raw documents into a structured, query-ready graph and vector database. It consists of 7 distinct stages:
 
 *   **1. Load**: Reads raw data from the local file system (`data/raw`), including structured JSON data (e.g., PubMed, FDA, DrugBank, GerMed) and unstructured local PDF files (e.g., EMA SmPC), converting them into internal `RawDocument` objects.
     *   *Key Aspect*: Utilizes specialized parsers (`StructuredParser`) to uniformly handle heterogeneous, multi-source medical data across different languages and formats, providing a standardized foundation for downstream tasks.
@@ -76,12 +76,10 @@ The ingestion pipeline orchestrates the offline knowledge-graph build process, t
     *   *Key Aspect*: Leverages GLiNER's zero-shot/few-shot flexibility to adapt to complex medical entity types, and implements a chunk-level degradation and retry mechanism for batch failures to ensure pipeline robustness.
 *   **5. Link (Entity Linking)**: Maps extracted entities to standard medical knowledge bases (MeSH). Uses a dense SapBERT retrieval index precomputed over the entire multilingual MeSH dictionary to find the best CUI match by semantic similarity.
     *   *Key Aspect*: The critical step for disambiguating entities and normalizing the knowledge graph. The precomputed dense index balances alignment accuracy with computational efficiency.
-*   **6. Extract (Relation Extraction)**: A schema-guided process based on LLMs that analyzes logical and medical associations between entities, extracting relation triplets and writing these edges concurrently to Neo4j.
-    *   *Key Aspect*: By injecting a predefined medical relation schema into the LLM, it strips out logically sound medical relation triplets (e.g., "Drug-TREATS-Disease") from unstructured text.
-*   **7. Embed**: Uses the BGE-M3 model to generate dense and sparse vector representations for each text chunk, upserting them into the Qdrant vector database.
+*   **6. Embed**: Uses the BGE-M3 model to generate dense and sparse vector representations for each text chunk, upserting them into the Qdrant vector database.
     *   *Key Aspect*: Generating hybrid vectors (dense for deep semantics, sparse for precise keyword matching) is the core foundation enabling high-quality Hybrid RAG for subsequent retrieval.
-*   **8. Community (Community Detection)**: Applies the Leiden algorithm to the entity-relation graph to detect communities, then invokes an LLM to generate summaries for these clusters and writes them back to Neo4j.
-    *   *Key Aspect*: Inspired by GraphRAG, partitioning the knowledge graph into hierarchical semantic communities empowers the system to handle macro-level medical queries requiring a global perspective.
+*   **7. Community (Community Detection)**: Applies the Leiden algorithm to an **entity co-occurrence graph** (two entities are linked if they're mentioned in the same chunk, weighted by shared-chunk count) to detect communities, then invokes an LLM to generate summaries for these clusters and writes them back to Neo4j.
+    *   *Key Aspect*: No relation extraction required — clustering runs directly on chunk co-occurrence, inspired by 2025-2026 relation-free GraphRAG research (LinearRAG, AtomicRAG). Partitioning the knowledge graph into hierarchical semantic communities empowers the system to handle macro-level medical queries requiring a global perspective.
 
 #### **2. Cross-Lingual Ontology Alignment**
 The system achieves deep cross-lingual alignment (ZH, EN, DE) through a unified MeSH ontology and a parallel multi-language retrieval mechanism:
@@ -116,7 +114,7 @@ To optimize for latency and cost, the system employs a tiered routing logic orch
 
 #### **5. Hybrid Global-Local Retrieval**
 The system fuses three distinct retrieval strategies to ensure comprehensive coverage:
-*   **Local Graph Traversal:** 1-2 hop expansion from query CUIs in Neo4j to find structured clinical facts (TREATS, CAUSES, etc.).
+*   **Local Graph Traversal:** Neo4j GDS **Personalized PageRank** over a transient in-memory bipartite entity-chunk projection, seeded at query CUIs, ranks the most structurally relevant chunks — no relation edges involved.
 *   **Global Community Summarization:** Semantic search over **Leiden-detected entity communities** in Neo4j to answer broad, cross-corpus overview questions.
 *   **Hybrid Vector Search:** Parallel BGE-M3 dense and sparse indexing on Qdrant. Results are merged via **Reciprocal Rank Fusion (RRF)** and prioritized by a cross-encoder reranker, ensuring both semantic depth and lexical precision (e.g., drug dosages).
 
@@ -136,8 +134,7 @@ MedGraphia leverages Large Language Models across the entire data lifecycle, fro
 |:-------------------------------|:---|:---|:---|
 | **Contextual Query Rewriting** | `Rewriter` | `dspy.Predict` | **DSPy Optimized**: Resolves coreference and ellipsis (e.g., "What are its side effects?") into standalone queries using conversation history. |
 | **Clinical Answer Generation** | `Generator` | `dspy.ChainOfThought` | **DSPy Optimized**: Synthesizes multilingual context into evidence-based answers with mandatory inline [N] citations and medical disclaimers. |
-| **Relation Extraction**        | `Extractor` | `dspy.Predict` | **DSPy Optimized**: Extracts high-fidelity medical triples (Disease → TREATS → Drug) from raw text, constrained to a closed ontology schema. |
-| **Community Summarization**    | `Summarizer` | `dspy.Predict` | **DSPy Optimized**: Generates hierarchical summaries for Leiden-detected entity clusters to support global, cross-corpus thematic queries. |
+| **Community Summarization**    | `Summarizer` | `dspy.Predict` | **DSPy Optimized**: Generates hierarchical summaries for Leiden-detected entity co-occurrence clusters to support global, cross-corpus thematic queries. |
 | **Multilingual Translation**   | `Translator` | `dspy.Predict` | **DSPy Optimized**: Parallel translation of queries into ZH, EN, and DE to eliminate lexical bias in sparse/hybrid retrieval paths. |
 | **Intelligent Intent Routing** | `Router` | `pydantic-ai` | **Typed Agent**: Classifies queries into 5 intent tiers (e.g., FAQ vs. Multi-hop) and generates a structured retrieval plan. |
 | **Proactive Safety Guarding**  | `Guard` | `Llama-Guard 3` | **Direct Inference**: Performs two-stage (input/output) safety filtering against S1-S14 hazard categories. |
@@ -169,23 +166,17 @@ MedGraphia leverages Large Language Models across the entire data lifecycle, fro
                     └─────────────────────────────────────┬──────────────────────────────┘
                                                           │
                     ┌─────────────────────────────────────▼────────────────────────────────┐
-                    │  Schema-guided Relation Extraction (LLM + DSPy)                      │
-                    │  TREATS · CAUSES · INTERACTS_WITH · DOSAGE_FOR · SYMPTOM_OF · etc.   │
-                    │  Each edge: evidence_text · source_id · chunk_id · confidence        │
-                    └────────────────────────┬─────────────────────────────────────────────┘
-                                             │
-                    ┌─────────────────────────────────────▼────────────────────────────────┐
                     │  Frontier Entity Expansion (domain-scoped builds only)               │
-                    │  Under-covered entities from new relations → light PubMed fetch →    │
-                    │  same NER/link/extract path, merged back into the graph              │
+                    │  Under-covered entities → light PubMed fetch →                       │
+                    │  same NER/link path, merged back into the graph                      │
                     └────────────────────────┬─────────────────────────────────────────────┘
                                              │
               ┌──────────────────────────────┼──────────────────────────┐
               │                              │                          │
    ┌──────────▼────────────────┐  ┌──────────▼───────────────┐          │
    │  Leiden Community         │  │  BGE-M3 Embedding        │          │
-   │  Detection + LLM          │  │  dense + sparse          │          │
-   │  community summaries      │  │                          │          │
+   │  Detection (co-occurrence)│  │  dense + sparse          │          │
+   │  + LLM community summaries│  │                          │          │
    └──────────┬────────────────┘  └───────────┬──────────────┘          │
               └─────────────────────┬─────────┘                         │
                                     │                                   │
@@ -194,7 +185,7 @@ MedGraphia leverages Large Language Models across the entire data lifecycle, fro
           │   ┌─────────────────────────┐   ┌────────────────┐   ┌──────────────┐  │
           │   │  Neo4j 5.x              │   │  Qdrant        │   │  Local Disk  │  │
           │   │  Knowledge Graph        │   │  Vector Store  │   │              │  │
-          │   │  entities · relations   │   │  dense + sparse│   │  raw docs    │  │
+          │   │  entities · co-occurs  │   │  dense + sparse│   │  raw docs    │  │
           │   │  community summaries    │   │  hybrid index  │   │  provenance  │  │
           │   └─────────────────────────┘   └────────────────┘   └──────────────┘  │
           └────────────────────────────────────────────────────────────────────────┘
@@ -236,9 +227,9 @@ MedGraphia leverages Large Language Models across the entire data lifecycle, fro
               │                      │                      │
     ┌─────────▼─────────┐   ┌─────────▼─────────┐  ┌────────▼──────────────┐
     │  Graph Retrieval  │   │  Hybrid Vector:   │  │  Community Summary    │
-    │  Neo4j 1–2-hop    │   │  (BGE-M3)         │  │  Global search over   │
-    │  subgraph from    │   │  dense + sparse   │  │  Leiden communities   │
-    │  query entity CUI │   │  on Qdrant        │  │  (Multi-hop/Overview) │
+    │  Neo4j GDS PPR     │   │  (BGE-M3)         │  │  Global search over   │
+    │  bipartite entity- │   │  dense + sparse   │  │  Leiden communities   │
+    │  chunk projection  │   │  on Qdrant        │  │  (Multi-hop/Overview) │
     └─────────┬─────────┘   └────────┬──────────┘  └────────┬──────────────┘
               └──────────────────────┼──────────────────────┘
                                      │
@@ -256,8 +247,8 @@ MedGraphia leverages Large Language Models across the entire data lifecycle, fro
                                      │
           ┌──────────────────────────▼─────────────────────────────┐
           │  Agentic Gap Completion (LangGraph)                    │
-          │  - LLM judges whether evidence is missing a relation   │
-          │  - If so: tool call → targeted fetch + NER/link/extract│
+          │  - LLM judges whether evidence is missing a connection │
+          │  - If so: tool call → targeted fetch + NER/link ingest │
           └──────────────────────────┬─────────────────────────────┘
                                      │
           ┌──────────────────────────▼─────────────────────────────┐
@@ -296,6 +287,9 @@ Core knowledge nodes. All medical entities are uniquely identified by their **Me
 | `Symptom` | Signs and symptoms | `cui`, `label`, `lang_zh`, `lang_de`, `confidence` |
 | `Gene` | Genes / proteins / markers | `cui`, `label`, `lang_zh`, `lang_de`, `confidence` |
 | `Procedure` | Diagnostic or therapeutic procedures | `cui`, `label`, `lang_zh`, `lang_de`, `confidence` |
+| `Anatomy` | Body parts / anatomical structures | `cui`, `label`, `lang_zh`, `lang_de`, `confidence` |
+| `Physiology` | Biological processes / phenomena | `cui`, `label`, `lang_zh`, `lang_de`, `confidence` |
+| `LivingBeing` | Pathogens / organisms (bacteria, viruses, parasites) | `cui`, `label`, `lang_zh`, `lang_de`, `confidence` |
 
 #### 2. Knowledge & Application Structure
 Nodes supporting the RAG workflow and system metadata.
@@ -315,29 +309,17 @@ Nodes supporting the RAG workflow and system metadata.
 
 ### Relationship Types
 
-#### 1. Semantic Relations (LLM Extracted)
-Directed edges between two **Medical Entities**, derived from text evidence.
-
-| Type | Example Triple (Source → Target) | Stored Properties |
-|---|---|---|
-| `TREATS` | Metformin → T2DM | `confidence`, `evidence_text`, `chunk_id`, `source_id`, `extracted_by` |
-| `CAUSES` | T2DM → Retinopathy | `confidence`, `evidence_text`, `chunk_id`, `source_id`, `extracted_by` |
-| `INTERACTS_WITH` | Warfarin → Aspirin | `confidence`, `evidence_text`, `chunk_id`, `source_id`, `extracted_by` |
-| `SYMPTOM_OF` | Polyuria → T2DM | `confidence`, `evidence_text`, `chunk_id`, `source_id`, `extracted_by` |
-| `COMPLICATION_OF` | Nephropathy → T2DM | `confidence`, `evidence_text`, `chunk_id`, `source_id`, `extracted_by` |
-| `CONTRAINDICATED_IN`| Metformin → Renal Failure | `confidence`, `evidence_text`, `chunk_id`, `source_id`, `extracted_by` |
-| `DOSAGE_FOR` | Tablets → Aspirin | `confidence`, `evidence_text`, `chunk_id`, `source_id`, `extracted_by` |
-| `CODED_AS` | T2DM → E11 (ICD-10) | `confidence`, `evidence_text`, `chunk_id`, `source_id`, `extracted_by` |
-
-#### 2. Structural & System Relations
+No typed semantic relations are extracted or stored — multi-hop reasoning comes from graph *connectivity* (entities co-occurring via shared chunks) rather than LLM-extracted edges. See [🕸️ Relation-Free Multi-Hop Retrieval](#-features) above.
 
 | Type | Source → Target | Description |
 |---|---|---|
-| `MENTIONED_IN` | Entity → Chunk | Indicates an entity mention within a specific text fragment |
+| `MENTIONED_IN` | Entity → Chunk | Indicates an entity mention within a specific text fragment — the backbone of the bipartite entity-chunk graph used for PPR retrieval |
 | `FROM_DOC` | Chunk → Document | Links a chunk back to its parent source document |
-| `MEMBER_OF` | Entity → Community | Assigns an entity to a Leiden-detected community cluster |
+| `MEMBER_OF` | Entity → Community | Assigns an entity to a Leiden-detected (co-occurrence) community cluster |
 | `HAS_MESSAGE` | ChatSession → ChatMessage| History chain for a specific conversation session |
 | `INTERESTED_IN` | User → Entity | Tracks user-specific interests with decaying `weight` |
+
+The `/graph/entity` API (Graph Explorer) derives a synthetic `CO_OCCURS_WITH` edge on the fly — two entities sharing a chunk are shown as connected, weighted by shared-chunk count.
 
 ---
 
@@ -349,13 +331,13 @@ Directed edges between two **Medical Entities**, derived from text evidence.
 | **API Framework** | FastAPI + Uvicorn                                                                                                                             | SSE streaming support                                                                                                                                                |
 | **Agent Orchestration** | LangGraph (LangChain)                                                                                                                         | Stateful, branching, retriable query agent                                                                                                                           |
 | **Prompt Optimization** | DSPy                                                                                                                                          | Optimized via **Adversarial Few-Shot Bootstrapping**; enforces clinical rigor through pre-compiled reasoning traces                                                  |
-| **GraphRAG Framework** | Custom Implementation                                                                                                                         | Fuses **Leiden community summarization** (Global), **Entity-centric traversal** (Local), and **MeSH-anchored semantic alignment** for complex cross-corpus reasoning. |
+| **GraphRAG Framework** | Custom Implementation                                                                                                                         | Fuses **Leiden community summarization** (Global), **PPR-based bipartite graph retrieval** (Local), and **MeSH-anchored semantic alignment** for complex cross-corpus reasoning. |
 | **Graph Database** | Neo4j 5.x                                                                                                                                     | Nodes and relationships                                                                                                                                              |
 | **Vector Store** | Qdrant                                                                                                                                        | Native dense + sparse hybrid                                                                                                                                         |
 | **Embedding** | BGE-M3 (BAAI)                                                                                                                                 | Dense + sparse                                                                                                                                                       |
-| **Entity NER** | GLiNER (`gliner_mediumv2.1`) · `biomedical-ner-all` (EN) · `Adapting/bert-base-chinese-finetuned-NER-biomedical` (ZH) · `GerMedBERT_NER_V01_BRONCO_CARDIO` (DE) | Multi-lang, domain-specialized                                                                                                                                       |
+| **Entity NER** | GLiNER (`Ihor/gliner-biomed-large-v1.0`) · `biomedical-ner-all` (EN) · `Adapting/bert-base-chinese-finetuned-NER-biomedical` (ZH) · `GerMedBERT_NER_V01_BRONCO_CARDIO` (DE) | Multi-lang, domain-specialized biomedical GLiNER                                                                                                                                       |
 | **Entity Linking** | SapBERT-XLMR (dense retrieval)                                                                                                                           | Cross-lingual → MeSH ID                                                                                                                                              |
-| **Relation Extraction** | Schema-guided LLM                                                                                                                       | Zero-shot extraction constrained to closed medical ontology                                                                                                          |
+| **Graph Algorithms** | Neo4j GDS (Personalized PageRank)                                                                                                                       | Transient in-memory bipartite entity-chunk projection for relation-free multi-hop retrieval                                                                          |
 | **Reranker** | bge-reranker-v2-m3                                                                                                                            | Cross-encoder, multilingual                                                                                                                                          |
 | **Community Detection** | Leiden algorithm                                                                                                                              | Graph clustering for global QA                                                                                                                                       |
 | **Document Parsing** | Docling (EN/DE) · MinerU (ZH)                                                                                                                 | Section-aware; table / formula extraction                                                                                                                            |
@@ -376,7 +358,7 @@ Directed edges between two **Medical Entities**, derived from text evidence.
 
 ### 1 — Offline Build Pipeline
 
-When you run `scripts/pipeline/build_graph.py` (or trigger the Prefect DAG), data flows through eight stages:
+When you run `scripts/pipeline/build_graph.py` (or trigger the Prefect DAG), data flows through seven stages:
 
 **Stage 1 — Fetch**
 
@@ -407,8 +389,8 @@ Text is split following the document's structural hierarchy (`section → paragr
 
 **Stage 4 — Multi-language NER**
 
-A two-stage pipeline extracts medical entities (`EntityType.DISEASE`, `EntityType.DRUG`, etc.):
-1. **Coarse pass**: GLiNER (`gliner_mediumv2.1`) performs zero-shot multilingual entity detection across EN, ZH, and DE.
+A two-stage pipeline extracts medical entities across 8 categories (`EntityType.DISEASE`, `DRUG`, `SYMPTOM`, `GENE`, `PROCEDURE`, `ANATOMY`, `PHYSIOLOGY`, `LIVING_BEING`):
+1. **Coarse pass**: GLiNER (`Ihor/gliner-biomed-large-v1.0`, domain-adapted for biomedical NER) performs zero-shot multilingual entity detection across EN, ZH, and DE.
 2. **Fine pass**: Language-specific BERT models refine candidate spans for higher precision.
     - **English**: `biomedical-ner-all`.
     - **Chinese**: `Adapting/bert-base-chinese-finetuned-NER-biomedical`.
@@ -420,19 +402,13 @@ Provisional mentions are resolved to global **MeSH CUIs**:
 1. **SapBERT-XLMR dense retrieval**: The entire multilingual MeSH dictionary is encoded into a vector index ahead of time; mentions are matched via GPU cosine similarity to find the best CUI.
 2. **Graph Write**: Linked entities and `MENTIONED_IN` relationships are written to Neo4j.
 
-**Stage 6 — Relation Extraction**
-
-A **DSPy-powered extractor** identifies relationships between linked entities using the `DEFAULT_LLM_MODEL`. Extraction is strictly constrained to the system's `RelationType` schema:
-- `TREATS`, `CAUSES`, `INTERACTS_WITH`, `SYMPTOM_OF`, `COMPLICATION_OF`, `CONTRAINDICATED_IN`, `DOSAGE_FOR`, `CODED_AS`.
-- Every relation includes `evidence_text` and `confidence` score.
-
-**Stage 7 — Embedding**
+**Stage 6 — Embedding**
 
 Chunks are embedded using **BGE-M3**, producing both **dense** (semantic) and **sparse** (lexical) vectors. These are indexed in Qdrant for hybrid retrieval.
 
-**Stage 8 — Community Detection**
+**Stage 7 — Community Detection**
 
-The **Leiden algorithm** clusters the entity graph based on relationship topology. An LLM then generates hierarchical summaries for each community, which are stored in Neo4j to support global "overview" queries.
+The **Leiden algorithm** clusters an **entity co-occurrence graph** (two entities are linked if they're mentioned in the same chunk, weighted by shared-chunk count) — no relation extraction involved. An LLM then generates hierarchical summaries for each community, which are stored in Neo4j to support global "overview" queries.
 
 ---
 
@@ -453,7 +429,7 @@ If conversation history exists, the `QueryRewriter` resolves pronouns and ellips
 
 **Step 3 — Three-Path Retrieval & Fusion**
 The system executes a concurrent retrieval plan:
-1. **Graph Traversal**: 1-2 hop expansion from query CUIs in Neo4j to find structured clinical facts.
+1. **Graph Traversal**: A transient Neo4j GDS in-memory projection (bipartite entity-chunk graph) + **Personalized PageRank** seeded at query CUIs ranks the most structurally relevant chunks — no relation edges to traverse.
 2. **Hybrid Vector Search**: Parallel per-language Qdrant searches using BGE-M3 (dense + sparse) with quota-based merging.
 3. **Community Summary**: Semantic search over Leiden-detected community summaries for global insights.
 
@@ -736,13 +712,15 @@ curl "http://localhost:8058/graph/entity?name=metformin&lang=en&hops=2" \
     "nodes": 14,
     "edges": 31,
     "relations": [
-      {"type": "TREATS", "target": {"cui": "C0011860", "label": "T2DM"}},
-      {"type": "INTERACTS_WITH", "target": {"cui": "C0009413", "label": "Contrast Media"}, "severity": "major"},
-      {"type": "CONTRAINDICATED_IN", "target": {"cui": "C0035222", "label": "Renal Failure"}}
+      {"type": "CO_OCCURS_WITH", "target": {"cui": "C0011860", "label": "T2DM"}, "confidence": 5},
+      {"type": "CO_OCCURS_WITH", "target": {"cui": "C0009413", "label": "Contrast Media"}, "confidence": 2},
+      {"type": "CO_OCCURS_WITH", "target": {"cui": "C0035222", "label": "Renal Failure"}, "confidence": 1}
     ]
   }
 }
 ```
+
+Edges are derived on the fly — two entities are connected if they co-occur in a shared chunk, with `confidence` set to the shared-chunk count (see [Relationship Types](#relationship-types)).
 
 ### 🧬 DSPy Prompt Optimization (Self-Improvement)
 
@@ -949,7 +927,6 @@ MedGraphia/
     ├── programs/                   # DSPy Programs: Encapsulated business logic
     │   ├── rewriter.py             # Context-aware query rewrite module
     │   ├── generator.py            # Clinical answer generation module (CoT)
-    │   ├── extractor.py            # Relation extraction module
     │   ├── summarizer.py           # Community summarization module
     │   └── translator.py           # Medical terminology translation module
     │
@@ -959,7 +936,7 @@ MedGraphia/
     │   ├── rewriter.py             # QueryRewriter: condense history into standalone query
     │   ├── query_translator.py     # QueryTranslator: translate query into ZH/EN/DE
     │   ├── query_ner.py            # NER on incoming query for entity-based graph lookup
-    │   ├── graph_retriever.py      # Neo4j 1–2-hop subgraph from entity CUIs in query
+    │   ├── graph_retriever.py      # Neo4j GDS Personalized PageRank over bipartite entity-chunk graph
     │   ├── vector_retriever.py     # BGE-M3 dense + sparse hybrid search on Qdrant
     │   ├── community_retriever.py  # Leiden community summary search (global QA)
     │   ├── reranker.py             # bge-reranker-v2-m3 cross-encoder
@@ -975,7 +952,6 @@ MedGraphia/
     │   ├── answer_generation.py
     │   ├── community_summary.py
     │   ├── query_rewriting.py
-    │   ├── relation_extraction.py
     │   └── safety.py
     │
     ├── api/                        # FastAPI application
@@ -1016,8 +992,7 @@ MedGraphia/
         ├── test_chunker.py         # Chunking + normalization tests
         ├── test_ner.py             # NER pipeline (GLiNER + BERT) accuracy tests
         ├── test_entity_linker.py   # Cross-lingual CUI alignment tests
-        ├── test_relation_extractor.py # Schema-guided relation extraction tests
-        ├── test_community_builder.py  # Leiden + community summary tests
+        ├── test_community_builder.py  # Leiden co-occurrence + community summary tests
         └── test_llm_gateway.py    # LiteLLMGateway integration tests
 ```
 
