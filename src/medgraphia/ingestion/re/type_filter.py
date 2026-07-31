@@ -49,8 +49,34 @@ VALID_PAIR_RELATIONS: dict[tuple[EntityType, EntityType], frozenset[RelationType
     (EntityType.SYMPTOM, EntityType.DISEASE): frozenset({
         RelationType.SYMPTOM_OF,
     }),
-    # Gene type excluded: GLiNER misclassifies anatomical terms (Brain, Breast, etc.)
-    # as Gene. Re-add Gene entries once a dedicated Anatomy entity type is introduced.
+    (EntityType.SYMPTOM, EntityType.ANATOMY): frozenset({
+        RelationType.ASSOCIATED_WITH,
+    }),
+
+    # Gene as source/target — now that Anatomy is its own type, GLiNER no longer
+    # misclassifies body parts as Gene, so these pairs are safe to enable.
+    (EntityType.GENE, EntityType.DISEASE): frozenset({
+        RelationType.ASSOCIATED_WITH,
+    }),
+    (EntityType.DRUG, EntityType.GENE): frozenset({
+        RelationType.INTERACTS_WITH,
+    }),
+
+    # Anatomy as target — where in the body a disease/procedure/symptom applies
+    (EntityType.DISEASE, EntityType.ANATOMY): frozenset({
+        RelationType.ASSOCIATED_WITH,
+    }),
+    (EntityType.PROCEDURE, EntityType.ANATOMY): frozenset({
+        RelationType.ASSOCIATED_WITH,
+    }),
+
+    # Living being (pathogen) as source — infectious disease relations
+    (EntityType.LIVING_BEING, EntityType.DISEASE): frozenset({
+        RelationType.CAUSES,
+    }),
+    (EntityType.DRUG, EntityType.LIVING_BEING): frozenset({
+        RelationType.INTERACTS_WITH,
+    }),
 }
 
 # Flat set of all valid (src_type, tgt_type) keys — used for O(1) lookup

@@ -183,7 +183,7 @@ class EntityEmbedder:
     """
     SapBERT entity embedder.
 
-    Reads all entity nodes (Disease / Drug / Symptom / Gene / Procedure) from Neo4j,
+    Reads all entity nodes (any EntityType) from Neo4j,
     encodes their canonical labels with SapBERT, and upserts dense vectors into the
     'medgraphia_entities' Qdrant collection for entity-level similarity search.
 

@@ -9,6 +9,9 @@ class EntityType(str, Enum):
     SYMPTOM = "Symptom"
     GENE = "Gene"
     PROCEDURE = "Procedure"
+    ANATOMY = "Anatomy"
+    PHYSIOLOGY = "Physiology"
+    LIVING_BEING = "LivingBeing"
     UNKNOWN = "Unknown"
 
 

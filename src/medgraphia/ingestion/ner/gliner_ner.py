@@ -36,12 +36,15 @@ _ENTITY_LABELS: dict[EntityType, dict[Language, str]] = {
     EntityType.SYMPTOM: {Language.EN: "symptom", Language.ZH: "症状", Language.DE: "Symptom"},
     EntityType.GENE: {Language.EN: "gene", Language.ZH: "基因", Language.DE: "Gen"},
     EntityType.PROCEDURE: {Language.EN: "procedure", Language.ZH: "手术", Language.DE: "Operation"},
+    EntityType.ANATOMY: {Language.EN: "body part", Language.ZH: "身体部位", Language.DE: "Körperteil"},
+    EntityType.PHYSIOLOGY: {Language.EN: "biological process", Language.ZH: "生理过程", Language.DE: "biologischer Prozess"},
+    EntityType.LIVING_BEING: {Language.EN: "pathogen", Language.ZH: "病原体", Language.DE: "Erreger"},
 }
 
 # Reverse map: label text -> EntityType (used to map model output back to domain types)
 _LABEL_TO_TYPE: dict[str, EntityType] = {
-    label: etype 
-    for etype, lang_map in _ENTITY_LABELS.items() 
+    label: etype
+    for etype, lang_map in _ENTITY_LABELS.items()
     for label in lang_map.values()
 }
 
@@ -52,7 +55,8 @@ _EN_LABELS = [lang_map[Language.EN] for lang_map in _ENTITY_LABELS.values()]
 _ZH_LABELS = [lang_map[Language.ZH] for lang_map in _ENTITY_LABELS.values()] + _EN_LABELS
 _DE_LABELS = [lang_map[Language.DE] for lang_map in _ENTITY_LABELS.values()] + _EN_LABELS
 
-_ALL_LABELS = _EN_LABELS + _ZH_LABELS[:5] + _DE_LABELS[:5] # keep unique values for UNKNOWN fallback
+_N_TYPES = len(_ENTITY_LABELS)
+_ALL_LABELS = _EN_LABELS + _ZH_LABELS[:_N_TYPES] + _DE_LABELS[:_N_TYPES]  # keep unique values for UNKNOWN fallback
 
 _LABELS_BY_LANG: dict[Language, list[str]] = {
     Language.EN: _EN_LABELS,

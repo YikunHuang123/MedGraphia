@@ -8,11 +8,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from medgraphia.domain import Chunk, Entity, Message, RawDocument, Relation, Session
+from medgraphia.domain import Chunk, Entity, EntityType, Message, RawDocument, Relation, Session
 from medgraphia.graph.client import get_session
 from medgraphia.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Matches any known entity-type node label (excludes Unknown), generated from
+# EntityType so it stays in sync when categories are added or removed.
+_ENTITY_LABEL_DISJUNCTION = " OR ".join(
+    f"e:{t.value}" for t in EntityType if t is not EntityType.UNKNOWN
+)
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +96,7 @@ async def create_chunk(chunk: Chunk) -> None:
 async def merge_entity(entity: Entity) -> None:
     """
     MERGE entity node on CUI.  Updates label, type, and lang_labels.
-    Works for Disease / Drug / Symptom / Gene / Procedure via dynamic label.
+    Works for any EntityType via dynamic label.
     """
     label = entity.entity_type.value  # e.g. "Disease"
     cypher = """
@@ -182,9 +188,9 @@ async def get_all_entities() -> list[dict[str, Any]]:
     Query Neo4j for all entity nodes and return them as plain dicts.
     Used by the embedding layer to sync graph entities to the vector store.
     """
-    cypher = """
+    cypher = f"""
     MATCH (e)
-    WHERE (e:Disease OR e:Drug OR e:Symptom OR e:Gene OR e:Procedure)
+    WHERE ({_ENTITY_LABEL_DISJUNCTION})
       AND e.cui IS NOT NULL AND e.label IS NOT NULL
     RETURN e.cui        AS cui,
            e.label      AS label,

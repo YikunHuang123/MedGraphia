@@ -63,7 +63,7 @@ def _search_cached(
         return c.search_entities(q=q, limit=limit, entity_type=entity_type)
 
 
-_ENTITY_TYPES = ["(any)", "Disease", "Drug", "Symptom", "Gene", "Procedure"]
+_ENTITY_TYPES = ["(any)", "Disease", "Drug", "Symptom", "Gene", "Procedure", "Anatomy", "Physiology", "LivingBeing"]
 _LANG_CHOICES = {"en": "English", "zh": "中文", "de": "Deutsch"}
 
 

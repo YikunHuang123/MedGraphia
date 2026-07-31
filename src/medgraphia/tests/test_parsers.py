@@ -221,6 +221,27 @@ def test_mesh_entity_type_priority():
     assert _resolve_entity_type(["C14.280", "D02.145"]) == "Disease"
 
 
+def test_mesh_entity_type_anatomy():
+    assert _resolve_entity_type(["A01.378"]) == "Anatomy"
+
+
+def test_mesh_entity_type_living_being():
+    assert _resolve_entity_type(["B03.353"]) == "LivingBeing"
+
+
+def test_mesh_entity_type_physiology():
+    # G-branch (other than G05=Genetic Phenomena) = Physiology
+    assert _resolve_entity_type(["G07.100"]) == "Physiology"
+    # F01/F02 = Behavior / Psychological Phenomena
+    assert _resolve_entity_type(["F02.463"]) == "Physiology"
+
+
+def test_mesh_entity_type_gene_priority_over_drug():
+    # A gene/protein (D12) that also carries an unrelated chemical tree number
+    # should resolve to Gene, not Drug (regression test for the mistyped-protein bug)
+    assert _resolve_entity_type(["D12.776.395", "D08.811.913"]) == "Gene"
+
+
 # ===========================================================================
 # Docling section extraction (no real PDF — unit-tests on the JSON parser)
 # ===========================================================================

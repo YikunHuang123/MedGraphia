@@ -58,6 +58,9 @@ _TYPE_MISMATCH_HINTS: dict[str, set[str]] = {
     "Disease": {"tablet", "capsule", "injection", "mg", "drug", "medication", "药片", "胶囊"},
     "Symptom": {"gene", "protein", "receptor", "enzyme", "基因", "蛋白"},
     "Gene": {"pain", "fever", "nausea", "疼痛", "发热", "恶心"},
+    "Anatomy": {"disease", "syndrome", "cancer", "疾病", "综合征"},
+    "Physiology": {"tablet", "capsule", "drug", "药片"},
+    "LivingBeing": {"tablet", "capsule", "syndrome", "药片"},
 }
 
 

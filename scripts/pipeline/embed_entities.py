@@ -2,7 +2,7 @@
 """
 Embed entity nodes from Neo4j using SapBERT and write to Qdrant.
 
-Reads all Disease / Drug / Symptom / Gene / Procedure nodes from Neo4j,
+Reads all entity nodes (any EntityType) from Neo4j,
 encodes their canonical labels with SapBERT, and upserts dense vectors
 into the entity Qdrant collection for entity-level similarity search.
 

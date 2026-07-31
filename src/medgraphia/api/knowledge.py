@@ -14,13 +14,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from medgraphia.api.auth import require_api_key
 from medgraphia.api.schemas import EntityQueryResponse
+from medgraphia.domain import EntityType
 from medgraphia.graph.client import get_session as neo4j_session
-from medgraphia.graph.queries import get_graph_stats, get_subgraph
+from medgraphia.graph.queries import _ENTITY_LABEL_DISJUNCTION, get_graph_stats, get_subgraph
 from medgraphia.logger import get_logger
 from medgraphia.observability import get_langfuse_client
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/graph", tags=["knowledge"])
+
+# Valid values for the public `entity_type` query param — also guards against
+# Cypher label injection since Neo4j labels can't be parameterized.
+_VALID_TYPES = {t.value for t in EntityType if t is not EntityType.UNKNOWN}
 
 
 # ---------------------------------------------------------------------------
@@ -157,9 +162,9 @@ async def _find_entity_by_name(name: str) -> dict[str, Any] | None:
     """
     # Neo4j 5.x recommendation: Lowercase the parameter, not the property
     lower_name = name.lower()
-    cypher = """
+    cypher = f"""
     MATCH (e)
-    WHERE (e:Disease OR e:Drug OR e:Symptom OR e:Gene OR e:Procedure)
+    WHERE ({_ENTITY_LABEL_DISJUNCTION})
       AND (
         e.label_lower   = $q  // Optimized path: if we had a lower_label property
         OR e.label      = $name
@@ -202,12 +207,11 @@ async def _fuzzy_search_entities(
 ) -> list[dict[str, Any]]:
     """Substring search on entity labels."""
     if entity_type:
-        _VALID_TYPES = {"Disease", "Drug", "Symptom", "Gene", "Procedure"}
         if entity_type not in _VALID_TYPES:
             return []
         type_filter = f"e:{entity_type} AND"
     else:
-        type_filter = "(e:Disease OR e:Drug OR e:Symptom OR e:Gene OR e:Procedure) AND"
+        type_filter = f"({_ENTITY_LABEL_DISJUNCTION}) AND"
 
     # Optimization: Use case-insensitive regex (?i) or STARTS WITH
     # if we want to stay within standard indexes. CONTAINS is always a scan.

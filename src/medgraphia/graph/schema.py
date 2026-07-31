@@ -5,6 +5,7 @@ and index creation statements.  Run apply_schema() once on a fresh database.
 
 from __future__ import annotations
 
+from medgraphia.domain import EntityType
 from medgraphia.graph.client import get_session
 from medgraphia.logger import get_logger
 
@@ -13,16 +14,8 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 # Node labels
 # ---------------------------------------------------------------------------
-NODE_LABELS = [
-    "Disease",
-    "Drug",
-    "Symptom",
-    "Gene",
-    "Procedure",
-    "Chunk",
-    "Document",
-    "Community",
-]
+ENTITY_LABELS = [t.value for t in EntityType]
+NODE_LABELS = ENTITY_LABELS + ["Chunk", "Document", "Community"]
 
 # ---------------------------------------------------------------------------
 # Relationship types (closed schema — no arbitrary types allowed)
@@ -46,31 +39,15 @@ RELATION_TYPES = [
 # Each tuple: (description, cypher)
 # ---------------------------------------------------------------------------
 _CONSTRAINTS: list[tuple[str, str]] = [
-    # Unique CUI per medical entity type
-    (
-        "unique_disease_cui",
-        "CREATE CONSTRAINT unique_disease_cui IF NOT EXISTS FOR (n:Disease)   REQUIRE n.cui IS UNIQUE",
-    ),
-    (
-        "unique_drug_cui",
-        "CREATE CONSTRAINT unique_drug_cui IF NOT EXISTS FOR (n:Drug)         REQUIRE n.cui IS UNIQUE",
-    ),
-    (
-        "unique_symptom_cui",
-        "CREATE CONSTRAINT unique_symptom_cui IF NOT EXISTS FOR (n:Symptom)   REQUIRE n.cui IS UNIQUE",
-    ),
-    (
-        "unique_gene_cui",
-        "CREATE CONSTRAINT unique_gene_cui IF NOT EXISTS FOR (n:Gene)         REQUIRE n.cui IS UNIQUE",
-    ),
-    (
-        "unique_procedure_cui",
-        "CREATE CONSTRAINT unique_procedure_cui IF NOT EXISTS FOR (n:Procedure) REQUIRE n.cui IS UNIQUE",
-    ),
-    (
-        "unique_unknown_cui",
-        "CREATE CONSTRAINT unique_unknown_cui IF NOT EXISTS FOR (n:Unknown) REQUIRE n.cui IS UNIQUE",
-    ),
+    # Unique CUI per medical entity type, generated from EntityType so every
+    # category gets a constraint without hand-writing one per type.
+    *[
+        (
+            f"unique_{label.lower()}_cui",
+            f"CREATE CONSTRAINT unique_{label.lower()}_cui IF NOT EXISTS FOR (n:{label}) REQUIRE n.cui IS UNIQUE",
+        )
+        for label in ENTITY_LABELS
+    ],
     # Chunk and Document use UUID-based IDs
     (
         "unique_chunk_id",
@@ -96,79 +73,16 @@ _CONSTRAINTS: list[tuple[str, str]] = [
 ]
 
 _INDEXES: list[tuple[str, str]] = [
-    # Full-text search index on entity labels (enables BM25-style lexical lookup)
-    (
-        "idx_disease_label",
-        "CREATE INDEX idx_disease_label IF NOT EXISTS FOR (n:Disease)   ON (n.label)",
-    ),
-    (
-        "idx_disease_zh",
-        "CREATE INDEX idx_disease_zh    IF NOT EXISTS FOR (n:Disease)   ON (n.lang_zh)",
-    ),
-    (
-        "idx_disease_de",
-        "CREATE INDEX idx_disease_de    IF NOT EXISTS FOR (n:Disease)   ON (n.lang_de)",
-    ),
-    (
-        "idx_drug_label",
-        "CREATE INDEX idx_drug_label    IF NOT EXISTS FOR (n:Drug)      ON (n.label)",
-    ),
-    (
-        "idx_drug_zh",
-        "CREATE INDEX idx_drug_zh       IF NOT EXISTS FOR (n:Drug)      ON (n.lang_zh)",
-    ),
-    (
-        "idx_drug_de",
-        "CREATE INDEX idx_drug_de       IF NOT EXISTS FOR (n:Drug)      ON (n.lang_de)",
-    ),
-    (
-        "idx_symptom_label",
-        "CREATE INDEX idx_symptom_label IF NOT EXISTS FOR (n:Symptom)   ON (n.label)",
-    ),
-    (
-        "idx_symptom_zh",
-        "CREATE INDEX idx_symptom_zh    IF NOT EXISTS FOR (n:Symptom)   ON (n.lang_zh)",
-    ),
-    (
-        "idx_symptom_de",
-        "CREATE INDEX idx_symptom_de    IF NOT EXISTS FOR (n:Symptom)   ON (n.lang_de)",
-    ),
-    (
-        "idx_gene_label",
-        "CREATE INDEX idx_gene_label    IF NOT EXISTS FOR (n:Gene)      ON (n.label)",
-    ),
-    (
-        "idx_gene_zh",
-        "CREATE INDEX idx_gene_zh       IF NOT EXISTS FOR (n:Gene)      ON (n.lang_zh)",
-    ),
-    (
-        "idx_gene_de",
-        "CREATE INDEX idx_gene_de       IF NOT EXISTS FOR (n:Gene)      ON (n.lang_de)",
-    ),
-    (
-        "idx_proc_label",
-        "CREATE INDEX idx_proc_label    IF NOT EXISTS FOR (n:Procedure) ON (n.label)",
-    ),
-    (
-        "idx_proc_zh",
-        "CREATE INDEX idx_proc_zh       IF NOT EXISTS FOR (n:Procedure) ON (n.lang_zh)",
-    ),
-    (
-        "idx_proc_de",
-        "CREATE INDEX idx_proc_de       IF NOT EXISTS FOR (n:Procedure) ON (n.lang_de)",
-    ),
-    (
-        "idx_unknown_label",
-        "CREATE INDEX idx_unknown_label IF NOT EXISTS FOR (n:Unknown)   ON (n.label)",
-    ),
-    (
-        "idx_unknown_zh",
-        "CREATE INDEX idx_unknown_zh    IF NOT EXISTS FOR (n:Unknown)   ON (n.lang_zh)",
-    ),
-    (
-        "idx_unknown_de",
-        "CREATE INDEX idx_unknown_de    IF NOT EXISTS FOR (n:Unknown)   ON (n.lang_de)",
-    ),
+    # Full-text search index on entity labels (enables BM25-style lexical lookup),
+    # generated from EntityType — one (label, lang_zh, lang_de) index triple per type.
+    *[
+        (
+            f"idx_{label.lower()}_{prop}",
+            f"CREATE INDEX idx_{label.lower()}_{prop} IF NOT EXISTS FOR (n:{label}) ON (n.{col})",
+        )
+        for label in ENTITY_LABELS
+        for prop, col in (("label", "label"), ("zh", "lang_zh"), ("de", "lang_de"))
+    ],
     (
         "idx_chunk_section",
         "CREATE INDEX idx_chunk_section IF NOT EXISTS FOR (n:Chunk)     ON (n.section_path)",

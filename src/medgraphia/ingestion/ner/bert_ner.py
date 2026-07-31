@@ -82,7 +82,6 @@ _LABEL_TO_TYPE: dict[str, EntityType] = {
     "cell_type": EntityType.GENE,
     "基因": EntityType.GENE,
     "蛋白质": EntityType.GENE,
-    "biological_structure": EntityType.GENE,  # From debug logs, approximate mapping
     # Procedure
     "procedure": EntityType.PROCEDURE,
     "therapy": EntityType.PROCEDURE,
@@ -93,13 +92,22 @@ _LABEL_TO_TYPE: dict[str, EntityType] = {
     "检查": EntityType.PROCEDURE,
     "影像检查": EntityType.PROCEDURE,   # Adapting/bert-base-chinese-finetuned-NER-biomedical
     "实验室检验": EntityType.PROCEDURE,  # Adapting/bert-base-chinese-finetuned-NER-biomedical
-    "解剖部位": EntityType.UNKNOWN,     # Adapting/bert-base-chinese-finetuned-NER-biomedical
     "pro": EntityType.PROCEDURE,
     "ite": EntityType.PROCEDURE,  # item/test
     "treat": EntityType.PROCEDURE,           # German GerMedBERT TREAT (Treatment)
     "diagnostic_procedure": EntityType.PROCEDURE,  # For d4data/biomedical-ner-all
     "therapeutic_procedure": EntityType.PROCEDURE, # For d4data/biomedical-ner-all
-    
+    # Anatomy
+    "biological_structure": EntityType.ANATOMY,  # For d4data/biomedical-ner-all
+    "anatomy": EntityType.ANATOMY,
+    "解剖部位": EntityType.ANATOMY,  # Adapting/bert-base-chinese-finetuned-NER-biomedical
+    # Physiology / biological process
+    "physiology": EntityType.PHYSIOLOGY,
+    "biological_process": EntityType.PHYSIOLOGY,
+    # Living being / organism (pathogens)
+    "organism": EntityType.LIVING_BEING,
+    "生物体": EntityType.LIVING_BEING,
+
     # Generic or Unknown (Do NOT force into specific clinical types)
     "m": EntityType.UNKNOWN,  # iioSnail outputs 'M' for all medical entities. Should not be forced to DRUG.
     "org": EntityType.UNKNOWN,

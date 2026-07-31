@@ -107,20 +107,27 @@ class MeSHLoader:
         """Map MeSH tree numbers to MedGraphia EntityTypes.
 
         Scans ALL tree numbers first, then resolves by priority so that a concept
-        with multiple tree numbers (e.g. Insulin: D12 protein + D06 hormone/drug)
-        gets the most clinically useful type.
+        with multiple tree numbers gets the most clinically useful type.
 
-        MeSH tree prefixes:
-          C23.888.* → SYMPTOM (Signs and Symptoms only; C23.550=Necrosis → DISEASE)
-          C*, F03.* → DISEASE
-          D12.*  → GENE      (Proteins as gene products; overridden by DRUG if D* also present)
-          D*     → DRUG      (Chemicals and Drugs)
-          E*     → PROCEDURE (Diagnostic and Therapeutic Techniques)
-          G05.*  → GENE      (Genetic Phenomena)
+        MeSH top-level tree branches used (official NLM tree, see nlm.nih.gov/mesh/intro_trees.html):
+          A*        → ANATOMY     (Anatomy)
+          B*        → LIVING_BEING(Organisms — bacteria, viruses, parasites, etc.)
+          C23.888.* → SYMPTOM     (Signs and Symptoms only; C23.550=Necrosis → DISEASE)
+          C*, F03.* → DISEASE     (Diseases; F03=Mental Disorders)
+          D12.*, G05.* → GENE     (Proteins as gene products; Genetic Phenomena)
+          D*        → DRUG       (Chemicals and Drugs, excluding D12)
+          E*        → PROCEDURE  (Diagnostic and Therapeutic Techniques and Equipment)
+          F01.*, F02.* → PHYSIOLOGY (Behavior/Psychological Phenomena; F04=disciplines, excluded)
+          G* (other than G05) → PHYSIOLOGY (Biological Sciences: metabolism, immunity,
+                                             physiological processes — G01-G04, G06+)
 
-        Priority: DRUG > SYMPTOM > DISEASE > PROCEDURE > GENE > UNKNOWN
-          Rationale: a protein that is also a licensed drug (insulin, antibodies)
-          should be findable as DRUG; C23 (Symptoms) is more specific than C (Diseases).
+        Priority: SYMPTOM > DISEASE > GENE > DRUG > PROCEDURE > ANATOMY > PHYSIOLOGY > LIVING_BEING
+          Rationale: pathology (symptom/disease) is the most clinically salient type when a
+          concept is multiply classified; GENE is checked before DRUG so gene/protein products
+          that also carry an unrelated chemical tree number (e.g. enzymes, syndrome proteins)
+          are not miscategorized as DRUG — only concepts with NO gene tree number fall through
+          to DRUG (this still covers protein drugs like insulin, which are indexed under D12 AND
+          get read out as GENE — a defensible trade-off over silently mistyping non-drug proteins).
         """
         types_found: set[EntityType] = set()
         for tn in tree_numbers:
@@ -128,21 +135,30 @@ class MeSHLoader:
                 types_found.add(EntityType.SYMPTOM)
             elif tn.startswith("C") or tn.startswith("F03"):
                 types_found.add(EntityType.DISEASE)
-            elif tn.startswith("G05"):
-                types_found.add(EntityType.GENE)
-            elif tn.startswith("D12"):
+            elif tn.startswith("D12") or tn.startswith("G05"):
                 types_found.add(EntityType.GENE)
             elif tn.startswith("D"):
                 types_found.add(EntityType.DRUG)
             elif tn.startswith("E"):
                 types_found.add(EntityType.PROCEDURE)
+            elif tn.startswith("A"):
+                types_found.add(EntityType.ANATOMY)
+            elif tn.startswith("F01") or tn.startswith("F02"):
+                types_found.add(EntityType.PHYSIOLOGY)
+            elif tn.startswith("G"):
+                types_found.add(EntityType.PHYSIOLOGY)
+            elif tn.startswith("B"):
+                types_found.add(EntityType.LIVING_BEING)
 
         for preferred in (
-            EntityType.DRUG,
             EntityType.SYMPTOM,
             EntityType.DISEASE,
-            EntityType.PROCEDURE,
             EntityType.GENE,
+            EntityType.DRUG,
+            EntityType.PROCEDURE,
+            EntityType.ANATOMY,
+            EntityType.PHYSIOLOGY,
+            EntityType.LIVING_BEING,
         ):
             if preferred in types_found:
                 return preferred
@@ -186,33 +202,10 @@ class MeSHLoader:
 
 
 # ---------------------------------------------------------------------------
-# Module-level helper (importable by tests)
+# Module-level helper (importable by tests) — actually delegates, not a copy
 # ---------------------------------------------------------------------------
 
 
 def _resolve_entity_type(tree_numbers: list[str]) -> str:
-    """Module-level wrapper — delegates to MeSHLoader._resolve_entity_type logic."""
-    types_found: set[EntityType] = set()
-    for tn in tree_numbers:
-        if tn.startswith("C23"):
-            types_found.add(EntityType.SYMPTOM)
-        elif tn.startswith("C") or tn.startswith("F03"):
-            types_found.add(EntityType.DISEASE)
-        elif tn.startswith("G05"):
-            types_found.add(EntityType.GENE)
-        elif tn.startswith("D12"):
-            types_found.add(EntityType.GENE)
-        elif tn.startswith("D"):
-            types_found.add(EntityType.DRUG)
-        elif tn.startswith("E"):
-            types_found.add(EntityType.PROCEDURE)
-    for preferred in (
-        EntityType.DRUG,
-        EntityType.SYMPTOM,
-        EntityType.DISEASE,
-        EntityType.PROCEDURE,
-        EntityType.GENE,
-    ):
-        if preferred in types_found:
-            return preferred.value
-    return EntityType.UNKNOWN.value
+    """Module-level wrapper — delegates to MeSHLoader._resolve_entity_type."""
+    return MeSHLoader()._resolve_entity_type(tree_numbers).value

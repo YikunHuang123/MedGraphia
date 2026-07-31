@@ -13,13 +13,16 @@ from typing import Any
 import streamlit as st
 import streamlit.components.v1 as components
 
-# Distinct colours for the five entity labels the backend whitelists.
+# Distinct colours for the entity labels the backend whitelists (see EntityType).
 _NODE_COLOURS = {
     "Disease": "#E63946",  # red
     "Drug": "#1D4ED8",  # blue
     "Symptom": "#F59E0B",  # amber
     "Gene": "#10B981",  # green
     "Procedure": "#8B5CF6",  # violet
+    "Anatomy": "#0EA5E9",  # sky blue
+    "Physiology": "#84CC16",  # lime
+    "LivingBeing": "#EC4899",  # pink
     "Community": "#6B7280",  # neutral grey
 }
 _DEFAULT_NODE_COLOUR = "#374151"
