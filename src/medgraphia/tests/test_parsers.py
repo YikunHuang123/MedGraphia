@@ -19,9 +19,9 @@ import pytest
 
 from medgraphia.data.drugbank import _parse_drug_element
 from medgraphia.data.fda_dailymed import _parse_spl_xml
-from medgraphia.data.mesh import _resolve_entity_type
+from medgraphia.data.mesh import MeSHLoader
 from medgraphia.data.pubmed import _parse_pubmed_xml
-from medgraphia.domain import Language
+from medgraphia.domain import EntityType, Language
 from medgraphia.ingestion.parsers.docling_parser import _extract_full_text, _extract_sections
 from medgraphia.ingestion.parsers.mineru_parser import _parse_markdown_sections
 
@@ -193,53 +193,58 @@ def test_drugbank_parse_language():
 
 # ===========================================================================
 # MeSH entity type resolution (MeSH tree numbers; replaces UMLS STY tests)
+#
+# Tests call MeSHLoader._resolve_entity_type() directly — the method that
+# load() actually uses — rather than a separate test-only wrapper.
 # ===========================================================================
+
+_mesh_loader = MeSHLoader()
 
 
 def test_mesh_entity_type_disease():
     # C-branch = Diseases and Conditions
-    assert _resolve_entity_type(["C14.280"]) == "Disease"
+    assert _mesh_loader._resolve_entity_type(["C14.280"]) == EntityType.DISEASE
 
 
 def test_mesh_entity_type_mental_disorder():
     # F03-branch = Mental Disorders (also Disease)
-    assert _resolve_entity_type(["F03.600"]) == "Disease"
+    assert _mesh_loader._resolve_entity_type(["F03.600"]) == EntityType.DISEASE
 
 
 def test_mesh_entity_type_drug():
     # D-branch = Chemicals and Drugs
-    assert _resolve_entity_type(["D02.145"]) == "Drug"
+    assert _mesh_loader._resolve_entity_type(["D02.145"]) == EntityType.DRUG
 
 
 def test_mesh_entity_type_unknown():
-    assert _resolve_entity_type([]) == "Unknown"
-    assert _resolve_entity_type(["Z99"]) == "Unknown"
+    assert _mesh_loader._resolve_entity_type([]) == EntityType.UNKNOWN
+    assert _mesh_loader._resolve_entity_type(["Z99"]) == EntityType.UNKNOWN
 
 
 def test_mesh_entity_type_priority():
     # Disease (C-branch) takes priority over Drug (D-branch) when listed first
-    assert _resolve_entity_type(["C14.280", "D02.145"]) == "Disease"
+    assert _mesh_loader._resolve_entity_type(["C14.280", "D02.145"]) == EntityType.DISEASE
 
 
 def test_mesh_entity_type_anatomy():
-    assert _resolve_entity_type(["A01.378"]) == "Anatomy"
+    assert _mesh_loader._resolve_entity_type(["A01.378"]) == EntityType.ANATOMY
 
 
 def test_mesh_entity_type_living_being():
-    assert _resolve_entity_type(["B03.353"]) == "LivingBeing"
+    assert _mesh_loader._resolve_entity_type(["B03.353"]) == EntityType.LIVING_BEING
 
 
 def test_mesh_entity_type_physiology():
     # G-branch (other than G05=Genetic Phenomena) = Physiology
-    assert _resolve_entity_type(["G07.100"]) == "Physiology"
+    assert _mesh_loader._resolve_entity_type(["G07.100"]) == EntityType.PHYSIOLOGY
     # F01/F02 = Behavior / Psychological Phenomena
-    assert _resolve_entity_type(["F02.463"]) == "Physiology"
+    assert _mesh_loader._resolve_entity_type(["F02.463"]) == EntityType.PHYSIOLOGY
 
 
 def test_mesh_entity_type_gene_priority_over_drug():
     # A gene/protein (D12) that also carries an unrelated chemical tree number
     # should resolve to Gene, not Drug (regression test for the mistyped-protein bug)
-    assert _resolve_entity_type(["D12.776.395", "D08.811.913"]) == "Gene"
+    assert _mesh_loader._resolve_entity_type(["D12.776.395", "D08.811.913"]) == EntityType.GENE
 
 
 # ===========================================================================

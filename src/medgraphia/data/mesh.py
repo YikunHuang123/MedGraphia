@@ -199,13 +199,3 @@ class MeSHLoader:
 
     def iter_concepts(self) -> Iterator[dict[str, Any]]:
         yield from self._index.values()
-
-
-# ---------------------------------------------------------------------------
-# Module-level helper (importable by tests) — actually delegates, not a copy
-# ---------------------------------------------------------------------------
-
-
-def _resolve_entity_type(tree_numbers: list[str]) -> str:
-    """Module-level wrapper — delegates to MeSHLoader._resolve_entity_type."""
-    return MeSHLoader()._resolve_entity_type(tree_numbers).value
