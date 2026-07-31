@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, Field
 
-from medgraphia.domain.base import EntityType, RelationType
+from medgraphia.domain.base import EntityType
 
 
 class Entity(BaseModel):
@@ -20,17 +18,3 @@ class Entity(BaseModel):
     confidence: float = 1.0
     start_char: int | None = None
     end_char: int | None = None
-
-
-class Relation(BaseModel):
-    """A directed semantic edge between two entities."""
-
-    source_cui: str
-    target_cui: str
-    relation_type: RelationType
-    evidence_text: str = ""
-    source_id: str = ""
-    chunk_id: str = ""
-    confidence: float = 1.0
-    extracted_by: str = ""  # model name / version that produced this edge
-    properties: dict[str, Any] = Field(default_factory=dict)

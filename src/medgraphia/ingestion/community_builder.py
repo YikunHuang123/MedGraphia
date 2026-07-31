@@ -1,5 +1,10 @@
 """
 Leiden community detection and LLM-based summarization.
+
+Communities are detected over an entity co-occurrence graph — two entities
+are linked if they're mentioned in the same chunk, weighted by how many
+chunks they share — rather than typed relation edges (see project notes
+"关系抽取阶段/4. 放弃类型化关系抽取..." for the rationale).
 """
 
 from __future__ import annotations
@@ -8,7 +13,7 @@ import hashlib
 
 import networkx as nx
 
-from medgraphia.domain import Community, Entity, Relation
+from medgraphia.domain import Chunk, Community, Entity
 from medgraphia.logger import get_logger
 
 logger = get_logger(__name__)
@@ -35,16 +40,18 @@ class CommunityBuilder:
         self._min_size = min_size
         self._resolution = resolution
 
-    async def build_from_relations(
+    async def build_from_chunks(
         self,
-        relations: list[Relation],
+        chunks: list[Chunk],
         entity_map: dict[str, Entity],
     ) -> list[Community]:
-        """Build graph -> detect communities -> summarize."""
-        if not relations:
+        """Build co-occurrence graph -> detect communities -> summarize."""
+        if not chunks:
             return []
 
-        graph = _build_graph(relations)
+        graph = _build_cooccurrence_graph(chunks)
+        if graph.number_of_nodes() == 0:
+            return []
         partition = self._partition(graph)
         logger.info(
             "community_partition_done",
@@ -58,11 +65,12 @@ class CommunityBuilder:
             if len(member_cuis) < self._min_size:
                 return None
 
-            subgraph_relations = [
-                r for r in relations if r.source_cui in member_cuis and r.target_cui in member_cuis
+            subgraph_pairs = [
+                (a, b, graph[a][b]["weight"])
+                for a, b in graph.subgraph(member_cuis).edges()
             ]
 
-            summary_text = await self._summarise(member_cuis, subgraph_relations, entity_map)
+            summary_text = await self._summarise(member_cuis, subgraph_pairs, entity_map)
 
             comm_id = _stable_community_id(member_cuis)
             return Community(
@@ -96,7 +104,10 @@ class CommunityBuilder:
         return louvain_communities(graph, weight="weight", resolution=self._resolution)
 
     async def _summarise(
-        self, member_cuis: set[str], relations: list[Relation], entity_map: dict[str, Entity]
+        self,
+        member_cuis: set[str],
+        cooccurrence_pairs: list[tuple[str, str, int]],
+        entity_map: dict[str, Entity],
     ) -> str:
         """Use DSPy to generate a clinical summary."""
         import dspy
@@ -107,7 +118,7 @@ class CommunityBuilder:
         lm = get_lm("summarizer")
 
         concept_lines = _format_concepts(member_cuis, entity_map)
-        relation_lines = _format_relations(relations, entity_map)
+        relation_lines = _format_cooccurrences(cooccurrence_pairs, entity_map)
 
         try:
             with dspy.context(lm=lm):
@@ -118,7 +129,7 @@ class CommunityBuilder:
             return f"{data.summary} {data.explanation} {data.clinical_relevance}"
         except Exception as exc:
             logger.warning("community_summary_failed", error=str(exc))
-            return _auto_summary(member_cuis, relations, entity_map)
+            return _auto_summary(member_cuis, entity_map)
 
     async def write_communities_to_neo4j(self, communities: list[Community]) -> None:
         """Write Community nodes to Neo4j."""
@@ -143,16 +154,19 @@ class CommunityBuilder:
         return cls(min_size=cfg.community_min_size, resolution=cfg.community_resolution)
 
 
-def _build_graph(relations: list[Relation]) -> nx.Graph:
+def _build_cooccurrence_graph(chunks: list[Chunk]) -> nx.Graph:
+    """Two entities are linked if they're mentioned in the same chunk; edge
+    weight is the number of chunks they co-occur in."""
     graph = nx.Graph()
-    for rel in relations:
-        graph.add_edge(
-            rel.source_cui,
-            rel.target_cui,
-            relation_type=rel.relation_type.value,
-            weight=rel.confidence,
-            confidence=rel.confidence,
-        )
+    for chunk in chunks:
+        cuis = sorted({e.cui for e in chunk.entities if not e.cui.startswith("MENTION:")})
+        for i in range(len(cuis)):
+            for j in range(i + 1, len(cuis)):
+                a, b = cuis[i], cuis[j]
+                if graph.has_edge(a, b):
+                    graph[a][b]["weight"] += 1
+                else:
+                    graph.add_edge(a, b, weight=1)
     return graph
 
 
@@ -167,30 +181,25 @@ def _format_concepts(cuis: set[str], entity_map: dict[str, Entity]) -> str:
     return "\n".join(lines) or "  (no entity details available)"
 
 
-def _format_relations(relations: list[Relation], entity_map: dict[str, Entity]) -> str:
-    if not relations:
-        return "  (no intra-community relations)"
+def _format_cooccurrences(
+    pairs: list[tuple[str, str, int]], entity_map: dict[str, Entity]
+) -> str:
+    if not pairs:
+        return "  (no intra-community co-occurrences)"
     lines = []
-    for rel in relations[:30]:
-        src_label = entity_map.get(rel.source_cui)
-        tgt_label = entity_map.get(rel.target_cui)
-        src = src_label.label if src_label else rel.source_cui
-        tgt = tgt_label.label if tgt_label else rel.target_cui
-        lines.append(
-            f"  {src} --[{rel.relation_type.value}]--> {tgt}"
-            + (f': "{rel.evidence_text[:60]}..."' if rel.evidence_text else "")
-        )
+    for src_cui, tgt_cui, weight in sorted(pairs, key=lambda p: -p[2])[:30]:
+        src_label = entity_map.get(src_cui)
+        tgt_label = entity_map.get(tgt_cui)
+        src = src_label.label if src_label else src_cui
+        tgt = tgt_label.label if tgt_label else tgt_cui
+        lines.append(f"  {src} co-occurs with {tgt} (in {weight} shared chunk(s))")
     return "\n".join(lines)
 
 
-def _auto_summary(
-    member_cuis: set[str], relations: list[Relation], entity_map: dict[str, Entity]
-) -> str:
+def _auto_summary(member_cuis: set[str], entity_map: dict[str, Entity]) -> str:
     labels = [entity_map[c].label for c in sorted(member_cuis) if c in entity_map][:5]
-    rel_types = list({r.relation_type.value for r in relations})[:3]
     concept_str = ", ".join(labels) if labels else f"{len(member_cuis)} entities"
-    rel_str = ", ".join(rel_types) if rel_types else "various"
-    return f"This cluster contains {len(member_cuis)} related medical concepts including {concept_str}. Key relationships include: {rel_str}."
+    return f"This cluster contains {len(member_cuis)} related medical concepts including {concept_str}."
 
 
 def _stable_community_id(member_cuis: set[str]) -> str:

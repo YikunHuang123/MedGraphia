@@ -114,7 +114,6 @@ from .query_rewriting import (
     ROUTING_RUBRIC,
     QueryRewritingWithTier,
 )
-from .relation_extraction import ExtractedRelation, ExtractMedicalRelations
 from .safety import LLAMA_GUARD_SYSTEM_PROMPT
 from .synthetic import GenerateSyntheticMedicalQA
 
@@ -124,8 +123,6 @@ __all__ = [
     "QueryRewritingWithTier",
     "ROUTING_RUBRIC",
     "GenerateSyntheticMedicalQA",
-    "ExtractMedicalRelations",
-    "ExtractedRelation",
     "SummarizeMedicalCommunity",
     "CommunitySummaryResult",
     "LLAMA_GUARD_SYSTEM_PROMPT",

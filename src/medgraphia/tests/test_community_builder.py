@@ -1,23 +1,22 @@
 """
-Phase 4 tests: CommunityBuilder (pydantic-ai version).
+CommunityBuilder tests.
 
 All tests are pure-Python unit tests:
-  - LLM calls are mocked at the pydantic-ai Agent level.
+  - LLM summarization is bypassed via monkey-patching `_summarise`.
   - No Neo4j required.
 """
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from medgraphia.domain import Community, Entity, EntityType, Relation, RelationType
+from medgraphia.domain import Chunk, Community, Entity, EntityType, Language, SourceMeta
 from medgraphia.ingestion.community_builder import (
     CommunityBuilder,
-    CommunitySummaryResult,
     _format_concepts,
-    _format_relations,
+    _format_cooccurrences,
     _stable_community_id,
 )
 
@@ -30,27 +29,20 @@ def _entity(cui: str, label: str, entity_type: EntityType = EntityType.DRUG) -> 
     return Entity(cui=cui, label=label, entity_type=entity_type, confidence=0.9)
 
 
-def _relation(src: str, tgt: str, rel_type: RelationType = RelationType.TREATS) -> Relation:
-    return Relation(
-        source_cui=src,
-        target_cui=tgt,
-        relation_type=rel_type,
-        confidence=1.0,
+def _chunk(chunk_id: str, entities: list[Entity]) -> Chunk:
+    return Chunk(
+        chunk_id=chunk_id,
+        doc_id="doc:test",
+        source=SourceMeta(source_id="test", source_title="Test"),
+        language=Language.EN,
+        section_path="test",
+        text="test chunk text",
+        entities=entities,
     )
 
 
-def _builder(
-    mock_data: CommunitySummaryResult | None = None, min_size: int = 2
-) -> CommunityBuilder:
-    """Helper to create a builder with a mocked agent."""
-    extractor = CommunityBuilder(model=MagicMock(), min_size=min_size)
-
-    if mock_data:
-        mock_run = AsyncMock()
-        mock_run.return_value = MagicMock(data=mock_data)
-        extractor._agent.run = mock_run
-
-    return extractor
+def _builder(min_size: int = 2) -> CommunityBuilder:
+    return CommunityBuilder(min_size=min_size)
 
 
 # ---------------------------------------------------------------------------
@@ -65,21 +57,20 @@ class TestFormatHelpers:
         assert "Metformin" in text
         assert "C001" in text
 
-    def test_format_relations_contains_labels(self):
+    def test_format_cooccurrences_contains_labels(self):
         entity_map = {
             "C001": _entity("C001", "Metformin"),
             "C002": _entity("C002", "Diabetes"),
         }
-        rel = _relation("C001", "C002")
-        text = _format_relations([rel], entity_map)
+        text = _format_cooccurrences([("C001", "C002", 3)], entity_map)
         assert "Metformin" in text
         assert "Diabetes" in text
-        assert "TREATS" in text
+        assert "3 shared chunk" in text
 
-    def test_format_relations_capped_at_30(self):
-        relations = [_relation("C001", "C002") for _ in range(40)]
-        text = _format_relations(relations, {})
-        lines = [l for l in text.splitlines() if "TREATS" in l]
+    def test_format_cooccurrences_capped_at_30(self):
+        pairs = [("C001", f"C{i:03d}", 1) for i in range(40)]
+        text = _format_cooccurrences(pairs, {})
+        lines = [l for l in text.splitlines() if "co-occurs" in l]
         assert len(lines) <= 30
 
 
@@ -101,46 +92,45 @@ class TestCommunityIdentification:
 
 
 # ---------------------------------------------------------------------------
-# CommunityBuilder.build_from_relations
+# CommunityBuilder.build_from_chunks
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-class TestBuildFromRelations:
-    async def test_no_relations_returns_empty(self):
+class TestBuildFromChunks:
+    async def test_no_chunks_returns_empty(self):
         builder = _builder()
-        assert await builder.build_from_relations([], {}) == []
+        assert await builder.build_from_chunks([], {}) == []
 
     async def test_communities_returned_as_community_objects(self):
-        relations = [_relation("C001", "C002"), _relation("C003", "C004")]
+        chunks = [
+            _chunk("c1", [_entity("C001", "Metformin"), _entity("C002", "Diabetes")]),
+            _chunk("c2", [_entity("C003", "Aspirin"), _entity("C004", "Headache")]),
+        ]
         builder = _builder(min_size=2)
-
-        # Mock the summarizer to avoid LLM calls
         builder._summarise = AsyncMock(return_value="Summary")
 
-        communities = await builder.build_from_relations(relations, {})
+        communities = await builder.build_from_chunks(chunks, {})
         assert len(communities) >= 2
         assert isinstance(communities[0], Community)
 
     async def test_min_size_filters_small_communities(self):
-        # 2 nodes form one community of size 2
-        relations = [_relation("C001", "C002")]
+        # 2 co-mentioned entities form one community of size 2
+        chunks = [_chunk("c1", [_entity("C001", "Metformin"), _entity("C002", "Diabetes")])]
         builder = _builder(min_size=3)  # require at least 3 members
         builder._summarise = AsyncMock(return_value="Summary")
 
-        communities = await builder.build_from_relations(relations, {})
+        communities = await builder.build_from_chunks(chunks, {})
         assert len(communities) == 0
 
     async def test_llm_summary_integrated(self):
-        mock_data = CommunitySummaryResult(
-            summary="Diabetes treatment group.",
-            explanation="Contains metformin and related drugs.",
-            clinical_relevance="High relevance for T2DM management.",
+        builder = _builder(min_size=2)
+        builder._summarise = AsyncMock(
+            return_value="Diabetes treatment group. High relevance for T2DM management."
         )
-        builder = _builder(mock_data=mock_data, min_size=2)
-        relations = [_relation("C001", "C002")]
+        chunks = [_chunk("c1", [_entity("C001", "Metformin"), _entity("C002", "Diabetes")])]
 
-        communities = await builder.build_from_relations(relations, {})
+        communities = await builder.build_from_chunks(chunks, {})
         assert len(communities) == 1
         summary = communities[0].summary
         assert "Diabetes treatment group" in summary

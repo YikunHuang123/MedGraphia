@@ -1,8 +1,10 @@
 """
-Shared small-scale ingestion path: chunk -> NER -> link -> extract for a
+Shared small-scale ingestion path: chunk -> NER -> link -> persist for a
 handful of freshly-fetched documents. Used wherever a small batch of new
-docs needs to become linked chunks and relations, outside a full-corpus
-build (see ingestion/pipeline.py for the batched build-time versions).
+docs needs to join the graph outside a full-corpus build (see
+ingestion/pipeline.py for the batched build-time versions). No relation
+extraction — new entities join the graph via chunk co-occurrence, which the
+PPR retriever picks up directly (see project notes "关系抽取阶段/4. ...").
 """
 
 from __future__ import annotations
@@ -38,27 +40,14 @@ def _get_entity_linker():
     return linker
 
 
-@lru_cache(maxsize=1)
-def get_relation_extractor():
-    from medgraphia.ingestion.relation_extractor import RelationExtractor
-
-    return RelationExtractor.from_settings()
-
-
-async def docs_to_relations(docs: list[Any], extracted_by: str) -> tuple[list[Any], list[Any]]:
-    """
-    Run freshly-fetched docs through chunk -> NER -> link -> extract.
-
-    Returns (linked_chunks, relations). Relations are tagged with
-    `extracted_by` but not written to Neo4j — callers decide whether/how
-    to persist the chunks, entities, and relations.
-    """
+async def docs_to_chunks(docs: list[Any]) -> list[Any]:
+    """Run freshly-fetched docs through chunk -> NER -> link, returning linked chunks."""
     from medgraphia.ingestion.chunker import MedicalChunker
 
     chunker = MedicalChunker()
     chunks = [c for doc in docs for c in chunker.chunk(doc)]
     if not chunks:
-        return [], []
+        return []
 
     # NER and entity linking run local GPU/CPU inference synchronously — offload
     # to a thread so an async caller (chat request or build pipeline) isn't blocked.
@@ -68,9 +57,21 @@ async def docs_to_relations(docs: list[Any], extracted_by: str) -> tuple[list[An
     linker = _get_entity_linker()
     chunks = await asyncio.to_thread(linker.link_chunks_batch, chunks)
 
-    extractor = get_relation_extractor()
-    relations = await extractor.extract_batch(chunks)
-    for r in relations:
-        r.extracted_by = extracted_by
+    return chunks
 
-    return chunks, relations
+
+async def write_chunks_to_graph(docs: list[Any], chunks: list[Any]) -> None:
+    """Persist fresh Document/Chunk nodes plus their linked entities and
+    MENTIONED_IN co-occurrence edges."""
+    from medgraphia.graph.queries import (
+        batch_upsert_entities_and_links,
+        create_chunk,
+        upsert_document,
+    )
+
+    for doc in docs:
+        await upsert_document(doc)
+    for chunk in chunks:
+        await create_chunk(chunk)
+    if chunks:
+        await batch_upsert_entities_and_links(chunks)

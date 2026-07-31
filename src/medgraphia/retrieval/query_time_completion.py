@@ -2,8 +2,9 @@
 Query-time knowledge graph completion.
 
 When a user's question involves two entities the graph can't connect, this
-fetches a few PubMed abstracts about the pair, extracts any relation found,
-and merges it into Neo4j so this answer and future queries both benefit.
+fetches a few PubMed abstracts about the pair and ingests them (chunk, NER,
+link, co-occurrence edges) so future PPR retrieval can find the connection —
+no relation extraction, the two entities simply join the same chunk graph.
 """
 
 from __future__ import annotations
@@ -15,10 +16,10 @@ logger = get_logger(__name__)
 
 async def complete_gap(entity_a: str, entity_b: str, pubmed_limit: int = 5) -> str:
     """
-    Search for evidence connecting two entities and merge any relation found
-    into the graph.  Returns a short text summary for the calling LLM —
-    either the evidence found, or an explicit "no evidence" message so the
-    model does not invent a connection.
+    Fetch evidence connecting two entities and ingest it into the graph.
+    Returns a short text summary for the calling LLM — either what was
+    found, or an explicit "no evidence" message so the model does not
+    invent a connection.
 
     Args:
         entity_a: Label or surface-form text of the first entity.
@@ -27,7 +28,7 @@ async def complete_gap(entity_a: str, entity_b: str, pubmed_limit: int = 5) -> s
             runs inline during a chat request.
     """
     from medgraphia.data.pubmed import PubMedConnector, PubMedFetchConfig
-    from medgraphia.ingestion.lightweight_extract import docs_to_relations, get_relation_extractor
+    from medgraphia.ingestion.lightweight_extract import docs_to_chunks, write_chunks_to_graph
 
     query = f'"{entity_a}" AND "{entity_b}"'
     logger.info("gap_completion_started", entity_a=entity_a, entity_b=entity_b)
@@ -43,16 +44,14 @@ async def complete_gap(entity_a: str, entity_b: str, pubmed_limit: int = 5) -> s
         logger.info("gap_completion_no_results", entity_a=entity_a, entity_b=entity_b)
         return f"No published evidence found connecting {entity_a} and {entity_b}."
 
-    _, relations = await docs_to_relations(docs, extracted_by="query_time_synthesis")
-    if not relations:
-        return f"Found {len(docs)} related article(s) but no explicit relation between {entity_a} and {entity_b} could be confirmed."
+    chunks = await docs_to_chunks(docs)
+    if not chunks:
+        return f"Found {len(docs)} related article(s) but could not extract usable passages."
 
-    await get_relation_extractor().write_relations_to_neo4j(relations)
+    await write_chunks_to_graph(docs, chunks)
 
-    summaries = [
-        f"{r.source_cui} --[{r.relation_type.value}]--> {r.target_cui}"
-        f" (\"{r.evidence_text.strip()}\")" if r.evidence_text else f"{r.source_cui} --[{r.relation_type.value}]--> {r.target_cui}"
-        for r in relations
-    ]
-    logger.info("gap_completion_relations_found", count=len(relations))
-    return "New evidence found and added to the knowledge graph: " + "; ".join(summaries)
+    logger.info("gap_completion_ingested", docs=len(docs), chunks=len(chunks))
+    return (
+        f"Found {len(docs)} new article(s) discussing both {entity_a} and {entity_b}; "
+        f"added {len(chunks)} passage(s) to the knowledge base for future retrieval."
+    )

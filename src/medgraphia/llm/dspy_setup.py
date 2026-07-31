@@ -18,7 +18,7 @@ _LM_CACHE: dict[str, dspy.LM] = {}
 
 
 def get_lm(
-    task: Literal["default", "rewriter", "extractor", "summarizer", "judge"] = "default",
+    task: Literal["default", "rewriter", "summarizer", "judge"] = "default",
     provider_override: str | None = None,
     model_override: str | None = None,
     temperature: float | None = None,
@@ -37,9 +37,6 @@ def get_lm(
         if task == "rewriter" and cfg.rewriter_llm_provider:
             provider = cfg.rewriter_llm_provider
             model = cfg.rewriter_llm_model
-        elif task == "extractor" and cfg.extractor_llm_provider:
-            provider = cfg.extractor_llm_provider
-            model = cfg.extractor_llm_model
         elif task == "summarizer" and cfg.summarizer_llm_provider:
             provider = cfg.summarizer_llm_provider
             model = cfg.summarizer_llm_model
@@ -66,9 +63,6 @@ def get_lm(
     if task == "rewriter" and (cfg.rewriter_llm_api_key.get_secret_value() or cfg.rewriter_llm_base_url):
         api_key = cfg.rewriter_llm_api_key.get_secret_value()
         api_base = cfg.rewriter_llm_base_url or None
-    elif task == "extractor" and (cfg.extractor_llm_api_key.get_secret_value() or cfg.extractor_llm_base_url):
-        api_key = cfg.extractor_llm_api_key.get_secret_value()
-        api_base = cfg.extractor_llm_base_url or None
     elif task == "summarizer" and (cfg.summarizer_llm_api_key.get_secret_value() or cfg.summarizer_llm_base_url):
         api_key = cfg.summarizer_llm_api_key.get_secret_value()
         api_base = cfg.summarizer_llm_base_url or None

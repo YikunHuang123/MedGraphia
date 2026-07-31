@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from medgraphia.domain import Chunk, Entity, EntityType, Message, RawDocument, Relation, Session
+from medgraphia.domain import Chunk, Entity, EntityType, Message, RawDocument, Session
 from medgraphia.graph.client import get_session
 from medgraphia.logger import get_logger
 
@@ -221,15 +221,11 @@ async def get_all_entities() -> list[dict[str, Any]]:
 
 
 async def get_chunks_from_db(limit: int | None = None) -> list[Chunk]:
-    """
-    Fetch stored chunks and their associated entities from Neo4j.
-    Enables resuming the pipeline at the Relation Extraction stage.
-    """
+    """Fetch stored chunks and their associated entities from Neo4j (pipeline resume)."""
     from medgraphia.domain import Entity, EntityType, Language, SourceMeta
 
     cypher = """
     MATCH (c:Chunk)
-    WHERE c.relations_extracted IS NULL
     OPTIONAL MATCH (c)-[:FROM_DOC]->(d:Document)
     OPTIONAL MATCH (e)-[:MENTIONED_IN]->(c)
     RETURN c, d, collect(e) AS entities
@@ -310,52 +306,6 @@ async def get_entity_mention_counts(cuis: list[str]) -> dict[str, int]:
     return counts
 
 
-async def mark_chunks_extracted(chunk_ids: list[str]) -> None:
-    """Mark chunks as having their relations extracted to support resuming."""
-    if not chunk_ids:
-        return
-    cypher = """
-    UNWIND $chunk_ids AS cid
-    MATCH (c:Chunk {chunk_id: cid})
-    SET c.relations_extracted = true
-    """
-    async with get_session() as session:
-        await session.run(cypher, chunk_ids=chunk_ids)
-
-
-# ---------------------------------------------------------------------------
-# Relations
-# ---------------------------------------------------------------------------
-
-
-async def create_relation(relation: Relation) -> None:
-    """
-    Create a typed edge between two entity nodes.
-    Uses MERGE to avoid duplicate edges for the same (source, target, type, chunk).
-    """
-    rel_type = relation.relation_type.value
-    cypher = """
-    MATCH (src {cui: $source_cui})
-    MATCH (tgt {cui: $target_cui})
-    MERGE (src)-[r:{rel_type} {chunk_id: $chunk_id}]->(tgt)
-    SET r.evidence_text  = $evidence_text,
-        r.source_id      = $source_id,
-        r.confidence     = $confidence,
-        r.extracted_by   = $extracted_by
-    """.replace("{rel_type}", rel_type)
-    async with get_session() as session:
-        await session.run(
-            cypher,
-            source_cui=relation.source_cui,
-            target_cui=relation.target_cui,
-            chunk_id=relation.chunk_id,
-            evidence_text=relation.evidence_text,
-            source_id=relation.source_id,
-            confidence=relation.confidence,
-            extracted_by=relation.extracted_by,
-        )
-
-
 # ---------------------------------------------------------------------------
 # Communities
 # ---------------------------------------------------------------------------
@@ -392,49 +342,66 @@ async def upsert_community(community_id: str, summary: str, member_cuis: list[st
 # ---------------------------------------------------------------------------
 
 
+_CYPHER_SUBGRAPH_1HOP = """
+MATCH (start {cui: $cui})-[:MENTIONED_IN]->(c:Chunk)<-[:MENTIONED_IN]-(neighbor)
+WHERE neighbor.cui IS NOT NULL AND neighbor.cui <> $cui
+WITH start, neighbor, count(DISTINCT c) AS weight
+RETURN start AS a, neighbor AS b, weight
+LIMIT 300
+"""
+
+_CYPHER_SUBGRAPH_2HOP = """
+MATCH (start {cui: $cui})-[:MENTIONED_IN]->(:Chunk)<-[:MENTIONED_IN]-(mid)
+WHERE mid.cui IS NOT NULL AND mid.cui <> $cui
+MATCH (mid)-[:MENTIONED_IN]->(c2:Chunk)<-[:MENTIONED_IN]-(leaf)
+WHERE leaf.cui IS NOT NULL AND leaf.cui <> mid.cui AND leaf.cui <> $cui
+WITH mid, leaf, count(DISTINCT c2) AS weight
+RETURN mid AS a, leaf AS b, weight
+LIMIT 300
+"""
+
+
 async def get_subgraph(cui: str, hops: int = 2) -> dict[str, Any]:
     """
-    Expand a 1- or 2-hop subgraph starting from a given CUI.
+    Expand a 1- or 2-hop entity subgraph starting from a given CUI.
 
-    Optimisations:
-      - Excludes 'Chunk' nodes to avoid supernode path explosions.
-      - Returns only essential serialisable properties to reduce payload size.
+    Two entities are connected if they co-occur in a shared Chunk (see
+    project notes "关系抽取阶段/4. ..."); Chunk nodes are collapsed into a
+    synthetic CO_OCCURS_WITH edge rather than rendered directly.
     """
-    # ── Cypher: exclude Chunk nodes and filter paths ─────────────────────────
-    cypher = """
-    MATCH path = (start {cui: $cui})-[*1..{hops}]-(neighbor)
-    WHERE ALL(n IN nodes(path) WHERE NOT n:Chunk)
-    RETURN path
-    LIMIT 300
-    """.replace("{hops}", str(hops))
+    hops = min(max(hops, 1), 2)
 
     nodes: dict[str, dict] = {}
     edges: list[dict] = []
 
+    def _add_node(node: Any) -> str:
+        nid = str(node.element_id)
+        if nid not in nodes:
+            # Only return UI-essential fields (no raw text)
+            nodes[nid] = {
+                "id": nid,
+                "cui": node.get("cui"),
+                "label": node.get("label"),
+                "labels": list(node.labels),
+                "lang_zh": node.get("lang_zh", ""),
+                "lang_de": node.get("lang_de", ""),
+            }
+        return nid
+
     async with get_session() as session:
-        result = await session.run(cypher, cui=cui)
+        result = await session.run(_CYPHER_SUBGRAPH_1HOP, cui=cui)
         async for record in result:
-            path = record["path"]
-            for node in path.nodes:
-                nid = str(node.element_id)
-                if nid not in nodes:
-                    # Only return UI-essential fields (no raw text)
-                    nodes[nid] = {
-                        "id": nid,
-                        "cui": node.get("cui"),
-                        "label": node.get("label"),
-                        "labels": list(node.labels),
-                        "lang_zh": node.get("lang_zh", ""),
-                        "lang_de": node.get("lang_de", ""),
-                    }
-            for rel in path.relationships:
+            a_id, b_id = _add_node(record["a"]), _add_node(record["b"])
+            edges.append(
+                {"type": "CO_OCCURS_WITH", "source": a_id, "target": b_id, "confidence": record["weight"]}
+            )
+
+        if hops >= 2:
+            result2 = await session.run(_CYPHER_SUBGRAPH_2HOP, cui=cui)
+            async for record in result2:
+                a_id, b_id = _add_node(record["a"]), _add_node(record["b"])
                 edges.append(
-                    {
-                        "type": rel.type,
-                        "source": str(rel.start_node.element_id),
-                        "target": str(rel.end_node.element_id),
-                        "confidence": rel.get("confidence", 1.0),
-                    }
+                    {"type": "CO_OCCURS_WITH", "source": a_id, "target": b_id, "confidence": record["weight"]}
                 )
 
     return {"nodes": list(nodes.values()), "edges": edges}

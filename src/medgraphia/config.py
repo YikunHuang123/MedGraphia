@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     neo4j_heap_max: str = "1G"
 
     # ------------------------------------------------------------------
+    # Graph retrieval (Bipartite Entity-Chunk + Personalized PageRank)
+    # ------------------------------------------------------------------
+    ppr_damping_factor: float = 0.85
+    ppr_max_iterations: int = 20
+    ppr_top_k_chunks: int = 15
+
+    # ------------------------------------------------------------------
     # Vector store
     # ------------------------------------------------------------------
     vector_store: str = "qdrant"
@@ -84,15 +91,6 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 2048
     llm_temperature: float = 0.1
 
-    # Extract relations of nodes in Neo4j
-    extractor_llm_provider: str = "ollama"
-    extractor_llm_model: str = "Qwen3.5:9b"
-    extractor_llm_api_key: SecretStr = SecretStr("")
-    extractor_llm_base_url: str = "http://localhost:11434"
-    # extractor_llm_provider: str = "openai"
-    # extractor_llm_model: str = "deepseek-ai/DeepSeek-V4-Flash"
-    # extractor_llm_api_key: SecretStr = SecretStr("sk-......")
-    # extractor_llm_base_url: str = "https://api.siliconflow.com/v1"
 
     # Model used for community summary generation; defaults to default_llm_model if empty
     community_summary_llm: str = ""

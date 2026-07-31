@@ -18,17 +18,11 @@ ENTITY_LABELS = [t.value for t in EntityType]
 NODE_LABELS = ENTITY_LABELS + ["Chunk", "Document", "Community"]
 
 # ---------------------------------------------------------------------------
-# Relationship types (closed schema — no arbitrary types allowed)
+# Relationship types (closed schema — no arbitrary types allowed). Structural
+# only — multi-hop reasoning comes from graph connectivity (PPR over these
+# edges), not typed semantic relations.
 # ---------------------------------------------------------------------------
 RELATION_TYPES = [
-    "TREATS",
-    "CAUSES",
-    "INTERACTS_WITH",
-    "DOSAGE_FOR",
-    "SYMPTOM_OF",
-    "COMPLICATION_OF",
-    "CODED_AS",
-    "CONTRAINDICATED_IN",
     "MENTIONED_IN",  # Entity  → Chunk
     "FROM_DOC",  # Chunk   → Document
     "MEMBER_OF",  # Entity  → Community

@@ -23,7 +23,7 @@ services:
       NEO4J_server_memory_pagecache_size: "${NEO4J_PAGE_CACHE:-2G}"
       NEO4J_server_memory_heap_initial__size: "${NEO4J_HEAP_INITIAL:-1G}"
       NEO4J_server_memory_heap_max__size: "${NEO4J_HEAP_MAX:-2G}"
-      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs

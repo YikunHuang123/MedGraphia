@@ -2,7 +2,7 @@
 Prefect-based offline knowledge-graph build pipeline.
 
 Orchestrates all ingestion stages in sequence:
-  fetch → parse → chunk → ner → link → extract → embed → community
+  fetch → parse → chunk → ner → link → embed → community
 
 Graceful degradation: if Prefect is not installed, @task and @flow decorators
 are replaced with no-ops so the pipeline runs as plain async functions.
@@ -89,7 +89,6 @@ class BuildConfig:
     skip_chunk: bool = False
     skip_ner: bool = False
     skip_link: bool = False
-    skip_extract: bool = False
     skip_frontier_expand: bool = False
     skip_embed: bool = False
     skip_community: bool = False
@@ -380,37 +379,12 @@ async def link_task(chunks: list[Any]) -> list[Any]:
     return result
 
 
-@task(name="extract")
-async def extract_task(chunks: list[Any]) -> list[Any]:
-    """LLM-based relation extraction (schema-guided)."""
-    from medgraphia.ingestion.relation_extractor import RelationExtractor
-
-    extractor = RelationExtractor.from_settings()
-    relations = await extractor.extract_batch(chunks)
-    await extractor.write_relations_to_neo4j(relations)
-    
-    from medgraphia.graph.queries import mark_chunks_extracted
-    await mark_chunks_extracted([c.chunk_id for c in chunks])
-    
-    logger.info("extract_done", relations=len(relations))
-    return relations
-
-
 @task(name="frontier_expand", retries=1)
-async def frontier_expand_task(
-    cfg: BuildConfig, chunks: list[Any], relations: list[Any]
-) -> tuple[list[Any], list[Any]]:
+async def frontier_expand_task(cfg: BuildConfig, chunks: list[Any]) -> list[Any]:
     """Fetch a few extra PubMed abstracts for entities barely covered in the graph so far."""
     from medgraphia.data.pubmed import PubMedConnector, PubMedFetchConfig
-    from medgraphia.graph.queries import (
-        batch_upsert_entities_and_links,
-        get_entity_mention_counts,
-        mark_chunks_extracted,
-    )
-    from medgraphia.ingestion.lightweight_extract import docs_to_relations, get_relation_extractor
-
-    if not relations:
-        return [], []
+    from medgraphia.graph.queries import get_entity_mention_counts
+    from medgraphia.ingestion.lightweight_extract import docs_to_chunks, write_chunks_to_graph
 
     label_map: dict[str, str] = {}
     for c in chunks:
@@ -418,7 +392,10 @@ async def frontier_expand_task(
             if not e.cui.startswith("MENTION:"):
                 label_map[e.cui] = e.label
 
-    involved_cuis = list({r.source_cui for r in relations} | {r.target_cui for r in relations})
+    involved_cuis = list(label_map.keys())
+    if not involved_cuis:
+        return []
+
     global_mention_counts = await get_entity_mention_counts(involved_cuis)
     frontier_cuis = [
         cui for cui in involved_cuis if global_mention_counts.get(cui, 0) <= cfg.frontier_min_mentions
@@ -426,7 +403,7 @@ async def frontier_expand_task(
 
     if not frontier_cuis:
         logger.info("frontier_expand_none")
-        return [], []
+        return []
 
     all_docs: list[Any] = []
     async with PubMedConnector() as pubmed:
@@ -437,22 +414,14 @@ async def frontier_expand_task(
 
     if not all_docs:
         logger.info("frontier_expand_no_docs", entities=len(frontier_cuis))
-        return [], []
+        return []
 
-    new_chunks, new_relations = await docs_to_relations(all_docs, extracted_by="frontier_expansion")
+    new_chunks = await docs_to_chunks(all_docs)
     if new_chunks:
-        await batch_upsert_entities_and_links(new_chunks)
-        await mark_chunks_extracted([c.chunk_id for c in new_chunks])
-    if new_relations:
-        await get_relation_extractor().write_relations_to_neo4j(new_relations)
+        await write_chunks_to_graph(all_docs, new_chunks)
 
-    logger.info(
-        "frontier_expand_done",
-        entities=len(frontier_cuis),
-        new_chunks=len(new_chunks),
-        new_relations=len(new_relations),
-    )
-    return new_chunks, new_relations
+    logger.info("frontier_expand_done", entities=len(frontier_cuis), new_chunks=len(new_chunks))
+    return new_chunks
 
 
 @task(name="embed")
@@ -482,11 +451,8 @@ async def embed_task(chunks: list[Any]) -> list[Any]:
 
 
 @task(name="community")
-async def community_task(
-    relations: list[Any],
-    chunks: list[Any],
-) -> list[Any]:
-    """Leiden community detection + LLM community summaries."""
+async def community_task(chunks: list[Any]) -> list[Any]:
+    """Leiden community detection (entity co-occurrence graph) + LLM summaries."""
     from medgraphia.ingestion.community_builder import CommunityBuilder
 
     # Build entity_map for richer prompts
@@ -495,7 +461,7 @@ async def community_task(
     }
 
     builder = CommunityBuilder.from_settings()
-    communities = await builder.build_from_relations(relations, entity_map)
+    communities = await builder.build_from_chunks(chunks, entity_map)
     await builder.write_communities_to_neo4j(communities)
     logger.info("community_done", count=len(communities))
     return communities
@@ -551,7 +517,6 @@ async def build_graph_flow(cfg: Any = None) -> dict[str, Any]:
     if not chunks and not (
         cfg.skip_ner
         and cfg.skip_link
-        and cfg.skip_extract
         and cfg.skip_embed
         and cfg.skip_community
     ):
@@ -581,20 +546,12 @@ async def build_graph_flow(cfg: Any = None) -> dict[str, Any]:
         1 for c in chunks for e in c.entities if not e.cui.startswith("MENTION:")
     )
 
-    # Stage 6: Relation extraction
-    relations: list[Any] = []
-    if not cfg.skip_extract and chunks:
-        relations = await extract_task(chunks)
-    summary["relations"] = len(relations)
-
-    # Stage 6.5: expand frontier entities for direction-scoped builds, folding
-    # any new chunks/relations into the main lists before embedding.
-    if not cfg.skip_frontier_expand and cfg.domain and relations:
-        frontier_chunks, frontier_relations = await frontier_expand_task(cfg, chunks, relations)
+    # Stage 6: expand frontier entities for direction-scoped builds, folding
+    # any new chunks into the main list before embedding.
+    if not cfg.skip_frontier_expand and cfg.domain and chunks:
+        frontier_chunks = await frontier_expand_task(cfg, chunks)
         chunks = chunks + frontier_chunks
-        relations = relations + frontier_relations
         summary["frontier_chunks"] = len(frontier_chunks)
-        summary["relations"] = len(relations)
 
     # Stage 7: Embedding — BGE-M3 dense + sparse → Qdrant
     if not cfg.skip_embed:
@@ -602,8 +559,8 @@ async def build_graph_flow(cfg: Any = None) -> dict[str, Any]:
 
     # Stage 8: Community detection
     communities: list[Any] = []
-    if not cfg.skip_community and relations:
-        communities = await community_task(relations, chunks)
+    if not cfg.skip_community and chunks:
+        communities = await community_task(chunks)
     summary["communities"] = len(communities)
 
     logger.info("pipeline_complete", **summary)

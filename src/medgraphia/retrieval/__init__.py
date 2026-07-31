@@ -12,9 +12,9 @@ from medgraphia.retrieval.fusion import (
     RRFFusion,
 )
 from medgraphia.retrieval.graph_retriever import (
+    ChunkHit,
     GraphRetrievalResult,
     GraphRetriever,
-    GraphTriple,
 )
 from medgraphia.retrieval.pipeline import RetrievalPipeline
 from medgraphia.retrieval.query_ner import QueryEntities, QueryNERLinker
@@ -39,7 +39,7 @@ __all__ = [
     # Graph retriever
     "GraphRetriever",
     "GraphRetrievalResult",
-    "GraphTriple",
+    "ChunkHit",
     # Vector retriever
     "VectorRetriever",
     "VectorRetrievalResult",

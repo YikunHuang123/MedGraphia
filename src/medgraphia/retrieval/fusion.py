@@ -3,7 +3,7 @@ Reciprocal Rank Fusion (RRF).
 
 Merges results from the three retrieval paths into a single ranked list.
 
-  Path 1 — Graph retriever   : GraphRetrievalResult  (entity triples)
+  Path 1 — Graph retriever   : GraphRetrievalResult  (PPR-ranked chunks)
   Path 2 — Vector retriever  : VectorRetrievalResult (dense+sparse chunks)
   Path 3 — Community retriever: CommunityRetrievalResult (community summaries)
 """
@@ -80,68 +80,27 @@ class FusionResult:
 
 
 def _graph_to_items(result: Any) -> list[FusedItem]:
-    """Convert GraphRetrievalResult → FusedItem list."""
+    """Convert GraphRetrievalResult (PPR-ranked chunks) → FusedItem list."""
     from medgraphia.retrieval.graph_retriever import GraphRetrievalResult
 
     if not isinstance(result, GraphRetrievalResult):
         return []
 
     items: list[FusedItem] = []
-    seen_texts: set[str] = set()
-
-    # Real relation triples first (confidence descending), IDENTITY node-summary triples
-    # ranked last so they don't displace substantive evidence in top RRF slots.
-    # IDENTITY triples whose evidence contains "None" placeholders are discarded.
-    real_triples = sorted(
-        [t for t in result.triples if t.relation_type != "IDENTITY"],
-        key=lambda x: x.confidence,
-        reverse=True,
-    )
-    identity_triples = sorted(
-        [
-            t for t in result.triples
-            if t.relation_type == "IDENTITY"
-            and t.evidence_text
-            and "None)" not in t.evidence_text
-            and "None (" not in t.evidence_text
-        ],
-        key=lambda x: x.confidence,
-        reverse=True,
-    )
-    sorted_triples = real_triples + identity_triples
-
-    for triple in sorted_triples:
-        # Skip triples whose neighbour node is missing or a null placeholder.
-        if not triple.neighbor_cui or triple.neighbor_label.lower() in ("", "none", "null"):
-            continue
-
-        text = triple.as_text()
-        if text in seen_texts:
-            continue
-        seen_texts.add(text)
-
-        # ── CORE FUSION LOGIC ──
-        # If the triple has a chunk_id, use it as the item_id.
-        # This allows it to overlap with the Vector search's chunk_id,
-        # resulting in a much higher RRF score for "Knowledge Graph confirmed" chunks.
-        item_id = (
-            triple.chunk_id
-            if triple.chunk_id
-            else f"{triple.entity_cui}|{triple.relation_type}|{triple.neighbor_cui}"
-        )
-
+    for hit in result.hits:
+        # Using chunk_id as item_id lets a PPR-ranked chunk overlap with the
+        # same chunk from vector search, boosting "graph-confirmed" chunks.
         items.append(
             FusedItem(
-                item_id=item_id,
-                text=text,
+                item_id=hit.chunk_id,
+                text=hit.as_text(),
                 source=RetrievalSource.GRAPH,
                 metadata={
-                    "entity_cui": triple.entity_cui,
-                    "neighbor_cui": triple.neighbor_cui,
-                    "relation_type": triple.relation_type,
-                    "evidence_text": triple.evidence_text,
-                    "confidence": triple.confidence,
-                    "chunk_id": triple.chunk_id,
+                    "chunk_id": hit.chunk_id,
+                    "doc_id": hit.doc_id,
+                    "source_id": hit.source_id,
+                    "section_path": hit.section_path,
+                    "ppr_score": hit.score,
                 },
             )
         )
