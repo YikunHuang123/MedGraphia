@@ -79,7 +79,7 @@ class MedicalNERPipeline:
 
     def __init__(
         self,
-        gliner_model: str = "urchade/gliner_mediumv2.1",
+        gliner_model: str = "Ihor/gliner-biomed-large-v1.0",
         gliner_threshold: float = 0.45,
         bert_en_model: str = "d4data/biomedical-ner-all",
         bert_zh_model: str = "uer/roberta-base-finetuned-cluener2020-chinese",
@@ -108,15 +108,6 @@ class MedicalNERPipeline:
 
         spans = self._run(chunk.text, chunk.language)
         entities = self._spans_to_entities(spans, chunk)
-
-        # if entities:
-        #     logger.info(
-        #         "ner_chunk_done",
-        #         chunk_id=chunk.chunk_id,
-        #         lang=chunk.language.value,
-        #         entities=len(entities),
-        #     )
-
         return chunk.model_copy(update={"entities": entities})
 
     def extract_batch(self, chunks: list[Chunk]) -> list[Chunk]:
@@ -150,15 +141,6 @@ class MedicalNERPipeline:
                     if s.confidence >= self._min_confidence and _is_valid_span(s)
                 ]
                 entities = self._spans_to_entities(filtered, chunk)
-
-                # if entities:
-                #     logger.info(
-                #         "ner_chunk_done",
-                #         chunk_id=chunk.chunk_id,
-                #         lang=chunk.language.value,
-                #         entities=len(entities),
-                #     )
-
                 results[orig_idx] = chunk.model_copy(update={"entities": entities})
 
         return results

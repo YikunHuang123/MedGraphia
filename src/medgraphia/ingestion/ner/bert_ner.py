@@ -201,7 +201,6 @@ class BertNER:
             label_key = ent.get("entity_group") or ent.get("entity", "")
             entity_type = _resolve_label(label_key)
             if entity_type is None:
-                # DEBUG INJECTION: Log the rejected label to understand why it failed
                 logger.debug(
                     "bert_ner_rejected",
                     lang=language.value,

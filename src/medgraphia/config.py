@@ -209,7 +209,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # NER
     # ------------------------------------------------------------------
-    ner_gliner_model: str = "urchade/gliner_mediumv2.1"
+    ner_gliner_model: str = "Ihor/gliner-biomed-large-v1.0"
     ner_gliner_threshold: float = 0.30  # lowered further
     ner_bert_en_model: str = "d4data/biomedical-ner-all"
     ner_bert_zh_model: str = "Adapting/bert-base-chinese-finetuned-NER-biomedical"

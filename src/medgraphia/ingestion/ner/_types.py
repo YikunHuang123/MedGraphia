@@ -15,7 +15,7 @@ class MentionSpan:
     """An entity mention span extracted from text by an NER model."""
 
     text: str  # Surface form
-    normalized: str  # Lower-stripped form used for deduplication / BM25 query
+    normalized: str  # Lower-stripped form used for deduplication
     start: int  # Inclusive char offset in source text
     end: int  # Exclusive char offset
     entity_type: EntityType

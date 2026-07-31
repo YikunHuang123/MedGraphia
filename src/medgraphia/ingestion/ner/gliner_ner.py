@@ -1,7 +1,7 @@
 """
 GLiNER zero-shot coarse NER for multilingual medical text.
 
-Default model: urchade/gliner_mediumv2.1
+Default model: Ihor/gliner-biomed-large-v1.0 (domain-adapted for biomedical NER)
 Handles EN / ZH / DE in a single zero-shot pass using a biomedical label set.
 
 if `gliner` is not installed, predict() returns [] and logs a
@@ -72,7 +72,7 @@ class GLiNERNER:
 
     def __init__(
         self,
-        model_name: str = "urchade/gliner_mediumv2.1",
+        model_name: str = "Ihor/gliner-biomed-large-v1.0",
         threshold: float = 0.45,
     ) -> None:
         self._model_name = model_name

@@ -1,22 +1,13 @@
 """
-Entity Linker: maps NER mention entities (cui="MENTION:...") to MeSH IDs.
-
-Two-stage pipeline:
-  Stage 1 — BM25 candidate retrieval (top-K lexical candidates)
-  Stage 2 — SapBERT re-ranking (cross-lingual semantic similarity)
+Entity Linker: maps NER mention entities (cui="MENTION:...") to MeSH IDs via
+SapBERT dense retrieval over the full multilingual MeSH dictionary.
 
 Cross-lingual alignment goal:
   "心肌梗死" / "myocardial infarction" / "Myokardinfarkt"  →  MeSH D0027051
 
-Lite mode (SapBERT not installed):
-  BM25 score + difflib SequenceMatcher for string similarity.
-
-Enterprise mode (sentence-transformers available):
-  BM25 top-K → SapBERT cosine similarity → keep best candidate above threshold.
-
 Degradation:
-  - MeSH index empty   → return entities unchanged (provisional MENTION: CUIs kept)
-  - SapBERT unavail.  → fall back to BM25 + string distance
+  - MeSH index empty  → return entities unchanged (provisional MENTION: CUIs kept)
+  - SapBERT unavail.  → fall back to difflib string similarity
   - Neo4j unavail.    → entities are linked in-memory but not written to the graph
 """
 
