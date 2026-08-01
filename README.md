@@ -773,6 +773,10 @@ python scripts/evaluation/generate_testset.py \
 - `--output`: Output CSV path.
 - `--append`: Append to existing file instead of overwriting.
 - `--max-workers`: Number of parallel RAGAS workers (default: 4).
+- `--llm-provider`: `openai` / `deepseek` / `gemini` (default `deepseek`) — same provider set as the evaluation judge.
+- `--language`: Restrict source docs to one language (`en`/`zh`/`de`/`all`). RAGAS's cluster-based synthesizers favor whichever docs have the strongest internal overlap, so generate one language at a time with `--append` to guarantee balanced per-language coverage in the final testset.
+
+`data/processed/` can be populated beyond the built-in samples with `scripts/evaluation/expand_processed_corpus.py`, which parses the already-downloaded local PubMed/DailyMed/Huatuo/GERNERMED corpora (zero API cost) into topic-clustered documents.
 
 ### 2. RAG Pipeline Metrics
 

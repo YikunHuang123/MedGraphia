@@ -3,9 +3,11 @@
 Synthetic Test Set Generation Script (Ragas 0.4.3 Compatible).
 
 Uses RAGAS TestsetGenerator to create medical QA pairs from local processed data.
-Requires an OpenAI API Key for generation.
+Supports openai/deepseek/gemini via --llm-provider (default deepseek — cheaper
+than OpenAI for this API-call-heavy generation step).
 
 python scripts/evaluation/generate_testset.py --test-size 10 --docs-limit 3
+python scripts/evaluation/generate_testset.py --test-size 10 --docs-limit 3 --llm-provider gemini
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import json
 import os
 import sys
 import types
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -58,6 +61,61 @@ from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from ragas.run_config import RunConfig
 from ragas.testset import TestsetGenerator
+
+# Same provider/model choices as eval_rag_metrics.py's judge — kept consistent so
+# a --llm-provider value means the same thing across both evaluation scripts.
+_DEFAULT_LLM_MODEL = {
+    "openai": "gpt-5.1",
+    "deepseek": "deepseek-v4-pro",
+    "gemini": "gemini-3.1-pro",
+}
+
+
+def _build_llm(provider: str, model: str) -> tuple[object, object]:
+    """Build the (llm, embeddings) pair for testset generation, mirroring
+    eval_rag_metrics.py's _build_judge so both scripts share the same provider
+    semantics. DeepSeek has no embeddings API, so it falls back to local BGE-M3.
+    """
+    from medgraphia.config import get_settings
+
+    cfg = get_settings()
+
+    if provider == "openai":
+        if not os.getenv("OPENAI_API_KEY"):
+            raise click.ClickException("OPENAI_API_KEY is required for --llm-provider openai.")
+        return ChatOpenAI(model=model, temperature=0, max_retries=10, timeout=120), OpenAIEmbeddings()
+
+    if provider == "deepseek":
+        api_key = cfg.deepseek_api_key.get_secret_value()
+        if not api_key:
+            raise click.ClickException(
+                "DEEPSEEK_API_KEY (config: deepseek_api_key) is required for --llm-provider deepseek."
+            )
+        llm = ChatOpenAI(
+            model=model,
+            temperature=0,
+            max_retries=10,
+            timeout=120,
+            api_key=api_key,
+            base_url="https://api.deepseek.com/v1",
+        )
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+
+        return llm, HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
+
+    if provider == "gemini":
+        api_key = cfg.gemini_api_key.get_secret_value()
+        if not api_key:
+            raise click.ClickException(
+                "GEMINI_API_KEY (config: gemini_api_key) is required for --llm-provider gemini."
+            )
+        from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+
+        llm = ChatGoogleGenerativeAI(model=model, temperature=0, google_api_key=api_key)
+        embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=api_key)
+        return llm, embeddings
+
+    raise click.ClickException(f"Unknown LLM provider: {provider}")
 from ragas.testset.persona import Persona
 from ragas.testset.transforms.engine import Parallel
 from ragas.testset.transforms.extractors import EmbeddingExtractor, SummaryExtractor
@@ -154,10 +212,51 @@ def _load_single_file(json_file: Path) -> list[Document]:
     return docs
 
 
-def load_documents(data_dir: str, limit: int = 5) -> list[Document]:
+def _select_files_by_language(data_dir: str, limit: int, language: str = "all") -> list[Path]:
+    """
+    Pick up to limit files.
+
+    When *language* is "all", round-robin across languages instead of a plain
+    alphabetical truncation — sorted()[:limit] would bias toward whichever
+    language's filenames sort first (UUID-named EN/PubMed files sort before
+    huatuo_*/germed_* and can crowd out ZH/DE entirely for small limits).
+
+    A single *language* restricts the pool to that language only. This exists
+    because balancing the *source* documents doesn't balance RAGAS's *output*:
+    its cluster-based synthesizers favor whichever docs have the strongest
+    internal semantic overlap, which in practice means long structured English
+    drug labels crowd out short ZH/DE snippets even when doc counts are equal.
+    Generating one language at a time (with --append) is the only reliable way
+    to guarantee per-language coverage in the final testset.
+    """
+    all_files = sorted(Path(data_dir).glob("*.json"))
+    buckets: dict[str, list[Path]] = defaultdict(list)
+    for f in all_files:
+        try:
+            with open(f, encoding="utf-8") as fh:
+                lang = json.load(fh).get("language", "en")
+        except Exception:
+            lang = "en"
+        buckets[lang].append(f)
+
+    if language != "all":
+        return buckets[language][:limit]
+
+    selected: list[Path] = []
+    lang_cycle = list(buckets.keys())
+    while len(selected) < limit and any(buckets[lang] for lang in lang_cycle):
+        for lang in lang_cycle:
+            if buckets[lang]:
+                selected.append(buckets[lang].pop(0))
+                if len(selected) >= limit:
+                    break
+    return selected
+
+
+def load_documents(data_dir: str, limit: int = 5, language: str = "all") -> list[Document]:
     """Load processed JSON files into LangChain Documents in parallel."""
-    json_files = sorted(Path(data_dir).glob("*.json"))[:limit]
-    logger.info("loading_files", count=len(json_files), limit=limit)
+    json_files = _select_files_by_language(data_dir, limit, language)
+    logger.info("loading_files", count=len(json_files), limit=limit, language=language)
 
     if not json_files:
         return []
@@ -208,6 +307,25 @@ def load_documents(data_dir: str, limit: int = 5) -> list[Document]:
     show_default=True,
     help="RAGAS parallel workers — lower to avoid OpenAI rate limits",
 )
+@click.option(
+    "--llm-provider",
+    type=click.Choice(["openai", "deepseek", "gemini"]),
+    default="deepseek",
+    show_default=True,
+    help="LLM provider for testset generation — same provider/model set as eval_rag_metrics.py's judge.",
+)
+@click.option(
+    "--llm-model",
+    default=None,
+    help="Model name; defaults per provider when left unset (gpt-5.1 / deepseek-v4-pro / gemini-3.1-pro).",
+)
+@click.option(
+    "--language",
+    type=click.Choice(["all", "en", "zh", "de"]),
+    default="all",
+    show_default=True,
+    help="Restrict source docs to one language.",
+)
 def main(
     data_dir: str,
     test_size: int,
@@ -216,11 +334,13 @@ def main(
     append: bool,
     no_dedup: bool,
     max_workers: int,
+    llm_provider: str,
+    llm_model: str | None,
+    language: str,
 ) -> None:
     configure_logging("INFO")
 
-    if not os.getenv("OPENAI_API_KEY"):
-        raise click.ClickException("OPENAI_API_KEY environment variable is required.")
+    llm_model = llm_model or _DEFAULT_LLM_MODEL[llm_provider]
 
     # Validate output path before spending time on generation
     output_path = Path(output)
@@ -235,7 +355,7 @@ def main(
     click.echo("=" * 60 + "\n")
 
     # 1. Load documents
-    documents = load_documents(data_dir, limit=docs_limit)
+    documents = load_documents(data_dir, limit=docs_limit, language=language)
     if not documents:
         raise click.ClickException(
             f"No documents found in '{data_dir}'. "
@@ -244,9 +364,11 @@ def main(
     click.echo(f"Loaded {len(documents)} section(s) from {docs_limit} document file(s).")
 
     # 2. Initialize LLM and embeddings
-    click.echo(f"Initializing generator (target: {test_size} QA pairs, workers: {max_workers})...")
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_retries=10, timeout=120)
-    embeddings = OpenAIEmbeddings()
+    click.echo(
+        f"Initializing generator (provider: {llm_provider}/{llm_model}, "
+        f"target: {test_size} QA pairs, workers: {max_workers})..."
+    )
+    llm, embeddings = _build_llm(llm_provider, llm_model)
 
     # 3. Build generator and inject medical personas
     generator = TestsetGenerator.from_langchain(llm=llm, embedding_model=embeddings)

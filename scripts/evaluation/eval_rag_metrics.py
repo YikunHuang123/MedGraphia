@@ -286,12 +286,23 @@ def _build_judge(provider: str, judge_model: str) -> tuple[Any, Any]:
     raise click.ClickException(f"Unknown judge provider: {provider}")
 
 
-def run_ragas_scoring(df: pd.DataFrame, judge_model: str = "gpt-4o-mini", judge_provider: str = "openai") -> Any:
+def run_ragas_scoring(
+    df: pd.DataFrame,
+    judge_model: str = "gpt-4o-mini",
+    judge_provider: str = "openai",
+    max_workers: int = 1,
+) -> Any:
     """Score the collected results with RAGAS metrics."""
     if df.empty:
         return None
 
-    logger.info("ragas_scoring_started", rows=len(df), judge_model=judge_model, judge_provider=judge_provider)
+    logger.info(
+        "ragas_scoring_started",
+        rows=len(df),
+        judge_model=judge_model,
+        judge_provider=judge_provider,
+        max_workers=max_workers,
+    )
 
     # Pass only the columns RAGAS expects; extra columns (e.g. 'category') can
     # trigger schema validation warnings or silent errors in RAGAS 0.4.x.
@@ -306,7 +317,7 @@ def run_ragas_scoring(df: pd.DataFrame, judge_model: str = "gpt-4o-mini", judge_
     if judge_provider != "openai":
         answer_relevancy.strictness = 1
 
-    run_config = RunConfig(timeout=600, max_retries=10, max_wait=180, max_workers=1)
+    run_config = RunConfig(timeout=600, max_retries=10, max_wait=180, max_workers=max_workers)
 
     return evaluate(
         dataset,
@@ -342,6 +353,13 @@ def run_ragas_scoring(df: pd.DataFrame, judge_model: str = "gpt-4o-mini", judge_
     help="Judge model name (defaults per provider: gpt-4o-mini / deepseek-chat / gemini-2.5-flash)",
 )
 @click.option("--by-category", is_flag=True, help="Print per-category score breakdown")
+@click.option(
+    "--judge-max-workers",
+    default=None,
+    type=int,
+    help="Concurrent RAGAS judge calls (default: 1 for openai to respect its stricter rate "
+    "limits, 4 for deepseek/gemini).",
+)
 def main(
     input_file: str | None,
     limit: int | None,
@@ -350,10 +368,13 @@ def main(
     judge_provider: str,
     judge_model: str | None,
     by_category: bool,
+    judge_max_workers: int | None,
 ) -> None:
     configure_logging("INFO")
 
     judge_model = judge_model or _DEFAULT_JUDGE_MODEL[judge_provider]
+    if judge_max_workers is None:
+        judge_max_workers = 1 if judge_provider == "openai" else 4
 
     click.echo("\n" + "=" * 60)
     click.echo("  MedGraphia — RAGAS Quality Evaluation")
@@ -390,7 +411,9 @@ def main(
     click.echo(f"Pipeline results saved to {output_path}\n")
 
     # 4. RAGAS scoring
-    result = run_ragas_scoring(df, judge_model=judge_model, judge_provider=judge_provider)
+    result = run_ragas_scoring(
+        df, judge_model=judge_model, judge_provider=judge_provider, max_workers=judge_max_workers
+    )
 
     # 5. Report overall scores
     click.echo("-" * 20 + " RAGAS SCORES " + "-" * 20)
