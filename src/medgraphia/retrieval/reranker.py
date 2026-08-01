@@ -208,24 +208,28 @@ class Reranker:
 
         logger.info("reranker_device_selected", device=device)
 
-        # Attempt 1: FlagEmbedding FlagReranker (preferred)
+        # FlagEmbedding (preferred backend, listed as a required dependency).
+        # Only an ImportError justifies falling back to sentence-transformers — that
+        # means the package genuinely isn't installed. Any other exception (bad args,
+        # corrupt download, incompatible version) is a real bug and must fail loudly
+        # instead of silently downgrading to a different backend with a different
+        # score distribution, which would corrupt reranker_threshold comparisons.
         try:
             from FlagEmbedding import FlagReranker  # type: ignore[import]
+        except ImportError:
+            FlagReranker = None  # noqa: N806
 
+        if FlagReranker is not None:
             logger.info(
                 "reranker_loading", model=self._model_name, backend="FlagEmbedding", device=device
             )
-            # FlagReranker takes 'devices' as a string or list
-            self._model = FlagReranker(self._model_name, use_fp16=self._use_fp16, devices=device)
+            self._model = FlagReranker(self._model_name, use_fp16=self._use_fp16, device=device)
             self._backend = "flag"
             logger.info("reranker_loaded", backend="FlagEmbedding")
             return
-        except ImportError:
-            pass
-        except Exception as exc:
-            logger.warning("reranker_flag_load_failed", error=str(exc))
 
-        # Attempt 2: sentence-transformers CrossEncoder
+        # Attempt 2: sentence-transformers CrossEncoder (only reached if FlagEmbedding
+        # is not installed at all).
         try:
             from sentence_transformers import CrossEncoder  # type: ignore[import]
 
