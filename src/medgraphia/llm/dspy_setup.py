@@ -91,6 +91,10 @@ def get_lm(
             kwargs["api_base"] = api_base
         if temperature is not None:
             kwargs["temperature"] = temperature
+        # Disable Qwen3's built-in thinking mode for ollama — the <think> tokens
+        # cause DSPy's JSONAdapter to receive an empty string and fail to parse.
+        if provider == "ollama":
+            kwargs["extra_body"] = {"think": False}
 
         lm = dspy.LM(model=model_id, **kwargs)
         _LM_CACHE[cache_key] = lm

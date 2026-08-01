@@ -36,6 +36,7 @@ class CompletionState(TypedDict, total=False):
     max_tool_calls: int
     tool_calls_made: int
     gap_evidence: list[str]
+    gap_chunks: list[Any]
     needs_completion: bool
     entity_a: str
     entity_b: str
@@ -132,9 +133,10 @@ async def _execute_tool_node(state: CompletionState) -> CompletionState:
     from medgraphia.retrieval.query_time_completion import complete_gap
 
     cfg = get_settings()
-    evidence = await complete_gap(entity_a, entity_b, pubmed_limit=cfg.gap_completion_pubmed_limit)
-    gap_evidence = state.get("gap_evidence", []) + [evidence]
-    return {**state, "gap_evidence": gap_evidence, "tool_calls_made": tool_calls_made, "needs_completion": False}
+    evidence_str, new_chunks = await complete_gap(entity_a, entity_b, pubmed_limit=cfg.gap_completion_pubmed_limit)
+    gap_evidence = state.get("gap_evidence", []) + [evidence_str]
+    gap_chunks = state.get("gap_chunks", []) + new_chunks
+    return {**state, "gap_evidence": gap_evidence, "gap_chunks": gap_chunks, "tool_calls_made": tool_calls_made, "needs_completion": False}
 
 
 def _route_after_assess(state: CompletionState) -> str:
@@ -183,16 +185,16 @@ async def run_gap_completion(
     entity_cui_map: dict[str, str],
     lm: Any,
     max_tool_calls: int = 2,
-) -> list[str]:
+) -> tuple[list[str], list[Any]]:
     """
     Entry point used by the generation pipeline. Returns a list of evidence
-    strings (empty if nothing was missing or LangGraph isn't installed).
+    strings and a list of new Chunk objects.
     """
     global _compiled_graph
     if _compiled_graph is None:
         _compiled_graph = _build_completion_graph()
     if _compiled_graph is None:
-        return []
+        return [], []
 
     initial_state: CompletionState = {
         "question": question,
@@ -203,12 +205,13 @@ async def run_gap_completion(
         "max_tool_calls": max_tool_calls,
         "tool_calls_made": 0,
         "gap_evidence": [],
+        "gap_chunks": [],
     }
 
     try:
         final_state = await _compiled_graph.ainvoke(initial_state)
     except Exception as exc:
         logger.warning("gap_completion_graph_failed", error=str(exc))
-        return []
+        return [], []
 
-    return final_state.get("gap_evidence", [])
+    return final_state.get("gap_evidence", []), final_state.get("gap_chunks", [])

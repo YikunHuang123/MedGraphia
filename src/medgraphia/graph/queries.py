@@ -449,7 +449,7 @@ async def upsert_chat_session(session: Session) -> None:
     MERGE (s:ChatSession {session_id: $session_id})
     SET s.user_id    = $user_id,
         s.language   = $language,
-        s.domain     = $domain,
+        s.title      = $title,
         s.created_at = $created_at,
         s.updated_at = $updated_at
     """
@@ -459,7 +459,7 @@ async def upsert_chat_session(session: Session) -> None:
             session_id=session.session_id,
             user_id=session.user_id,
             language=session.language.value,
-            domain=session.domain,
+            title=session.title,
             created_at=session.created_at.isoformat(),
             updated_at=session.updated_at.isoformat(),
         )
@@ -542,7 +542,7 @@ async def get_chat_session(session_id: str) -> Session | None:
             session_id=s_node["session_id"],
             user_id=s_node.get("user_id", "anonymous"),
             language=Language(s_node.get("language", "en")),
-            domain=s_node.get("domain", ""),
+            title=s_node.get("title", "New Session"),
             messages=messages,
             created_at=datetime.fromisoformat(s_node["created_at"]),
             updated_at=datetime.fromisoformat(s_node["updated_at"]),
@@ -594,7 +594,7 @@ async def update_user_interests(user_id: str, cuis: list[str], decay_factor: flo
     MERGE (u:User {id: $user_id})
     WITH u
     UNWIND $cuis AS cui
-    MATCH (e:Entity {cui: cui})
+    MATCH (e) WHERE e.cui = cui
     MERGE (u)-[r:INTERESTED_IN]->(e)
     ON CREATE SET r.weight = 1.0, r.last_accessed = $now
     ON MATCH SET r.weight = (r.weight * $decay) + 1.0, r.last_accessed = $now
@@ -613,7 +613,7 @@ async def update_user_interests(user_id: str, cuis: list[str], decay_factor: flo
 async def get_user_top_interests(user_id: str, limit: int = 10) -> list[str]:
     """Return the CUIs of the entities a user is most interested in."""
     cypher = """
-    MATCH (u:User {id: $user_id})-[r:INTERESTED_IN]->(e:Entity)
+    MATCH (u:User {id: $user_id})-[r:INTERESTED_IN]->(e)
     RETURN e.cui AS cui
     ORDER BY r.weight DESC
     LIMIT $limit

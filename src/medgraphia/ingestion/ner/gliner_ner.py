@@ -158,7 +158,13 @@ class GLiNERNER:
 
         indices, batch_texts = zip(*non_empty)
         try:
-            raw_results = model.predict_entities(list(batch_texts), labels, threshold=self._threshold)
+            if hasattr(model, "batch_predict_entities"):
+                raw_results = model.batch_predict_entities(list(batch_texts), labels, threshold=self._threshold)
+            else:
+                raw_results = [
+                    model.predict_entities(text, labels, threshold=self._threshold)
+                    for text in batch_texts
+                ]
             # GLiNER returns list[dict] for a single string; list[list[dict]] for a list
             if raw_results and isinstance(raw_results[0], dict):
                 raw_results = [raw_results]

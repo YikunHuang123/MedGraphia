@@ -64,6 +64,19 @@ _CONSTRAINTS: list[tuple[str, str]] = [
         "unique_pipeline_dom",
         "CREATE CONSTRAINT unique_pipeline_dom IF NOT EXISTS FOR (n:PipelineStatus) REQUIRE n.domain IS UNIQUE",
     ),
+    # User and Chat memory
+    (
+        "unique_user_id",
+        "CREATE CONSTRAINT unique_user_id IF NOT EXISTS FOR (n:User) REQUIRE n.id IS UNIQUE",
+    ),
+    (
+        "unique_chat_session_id",
+        "CREATE CONSTRAINT unique_chat_session_id IF NOT EXISTS FOR (n:ChatSession) REQUIRE n.session_id IS UNIQUE",
+    ),
+    (
+        "unique_chat_message_id",
+        "CREATE CONSTRAINT unique_chat_message_id IF NOT EXISTS FOR (n:ChatMessage) REQUIRE n.message_id IS UNIQUE",
+    ),
 ]
 
 _INDEXES: list[tuple[str, str]] = [

@@ -58,7 +58,7 @@ class GraphRetrievalResult:
 # Cypher
 # ---------------------------------------------------------------------------
 
-_CYPHER_RESOLVE_SEEDS = "MATCH (n) WHERE n.cui IN $cuis RETURN id(n) AS node_id"
+_CYPHER_RESOLVE_SEEDS = "MATCH (n) WHERE n.cui IN $cuis RETURN count(n) AS cnt"
 
 _CYPHER_PROJECT = """
 CALL gds.graph.project(
@@ -69,8 +69,10 @@ CALL gds.graph.project(
 """
 
 _CYPHER_PPR_STREAM = """
+MATCH (n) WHERE n.cui IN $cuis
+WITH collect(n) AS source_nodes
 CALL gds.pageRank.stream($graph_name, {
-  sourceNodes: $source_node_ids,
+  sourceNodes: source_nodes,
   dampingFactor: $damping_factor,
   maxIterations: $max_iterations
 })
@@ -83,7 +85,7 @@ ORDER BY score DESC
 LIMIT $top_k
 """
 
-_CYPHER_DROP_PROJECTION = "CALL gds.graph.drop($graph_name, false)"
+_CYPHER_DROP_PROJECTION = "CALL gds.graph.drop($graph_name, false) YIELD graphName"
 
 # Shortest-path existence check between two seed CUIs. Only excludes FROM_DOC
 # (Chunk -> Document, not meaningful for entity connectivity) — MENTIONED_IN
@@ -175,8 +177,8 @@ class GraphRetriever:
 
             async with get_session() as session:
                 seed_result = await session.run(_CYPHER_RESOLVE_SEEDS, cuis=seed_cuis)
-                source_node_ids = [r["node_id"] async for r in seed_result]
-                if not source_node_ids:
+                record = await seed_result.single()
+                if not record or record["cnt"] == 0:
                     return result
 
                 graph_name = f"ppr_{uuid.uuid4().hex}"
@@ -188,8 +190,8 @@ class GraphRetriever:
                     )
                     ppr_result = await session.run(
                         _CYPHER_PPR_STREAM,
+                        cuis=seed_cuis,
                         graph_name=graph_name,
-                        source_node_ids=source_node_ids,
                         damping_factor=self._damping_factor,
                         max_iterations=self._max_iterations,
                         top_k=self._top_k_chunks * hops,

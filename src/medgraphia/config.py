@@ -98,8 +98,8 @@ class Settings(BaseSettings):
     community_resolution: float = 1.0
 
     # Task-specific LLM overrides
-    rewriter_llm_provider: str = "openai"
-    rewriter_llm_model: str = "Qwen/Qwen2.5-7B-Instruct"
+    rewriter_llm_provider: str = "ollama"
+    rewriter_llm_model: str = "qwen3.5:9b"
     rewriter_llm_api_key: SecretStr = SecretStr("")
     rewriter_llm_base_url: str = ""
 
@@ -127,7 +127,7 @@ class Settings(BaseSettings):
     # Each tier maps to a (provider, model) pair.  Falls back to default_llm_provider /
     # default_llm_model when not explicitly set.
     llm_small_provider: str = "ollama"        # e.g. "ollama"
-    llm_small_model: str = "Qwen3.5:4b"           # e.g. "qwen2.5:7b"
+    llm_small_model: str = "Qwen3.5:9b"           # e.g. "qwen2.5:7b"
     llm_medium_provider: str = "ollama"       # e.g. "deepseek"
     llm_medium_model: str = "Qwen3.5:9b"          # e.g. "deepseek-chat"
     llm_large_provider: str = "ollama"        # e.g. "openai"

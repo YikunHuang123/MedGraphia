@@ -167,6 +167,24 @@ def _community_to_items(result: Any) -> list[FusedItem]:
     return items
 
 
+def chunk_to_fused_item(chunk: Any) -> FusedItem:
+    """Wrap a freshly-ingested Chunk (e.g. from agentic gap completion) as a
+    FusedItem so it can be merged into an existing retrieved_items list and
+    survive citation.py's numbering/lookup, which expects FusedItem shape."""
+    return FusedItem(
+        item_id=chunk.chunk_id,
+        text=chunk.text,
+        source=RetrievalSource.GRAPH,
+        metadata={
+            "chunk_id": chunk.chunk_id,
+            "doc_id": chunk.doc_id,
+            "source_id": chunk.source.source_id,
+            "source_title": chunk.source.source_title,
+            "section_path": chunk.section_path,
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Core RRF computation
 # ---------------------------------------------------------------------------

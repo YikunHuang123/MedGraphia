@@ -84,9 +84,19 @@ class GenerationPipeline:
         )
 
         # 2.5. Agentic gap completion — same lm as final generation, runs before it
-        context_str = await self._maybe_complete_gaps(
+        evidence_lines, new_chunks = await self._maybe_complete_gaps(
             question, context_str, entity_labels or {}, unlinked_mentions or [], lm
         )
+        if new_chunks:
+            # Rebuild the numbered context so newly-fetched passages get a
+            # real [N] citation number the model can reference, instead of
+            # being appended as unnumbered raw text.
+            from medgraphia.retrieval.fusion import chunk_to_fused_item
+
+            retrieved_items.extend(chunk_to_fused_item(c) for c in new_chunks)
+            context_str = build_numbered_context(retrieved_items)
+        if evidence_lines:
+            context_str += "\n\n[Additional evidence found for this query]\n" + "\n".join(evidence_lines)
 
         target_lang = language.full_name if language else Language.EN.full_name
 
@@ -195,9 +205,16 @@ class GenerationPipeline:
             model_override=routing.model_name,
         )
 
-        context_str = await self._maybe_complete_gaps(
+        evidence_lines, new_chunks = await self._maybe_complete_gaps(
             question, context_str, entity_labels or {}, unlinked_mentions or [], lm
         )
+        if new_chunks:
+            from medgraphia.retrieval.fusion import chunk_to_fused_item
+
+            retrieved_items.extend(chunk_to_fused_item(c) for c in new_chunks)
+            context_str = build_numbered_context(retrieved_items)
+        if evidence_lines:
+            context_str += "\n\n[Additional evidence found for this query]\n" + "\n".join(evidence_lines)
 
         target_lang = language.full_name if language else Language.EN.full_name
 
@@ -256,26 +273,31 @@ class GenerationPipeline:
         entity_labels: dict[str, str],
         unlinked_mentions: list[str],
         lm: Any,
-    ) -> str:
+    ) -> tuple[list[str], list[Any]]:
         """
         Let an agent decide whether the context is missing a relation
-        between two entities mentioned in the question, and if so fetch and
-        merge evidence before the final answer is generated.
+        between two entities mentioned in the question, and if so fetch new
+        evidence before the final answer is generated.
+
+        Returns (evidence_status_lines, new_chunks). The caller is
+        responsible for merging new_chunks into retrieved_items and
+        rebuilding the numbered context so newly-fetched passages get a
+        real [N] citation number instead of being appended as raw text.
         """
         from medgraphia.config import get_settings
 
         cfg = get_settings()
         if not cfg.gap_completion_enabled:
-            return context_str
+            return [], []
 
         candidate_labels = list(entity_labels.values()) + unlinked_mentions
         if len(candidate_labels) < 2:
-            return context_str
+            return [], []
 
         from medgraphia.generation.agentic_completion import run_gap_completion
 
         cui_map = {label: cui for cui, label in entity_labels.items()}
-        evidence = await run_gap_completion(
+        evidence, new_chunks = await run_gap_completion(
             question=question,
             context=context_str,
             entity_labels=candidate_labels,
@@ -283,11 +305,9 @@ class GenerationPipeline:
             lm=lm,
             max_tool_calls=cfg.gap_completion_max_tool_calls,
         )
-        if not evidence:
-            return context_str
-
-        logger.info("gap_completion_applied", count=len(evidence))
-        return context_str + "\n\n[Additional evidence found for this query]\n" + "\n".join(evidence)
+        if evidence:
+            logger.info("gap_completion_applied", count=len(evidence))
+        return evidence, new_chunks
 
     def get_streaming_components(self, query_type: QueryType, language: Language) -> dict[str, str]:
         """Return the system prompt and disclaimer for streaming."""
