@@ -752,7 +752,7 @@ python scripts/dspy/optimize.py
 
 MedGraphia includes a comprehensive evaluation suite using RAGAS for quality measurement and automated testset generation.
 
-> **Note**: Evaluation scripts require `OPENAI_API_KEY` to be set in your environment, as they use GPT-4o-mini as a "judge" model.
+> **Note**: Evaluation scripts support switching the judge model via `--judge-provider` (`openai` / `deepseek` / `gemini`, default `openai`) — set the corresponding `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` / `GEMINI_API_KEY`. The DeepSeek judge uses local BGE-M3 for embeddings at no extra cost.
 
 ### 1. Synthetic Testset Generation
 
@@ -780,9 +780,14 @@ Evaluate the full RAG pipeline (Faithfulness, Relevance, Precision, Recall) usin
 
 ```bash
 python scripts/evaluation/eval_rag_metrics.py \
-  --input data/evaluation/synthetic_testset.csv \
-  --output eval_results.csv
+  --input-file data/evaluation/synthetic_testset.csv \
+  --output eval_results.csv \
+  --judge-provider deepseek
 ```
+
+**Parameters:**
+- `--judge-provider`: Judge model provider — `openai` / `deepseek` / `gemini` (default `openai`).
+- `--judge-model`: Judge model name; defaults per provider when left unset (`gpt-4o-mini` / `deepseek-chat` / `gemini-2.5-flash`).
 
 **🏆 Performance Leap (Parent-Child Optimization & DSPy MIPROv2)**
 

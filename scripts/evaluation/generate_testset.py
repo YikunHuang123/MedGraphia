@@ -39,10 +39,15 @@ try:
     from mistralai import Mistral  # noqa: F401
 except ImportError:
     try:
+        import importlib.machinery
+
         from mistralai.client import Mistral as _Mistral
 
         _mistral_mod = types.ModuleType("mistralai")
         _mistral_mod.Mistral = _Mistral
+        # A bare ModuleType has no __spec__, which makes importlib.util.find_spec()
+        # raise ValueError for anything probing "mistralai" later (e.g. instructor).
+        _mistral_mod.__spec__ = importlib.machinery.ModuleSpec("mistralai", loader=None)
         sys.modules["mistralai"] = _mistral_mod
     except ImportError:
         pass

@@ -126,18 +126,18 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Each tier maps to a (provider, model) pair.  Falls back to default_llm_provider /
     # default_llm_model when not explicitly set.
-    llm_small_provider: str = "ollama"        # e.g. "ollama"
-    llm_small_model: str = "Qwen3.5:9b"           # e.g. "qwen2.5:7b"
-    llm_medium_provider: str = "ollama"       # e.g. "deepseek"
-    llm_medium_model: str = "Qwen3.5:9b"          # e.g. "deepseek-chat"
-    llm_large_provider: str = "ollama"        # e.g. "openai"
-    llm_large_model: str = "qwen3:14b"           # e.g. "gpt-4o"
-    # llm_small_provider: str = "deepseek"  # e.g. "ollama"
-    # llm_small_model: str = "deepseek-v4-flash"  # e.g. "qwen2.5:7b"
-    # llm_medium_provider: str = "deepseek"  # e.g. "deepseek"
-    # llm_medium_model: str = "deepseek-v4-pro"  # e.g. "deepseek-chat"
-    # llm_large_provider: str = "openai"  # e.g. "openai"
-    # llm_large_model: str = "gpt-5.1"  # e.g. "gpt-4opseek"
+    # llm_small_provider: str = "ollama"        # e.g. "ollama"
+    # llm_small_model: str = "Qwen3.5:9b"           # e.g. "qwen2.5:7b"
+    # llm_medium_provider: str = "ollama"       # e.g. "deepseek"
+    # llm_medium_model: str = "Qwen3.5:9b"          # e.g. "deepseek-chat"
+    # llm_large_provider: str = "ollama"        # e.g. "openai"
+    # llm_large_model: str = "qwen3:14b"           # e.g. "gpt-4o"
+    llm_small_provider: str = "deepseek"
+    llm_small_model: str = "deepseek-v4-flash"
+    llm_medium_provider: str = "deepseek"
+    llm_medium_model: str = "deepseek-v4-flash"
+    llm_large_provider: str = "deepseek"
+    llm_large_model: str = "deepseek-v4-pro"
 
     # ------------------------------------------------------------------
     # Safety guardrails

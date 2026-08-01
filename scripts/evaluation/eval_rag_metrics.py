@@ -56,10 +56,15 @@ try:
     from mistralai import Mistral  # noqa: F401
 except ImportError:
     try:
+        import importlib.machinery
+
         from mistralai.client import Mistral as _Mistral
 
         _mistral_mod = types.ModuleType("mistralai")
         _mistral_mod.Mistral = _Mistral
+        # A bare ModuleType has no __spec__, which makes importlib.util.find_spec()
+        # raise ValueError for anything probing "mistralai" later (e.g. instructor).
+        _mistral_mod.__spec__ = importlib.machinery.ModuleSpec("mistralai", loader=None)
         sys.modules["mistralai"] = _mistral_mod
     except ImportError:
         pass
@@ -227,20 +232,79 @@ async def run_evaluation(
 # ---------------------------------------------------------------------------
 
 
-def run_ragas_scoring(df: pd.DataFrame, judge_model: str = "gpt-4o-mini") -> Any:
+# Sensible default judge model per provider — used when --judge-model is left
+# at its default while switching --judge-provider.
+_DEFAULT_JUDGE_MODEL = {
+    "openai": "gpt-5.1",
+    "deepseek": "deepseek-v4-pro",
+    "gemini": "gemini-3.1-pro",
+}
+
+
+def _build_judge(provider: str, judge_model: str) -> tuple[Any, Any]:
+    """
+    Build the (llm, embeddings) pair RAGAS needs for a given judge provider.
+
+    DeepSeek has no embeddings API, so its judge falls back to a local BGE-M3
+    embedding model (already used elsewhere in the project) — zero extra cost,
+    no OpenAI dependency required for a DeepSeek-only run.
+    """
+    from medgraphia.config import get_settings
+
+    cfg = get_settings()
+
+    if provider == "openai":
+        if not os.getenv("OPENAI_API_KEY"):
+            raise click.ClickException("OPENAI_API_KEY environment variable is required for --judge-provider openai.")
+        return ChatOpenAI(model=judge_model, temperature=0), OpenAIEmbeddings()
+
+    if provider == "deepseek":
+        api_key = cfg.deepseek_api_key.get_secret_value()
+        if not api_key:
+            raise click.ClickException("DEEPSEEK_API_KEY (config: deepseek_api_key) is required for --judge-provider deepseek.")
+        llm = ChatOpenAI(
+            model=judge_model,
+            temperature=0,
+            api_key=api_key,
+            base_url="https://api.deepseek.com/v1",
+        )
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+
+        embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
+        return llm, embeddings
+
+    if provider == "gemini":
+        api_key = cfg.gemini_api_key.get_secret_value()
+        if not api_key:
+            raise click.ClickException("GEMINI_API_KEY (config: gemini_api_key) is required for --judge-provider gemini.")
+        from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+
+        llm = ChatGoogleGenerativeAI(model=judge_model, temperature=0, google_api_key=api_key)
+        embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=api_key)
+        return llm, embeddings
+
+    raise click.ClickException(f"Unknown judge provider: {provider}")
+
+
+def run_ragas_scoring(df: pd.DataFrame, judge_model: str = "gpt-4o-mini", judge_provider: str = "openai") -> Any:
     """Score the collected results with RAGAS metrics."""
     if df.empty:
         return None
 
-    logger.info("ragas_scoring_started", rows=len(df), judge_model=judge_model)
+    logger.info("ragas_scoring_started", rows=len(df), judge_model=judge_model, judge_provider=judge_provider)
 
     # Pass only the columns RAGAS expects; extra columns (e.g. 'category') can
     # trigger schema validation warnings or silent errors in RAGAS 0.4.x.
     ragas_cols = [c for c in ["question", "answer", "contexts", "ground_truth"] if c in df.columns]
     dataset = Dataset.from_pandas(df[ragas_cols])
 
-    eval_llm = ChatOpenAI(model=judge_model, temperature=0)
-    eval_embeddings = OpenAIEmbeddings()
+    eval_llm, eval_embeddings = _build_judge(judge_provider, judge_model)
+
+    # answer_relevancy asks the judge for `strictness` completions in one call
+    # (n=strictness). DeepSeek's API only accepts n=1, so force single-sample
+    # mode for non-OpenAI judges instead of hitting a 400 on every row.
+    if judge_provider != "openai":
+        answer_relevancy.strictness = 1
 
     run_config = RunConfig(timeout=600, max_retries=10, max_wait=180, max_workers=1)
 
@@ -266,10 +330,16 @@ def run_ragas_scoring(df: pd.DataFrame, judge_model: str = "gpt-4o-mini") -> Any
     "--user-id", default="eval_user", show_default=True, help="User ID for memory/decay testing"
 )
 @click.option(
-    "--judge-model",
-    default="gpt-4o-mini",
+    "--judge-provider",
+    type=click.Choice(["openai", "deepseek", "gemini"]),
+    default="openai",
     show_default=True,
-    help="OpenAI model used as RAGAS judge (use gpt-4o for production-quality evaluation)",
+    help="LLM provider for the RAGAS judge — openai is the most expensive; deepseek/gemini are cheaper alternatives.",
+)
+@click.option(
+    "--judge-model",
+    default=None,
+    help="Judge model name (defaults per provider: gpt-4o-mini / deepseek-chat / gemini-2.5-flash)",
 )
 @click.option("--by-category", is_flag=True, help="Print per-category score breakdown")
 def main(
@@ -277,17 +347,17 @@ def main(
     limit: int | None,
     output: str,
     user_id: str,
-    judge_model: str,
+    judge_provider: str,
+    judge_model: str | None,
     by_category: bool,
 ) -> None:
     configure_logging("INFO")
 
-    if not os.getenv("OPENAI_API_KEY"):
-        raise click.ClickException("OPENAI_API_KEY environment variable is required.")
+    judge_model = judge_model or _DEFAULT_JUDGE_MODEL[judge_provider]
 
     click.echo("\n" + "=" * 60)
     click.echo("  MedGraphia — RAGAS Quality Evaluation")
-    click.echo(f"  Judge model: {judge_model}")
+    click.echo(f"  Judge: {judge_provider}/{judge_model}")
     click.echo("=" * 60 + "\n")
 
     # 1. Load samples
@@ -320,7 +390,7 @@ def main(
     click.echo(f"Pipeline results saved to {output_path}\n")
 
     # 4. RAGAS scoring
-    result = run_ragas_scoring(df, judge_model=judge_model)
+    result = run_ragas_scoring(df, judge_model=judge_model, judge_provider=judge_provider)
 
     # 5. Report overall scores
     click.echo("-" * 20 + " RAGAS SCORES " + "-" * 20)
