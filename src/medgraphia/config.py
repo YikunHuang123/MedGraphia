@@ -188,7 +188,8 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Reranker
     # ------------------------------------------------------------------
-    reranker_threshold: float = 0.1  # Minimum score for a passage to be considered relevant
+    reranker_threshold: float = 0.25  # Minimum score for a passage to be considered relevant
+    reranker_fallback_top_n: int = 2  # Kept even below threshold so context is never empty
 
     # ------------------------------------------------------------------
     # Multilingual retrieval

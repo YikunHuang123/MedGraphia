@@ -86,16 +86,20 @@ class Reranker:
         model_name: str = _DEFAULT_MODEL,
         use_fp16: bool = True,
         threshold: float | None = None,
+        fallback_top_n: int | None = None,
     ) -> None:
         self._model_name = model_name
         self._use_fp16 = use_fp16
         self._threshold = threshold if threshold is not None else settings.reranker_threshold
+        self._fallback_top_n = (
+            fallback_top_n if fallback_top_n is not None else settings.reranker_fallback_top_n
+        )
         self._model: Any = None  # lazy-loaded
         self._backend: str | None = None  # "flag" | "sentence_transformers"
 
     @classmethod
     def from_settings(cls) -> Reranker:
-        return cls(threshold=settings.reranker_threshold)
+        return cls(threshold=settings.reranker_threshold, fallback_top_n=settings.reranker_fallback_top_n)
 
     # ------------------------------------------------------------------
     # Public API
@@ -157,6 +161,14 @@ class Reranker:
             :top_k
         ]
 
+        # Threshold filtered out everything — fall back to the top-scoring items so the
+        # generator never gets an empty context. Low reranker_score still lets the LLM
+        # (or a downstream check) recognize weak evidence and hedge or decline.
+        used_fallback = False
+        if not filtered_ranked and ranked and self._fallback_top_n > 0:
+            filtered_ranked = ranked[: self._fallback_top_n]
+            used_fallback = True
+
         reranked_items = []
         for score, item in filtered_ranked:
             item.metadata["reranker_score"] = float(score)
@@ -168,6 +180,7 @@ class Reranker:
             output=len(reranked_items),
             top_score=f"{ranked[0][0]:.4f}" if ranked else "n/a",
             threshold=self._threshold,
+            used_fallback=used_fallback,
         )
         return RerankedResult(
             items=reranked_items,
