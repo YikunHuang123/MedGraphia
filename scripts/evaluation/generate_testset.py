@@ -67,7 +67,7 @@ from ragas.testset import TestsetGenerator
 _DEFAULT_LLM_MODEL = {
     "openai": "gpt-5.1",
     "deepseek": "deepseek-v4-pro",
-    "gemini": "gemini-3.1-pro",
+    "gemini": "gemini-3.1-pro-preview",
 }
 
 
@@ -317,7 +317,7 @@ def load_documents(data_dir: str, limit: int = 5, language: str = "all") -> list
 @click.option(
     "--llm-model",
     default=None,
-    help="Model name; defaults per provider when left unset (gpt-5.1 / deepseek-v4-pro / gemini-3.1-pro).",
+    help="Model name; defaults per provider when left unset (gpt-5.1 / deepseek-v4-pro / gemini-3.1-pro-preview).",
 )
 @click.option(
     "--language",

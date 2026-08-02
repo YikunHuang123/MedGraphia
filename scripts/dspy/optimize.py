@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 
 import dspy
-from dspy.teleprompt import BootstrapFewShot, MIPROv2
+from dspy.teleprompt import GEPA
 
 from medgraphia.domain.base import Language
 from medgraphia.llm.dspy_setup import get_lm
@@ -20,10 +20,16 @@ from medgraphia.prompts.query_rewriting import RewritingJudge
 # Initialize LMs
 # - student_lm: used for the modules being optimized (the 'student')
 # - eval_lm: deterministic judge (temp=0.0) used for scoring metrics
-# - proposal_lm: creative judge (temp=0.7) used by MIPROv2 to brainstorm instructions
+# - proposal_lm: GEPA's reflection_lm, which reads execution traces + feedback to
+#   propose better instructions. Deliberately a different provider (Gemini, not
+#   DeepSeek) from every student model this script compiles — the generator's
+#   student is deepseek-v4-pro, same as the old judge-task LM would have been,
+#   so a same-model "self-reflection" loop wouldn't surface new blind spots.
 student_lm = get_lm(task="rewriter")
 eval_lm = get_lm(task="judge", temperature=0.0)
-proposal_lm = get_lm(task="judge", temperature=0.7)
+proposal_lm = get_lm(
+    task="default", provider_override="gemini", model_override="gemini-3.1-pro-preview", temperature=0.7
+)
 
 # Set the student as the default for module execution during optimization
 dspy.settings.configure(lm=student_lm)
@@ -398,6 +404,79 @@ def answer_metric(example: dspy.Example, pred: dspy.Prediction, trace=None) -> f
 
 
 # ---------------------------------------------------------
+# 2b. GEPA metric wrappers
+# ---------------------------------------------------------
+# GEPA's reflection LM reads natural-language feedback (not just a score) to
+# diagnose *why* a candidate failed and propose a better instruction. Plain
+# floats still work but skip the reflective benefit GEPA is chosen for, so
+# these wrappers reuse the scoring logic above and add a feedback string.
+
+
+def rewrite_metric_gepa(gold, pred, trace=None, pred_name=None, pred_trace=None):
+    score = rewrite_metric(gold, pred, trace)
+
+    expected_tier = getattr(gold, "expected_tier", None)
+    tier_ok = expected_tier is None or pred.complexity_tier.strip().upper() == expected_tier.strip().upper()
+    reasoning_len = len(pred.complexity_reasoning.strip())
+
+    notes = []
+    if not tier_ok:
+        notes.append(
+            f"Wrong complexity tier: predicted {pred.complexity_tier!r}, expected {expected_tier!r}. "
+            "Re-check the E+I scoring rubric — this is the single biggest score penalty."
+        )
+    if reasoning_len < 80:
+        notes.append(
+            f"complexity_reasoning is only {reasoning_len} chars — too short to show real E+I "
+            "counting work; aim for an explicit 'E=?, I=?, Total=?' breakdown."
+        )
+    if gold.result["rewritten_query"].strip().lower() != pred.rewritten_query.strip().lower():
+        notes.append(
+            f"Rewritten query diverged from the expected standalone form "
+            f"(expected: {gold.result['rewritten_query']!r}, got: {pred.rewritten_query!r})."
+        )
+    feedback = " ".join(notes) if notes else "Tier correct, rewrite matched, reasoning adequate."
+
+    return dspy.Prediction(score=score, feedback=feedback)
+
+
+def answer_metric_gepa(gold, pred, trace=None, pred_name=None, pred_trace=None):
+    score = answer_metric(gold, pred, trace)
+
+    predicted_ans = pred.result.answer
+    predicted_cites = set(pred.result.citations)
+    expected_cites = set(gold.result["citations"])
+
+    notes = []
+    if predicted_cites != expected_cites:
+        missing = expected_cites - predicted_cites
+        extra = predicted_cites - expected_cites
+        if missing:
+            notes.append(f"Missing citations that should have been used: {sorted(missing)}.")
+        if extra:
+            notes.append(f"Cited sources not actually needed: {sorted(extra)}.")
+    if predicted_cites and not all(f"[{c}]" in predicted_ans for c in predicted_cites):
+        notes.append("Some cited numbers never appear inline as [N] markers in the answer text.")
+
+    sentences = [
+        s.strip() for s in re.split(r"[。!?！？\n]|\.\s+", predicted_ans) if len(s.strip()) > 15
+    ]
+    if sentences and not expected_cites:
+        pass  # refusal case, density not applicable
+    elif sentences:
+        uncited = [s for s in sentences if not re.search(r"\[\d+\]", s)]
+        if uncited:
+            notes.append(
+                f"{len(uncited)}/{len(sentences)} factual sentence(s) lack a [N] marker — "
+                "every claim must trace back to a numbered context paragraph. "
+                f"Example uncited sentence: {uncited[0][:80]!r}"
+            )
+
+    feedback = " ".join(notes) if notes else "Citations correct, inline markers present, good citation density."
+    return dspy.Prediction(score=score, feedback=feedback)
+
+
+# ---------------------------------------------------------
 # 3. Compilation Functions
 # ---------------------------------------------------------
 
@@ -420,7 +499,7 @@ def _eval_to_float(result) -> float:
 
 
 def compile_rewriter():
-    print("\n--- Compiling Query Rewriter (MIPROv2) ---")
+    print("\n--- Compiling Query Rewriter (GEPA) ---")
     from medgraphia.llm.dspy_setup import get_lm
     from medgraphia.programs.rewriter import RewriterModule
 
@@ -460,14 +539,14 @@ def compile_rewriter():
         baseline_score = _eval_to_float(baseline_eval(module))
     print(f"  Baseline score: {baseline_score:.3f}")
 
-    # MIPROv2: proposal_lm (DeepSeek temp 0.7) proposes instruction variants via Bayesian search;
-    # student_lm (Qwen) is the task model that gets evaluated under each candidate.
-    # auto="medium" runs ~20-30 trials — sufficient for a 2-objective rewriting+tier task.
-    teleprompter = MIPROv2(
-        metric=rewrite_metric,
-        prompt_model=proposal_lm,
-        task_model=student_lm,
-        auto="medium",
+    # GEPA: reflective prompt evolution. reflection_lm (DeepSeek temp 0.7) reads
+    # execution traces + the feedback text from rewrite_metric_gepa to diagnose
+    # failures and propose better instructions; auto="light" (~20-100 evals) fits
+    # our dataset size far better than MIPROv2's 200+-example recommendation.
+    teleprompter = GEPA(
+        metric=rewrite_metric_gepa,
+        reflection_lm=proposal_lm,
+        auto="light",
         num_threads=4,
     )
 
@@ -475,7 +554,6 @@ def compile_rewriter():
         module,
         trainset=trainset,
         valset=valset,
-        requires_permission_to_run=False,
     )
 
     # Report improvement over baseline before persisting.
@@ -504,10 +582,21 @@ def compile_rewriter():
 
 
 def compile_generator():
-    print("\n--- Compiling Answer Generator (MIPROv2) ---")
+    print("\n--- Compiling Answer Generator (GEPA) ---")
+    from medgraphia.config import get_settings
     from medgraphia.programs.generator import GeneratorModule
 
     module = GeneratorModule()
+
+    # The generator has no dedicated dspy_setup task, so it previously inherited
+    # whichever LM this module configured globally for the rewriter — a silent
+    # mismatch. Compile against the LARGE tier explicitly: that's the model
+    # LLMRouter actually routes complex, high-stakes questions to at runtime,
+    # exactly the case where citation grounding matters most.
+    cfg = get_settings()
+    generator_lm = get_lm(
+        task="default", provider_override=cfg.llm_large_provider, model_override=cfg.llm_large_model
+    )
 
     # Merge handcrafted + synthetic examples.  Handcrafted come first so they
     # are prioritised as labeled demos; synthetic examples expand the bootstrap pool.
@@ -517,9 +606,9 @@ def compile_generator():
         f"  Full set: {len(ANSWER_DATA)} handcrafted + {len(synthetic)} synthetic = {len(full_set)} total"
     )
 
-    # Hold out 20% of synthetic examples as valset so MIPROv2's Bayesian search
-    # evaluates against unseen data.  Handcrafted examples are never placed in
-    # valset — they are too valuable as labeled demos.
+    # Hold out 20% of synthetic examples as valset so GEPA evaluates against
+    # unseen data.  Handcrafted examples are never placed in valset — they are
+    # too valuable as labeled demos.
     random.seed(42)
     shuffled_synthetic = synthetic.copy()
     random.shuffle(shuffled_synthetic)
@@ -530,7 +619,7 @@ def compile_generator():
 
     # Baseline: measure uncompiled module before optimisation.
     print("  Evaluating baseline (uncompiled)…")
-    with dspy.context(lm=student_lm):
+    with dspy.context(lm=generator_lm):
         baseline_eval = dspy.Evaluate(
             devset=valset,
             metric=answer_metric,
@@ -540,27 +629,28 @@ def compile_generator():
         baseline_score = _eval_to_float(baseline_eval(module))
     print(f"  Baseline score: {baseline_score:.3f}")
 
-    # MIPROv2: proposal_lm proposes instruction variants via Bayesian search;
-    # student_lm is the task model evaluated under each candidate.
-    # auto="medium" runs ~20-30 trials.
-    teleprompter = MIPROv2(
-        metric=answer_metric,
-        prompt_model=proposal_lm,
-        task_model=student_lm,
-        auto="medium",
+    # GEPA: reflection_lm reads execution traces + answer_metric_gepa's feedback
+    # text (missing/extra citations, uncited sentences, refusal correctness) to
+    # diagnose failures and propose better instructions. GEPA has no task_model
+    # param (unlike MIPROv2) — it uses dspy.settings.lm, hence the context here
+    # rather than a permanent global reconfigure.
+    teleprompter = GEPA(
+        metric=answer_metric_gepa,
+        reflection_lm=proposal_lm,
+        auto="light",
         num_threads=4,
     )
 
-    compiled_generator = teleprompter.compile(
-        module,
-        trainset=trainset,
-        valset=valset,
-        requires_permission_to_run=False,
-    )
+    with dspy.context(lm=generator_lm):
+        compiled_generator = teleprompter.compile(
+            module,
+            trainset=trainset,
+            valset=valset,
+        )
 
     # Report improvement over baseline before persisting.
     print("  Evaluating compiled module…")
-    with dspy.context(lm=student_lm):
+    with dspy.context(lm=generator_lm):
         compiled_eval = dspy.Evaluate(
             devset=valset,
             metric=answer_metric,

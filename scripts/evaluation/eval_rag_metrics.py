@@ -237,7 +237,7 @@ async def run_evaluation(
 _DEFAULT_JUDGE_MODEL = {
     "openai": "gpt-5.1",
     "deepseek": "deepseek-v4-pro",
-    "gemini": "gemini-3.1-pro",
+    "gemini": "gemini-3.1-pro-preview",
 }
 
 

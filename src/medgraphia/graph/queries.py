@@ -585,6 +585,12 @@ async def update_user_interests(user_id: str, cuis: list[str], decay_factor: flo
     if not cuis:
         return
 
+    # "anonymous" is a shared fallback id for every unauthenticated caller, not
+    # a real user — writing here would let unrelated visitors bias each other's
+    # PPR retrieval seeds via get_user_top_interests().
+    if user_id == "anonymous":
+        return
+
     # Filter for real CUIs only (in case any mentions leaked through)
     valid_cuis = [c for c in cuis if not c.startswith("MENTION:")]
     if not valid_cuis:
@@ -610,16 +616,35 @@ async def update_user_interests(user_id: str, cuis: list[str], decay_factor: flo
     logger.info("user_interests_updated", user_id=user_id, count=len(valid_cuis))
 
 
-async def get_user_top_interests(user_id: str, limit: int = 10) -> list[str]:
-    """Return the CUIs of the entities a user is most interested in."""
+async def get_user_top_interests(
+    user_id: str, limit: int = 10, half_life_days: float = 30.0
+) -> list[str]:
+    """
+    Return the CUIs of the entities a user is most interested in, ranked by an
+    interaction-weighted score that additionally decays exponentially with wall-clock
+    time since it was last touched (half_life_days: time for a weight to halve if the
+    entity is never mentioned again). The event-count discount in update_user_interests
+    (weight = weight*0.9 + 1.0 on repeat mentions) rewards frequently-revisited topics;
+    this read-time decay ensures topics also fade if the user simply stops asking about
+    them, so a one-off interest from months ago doesn't keep skewing retrieval forever.
+    """
+    if user_id == "anonymous":
+        return []
+
+    import math
+
+    decay_lambda = math.log(2) / half_life_days
     cypher = """
     MATCH (u:User {id: $user_id})-[r:INTERESTED_IN]->(e)
+    WITH e, r.weight * exp(-$decay_lambda * duration.between(datetime(r.last_accessed), datetime()).days) AS effective_weight
     RETURN e.cui AS cui
-    ORDER BY r.weight DESC
+    ORDER BY effective_weight DESC
     LIMIT $limit
     """
     async with get_session() as g_session:
-        result = await g_session.run(cypher, user_id=user_id, limit=limit)
+        result = await g_session.run(
+            cypher, user_id=user_id, limit=limit, decay_lambda=decay_lambda
+        )
         return [record["cui"] async for record in result]
 
 

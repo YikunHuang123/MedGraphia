@@ -80,6 +80,8 @@ def get_lm(
             api_key = cfg.deepseek_api_key.get_secret_value()
         elif provider == "anthropic":
             api_key = cfg.anthropic_api_key.get_secret_value()
+        elif provider == "gemini":
+            api_key = cfg.gemini_api_key.get_secret_value()
         elif provider == "ollama":
             api_base = cfg.llm_base_url or "http://localhost:11434"
 
