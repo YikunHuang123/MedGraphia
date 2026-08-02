@@ -50,10 +50,13 @@ def get_lm(
 
     # Construct model_id ensuring provider prefix is present for LiteLLM
     # e.g., "deepseek/deepseek-chat" or "openai/gpt-4o"
-    if model.startswith(f"{provider}/"):
+    # vLLM is the odd one out: litellm's dedicated prefix for a self-hosted
+    # OpenAI-compatible vLLM server is "hosted_vllm/", not "vllm/".
+    litellm_prefix = "hosted_vllm" if provider == "vllm" else provider
+    if model.startswith(f"{litellm_prefix}/"):
         model_id = model
     else:
-        model_id = f"{provider}/{model}"
+        model_id = f"{litellm_prefix}/{model}"
 
     # 2. Determine API key and Base URL
     api_key = None
@@ -84,6 +87,9 @@ def get_lm(
             api_key = cfg.gemini_api_key.get_secret_value()
         elif provider == "ollama":
             api_base = cfg.llm_base_url or "http://localhost:11434"
+        elif provider == "vllm":
+            api_key = "vllm"  # ignored unless the vLLM server was started with --api-key
+            api_base = cfg.vllm_base_url or "http://localhost:8000/v1"
 
     try:
         kwargs = {}

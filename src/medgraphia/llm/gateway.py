@@ -42,6 +42,7 @@ class LLMProvider(str, Enum):
     GEMINI = "gemini"
     GROQ = "groq"
     OLLAMA = "ollama"
+    VLLM = "vllm"
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +116,11 @@ def _build_litellm_model_id(provider: LLMProvider, model_name: str) -> str:
             return f"groq/{model_name}"  # "groq/llama-3.3-70b-versatile"
         case LLMProvider.OLLAMA:
             return f"ollama/{model_name}"  # "ollama/qwen2.5:7b"
+        case LLMProvider.VLLM:
+            # litellm's dedicated prefix for self-hosted OpenAI-compatible vLLM
+            # servers — unlike a plain "openai/" prefix, it skips params vLLM's
+            # server doesn't accept (e.g. "user").
+            return f"hosted_vllm/{model_name}"
         case _:
             return model_name
 
@@ -175,6 +181,11 @@ def _build_extra_kwargs(provider: LLMProvider, cfg: Any) -> dict[str, Any]:
             # is the same escape hatch already used for Qwen3's `think` flag).
             kwargs["extra_body"] = {"keep_alive": "30m"}
 
+        case LLMProvider.VLLM:
+            base = getattr(cfg, "vllm_base_url", "") or "http://localhost:8000/v1"
+            kwargs["api_base"] = base
+            kwargs["api_key"] = "vllm"  # vLLM's OpenAI-compatible server ignores this unless --api-key is set
+
     return kwargs
 
 
@@ -187,6 +198,7 @@ _JSON_MODE_PROVIDERS = {
     LLMProvider.DEEPSEEK,
     LLMProvider.GEMINI,
     LLMProvider.GROQ,
+    LLMProvider.VLLM,  # vLLM's OpenAI-compatible server implements response_format=json_object
 }
 
 

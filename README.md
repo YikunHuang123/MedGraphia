@@ -342,7 +342,7 @@ The `/graph/entity` API (Graph Explorer) derives a synthetic `CO_OCCURS_WITH` ed
 | **Community Detection** | Leiden algorithm                                                                                                                              | Graph clustering for global QA                                                                                                                                       |
 | **Document Parsing** | Docling (EN/DE) · MinerU (ZH)                                                                                                                 | Section-aware; table / formula extraction                                                                                                                            |
 | **OCR** | Tesseract 5 + PaddleOCR                                                                                                                       | Fallback for scanned PDFs and images                                                                                                                                 |
-| **LLM Inference** | LiteLLM Gateway                                                                                                                               | Unified API layer. Supports **DeepSeek**, **OpenAI**, **Anthropic**, **Groq**, and **Ollama**.                                                                       |
+| **LLM Inference** | LiteLLM Gateway                                                                                                                               | Unified API layer. Supports **DeepSeek**, **OpenAI**, **Anthropic**, **Groq**, **Ollama**, and **vLLM**.                                                                       |
 | **Safety** | Llama-Guard-3-1B                                                                                                                              | Input + output filtering; S1-S14 policy                                                                                                                              |
 | **Observability** | Langfuse (self-hosted)                                                                                                                        | prompt/token/latency/cost tracing                                                                                                                                    |
 | **Evaluation** | RAGAS                                                                                                                                         | Faithfulness · Answer Relevance · Context Precision/Recall · **Synthetic Testset Generation**                                                                        |
@@ -1005,55 +1005,6 @@ MedGraphia/
         └── test_llm_gateway.py    # LiteLLMGateway integration tests
 ```
 
----
-
-## 🔮 Roadmap
-
-No items currently scheduled.
-
----
-
-## 🤝 Contributing
-
-Contributions, bug reports, and feature requests are welcome.
-
-1. **Fork** the repository and create a feature branch:
-   ```bash
-   git checkout -b feat/your-feature-name
-   ```
-
-2. **Make your changes** — follow the existing code style (Ruff / Black formatting).
-
-3. **Add or update tests** for any new behaviour:
-   ```bash
-   pytest -v tests/
-   ```
-
-4. **Commit** with a descriptive message:
-   ```bash
-   git commit -m "feat: add cross-lingual entity search endpoint"
-   ```
-
-5. **Open a Pull Request** against `main`. Include:
-   - A description of the problem solved or feature added
-   - Which language(s) (ZH / EN / DE) are affected or tested
-   - Any relevant changes to `.env.example` or `docker-compose.yml`
-
-**Reporting bugs:** Please open a GitHub Issue with the label `bug`, your Python version, deployment mode (enterprise / lite), and a minimal reproduction snippet.
-
----
-
 ## 📄 License & Contact
 
 This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
-
-**Author:** Yikun Huang
-**Email:** q1945948369@gmail.com
-**GitHub:** [@YikunHuang123](https://github.com/YikunHuang123)
-
-> Moving beyond simple hybrid search, MedGraphia bridges the semantic gap across Chinese, English,
-  and German medical data through deep ontology alignment. It ensures clinical rigor via DSPy prompt
-  optimization and proactive Llama-Guard safety checks. Equipped with a dual long-short-term memory
-  system featuring time-decay attention, intelligent query-complexity LLM routing, and an integrated
-  RAGAS evaluation suite, it is designed from the ground up for safe, scalable, and personalized
-  healthcare AI.

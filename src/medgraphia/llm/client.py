@@ -82,6 +82,9 @@ def get_model(model_override: str | None = None, provider_override: str | None =
         case LLMProvider.OLLAMA:
             base_url = base_url or "http://localhost:11434/v1"
             api_key = "ollama"
+        case LLMProvider.VLLM:
+            base_url = cfg.vllm_base_url or "http://localhost:8000/v1"
+            api_key = "vllm"
 
     # pydantic-ai v1.104+ reads these from environment variables or explicit config
     import os

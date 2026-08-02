@@ -85,11 +85,16 @@ class Settings(BaseSettings):
     #   - llm/gateway.py (from_settings)   : provider_override or default
     #   - llm/dspy_setup.py                : provider_override or default
     #   - generation/llm_router.py         : each tier's provider/model attr or default
-    default_llm_provider: Literal["deepseek", "openai", "anthropic", "gemini", "groq", "ollama", "local"] = "ollama"
+    default_llm_provider: Literal["deepseek", "openai", "anthropic", "gemini", "groq", "ollama", "vllm", "local"] = "ollama"
     default_llm_model: str = "qwen3:14b"
     llm_base_url: str = "http://localhost:11434"
     llm_max_tokens: int = 2048
     llm_temperature: float = 0.1
+
+    # vLLM has its own base_url field — llm_base_url is shared with DeepSeek's
+    # override fallback, so repurposing it here would silently redirect DeepSeek
+    # calls into vLLM's OpenAI-compatible endpoint too.
+    vllm_base_url: str = "http://localhost:8010/v1"
 
 
     # Model used for community summary generation; defaults to default_llm_model if empty
@@ -134,8 +139,8 @@ class Settings(BaseSettings):
     # llm_medium_model: str = "Qwen3.5:9b"          # e.g. "deepseek-chat"
     # llm_large_provider: str = "ollama"        # e.g. "openai"
     # llm_large_model: str = "qwen3:14b"           # e.g. "gpt-4o"
-    llm_small_provider: str = "deepseek"
-    llm_small_model: str = "deepseek-v4-flash"
+    llm_small_provider: str = "vllm"
+    llm_small_model: str = "Qwen/Qwen2.5-3B-Instruct"
     llm_medium_provider: str = "deepseek"
     llm_medium_model: str = "deepseek-v4-flash"
     llm_large_provider: str = "deepseek"
