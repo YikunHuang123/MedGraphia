@@ -102,7 +102,7 @@ def render_citation_cards(citations: list[dict[str, Any]]) -> None:
                 f"""
                 <div class="mg-cite">
                   <span class="mg-cite-num">[{n}]</span>
-                  <div style="flex:1">
+                  <div style="flex:1; min-width:0;">
                     <div class="mg-cite-title">{title}</div>
                     <div class="mg-cite-meta">{meta}</div>
                     <div class="mg-cite-snippet">{snippet}</div>

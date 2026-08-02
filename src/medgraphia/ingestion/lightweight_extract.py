@@ -40,6 +40,36 @@ def _get_entity_linker():
     return linker
 
 
+def warm_up() -> None:
+    """
+    Force-populate the lru_caches above at server startup.
+
+    This is a separate model instance from retrieval/query_ner.py's cache —
+    they don't share GLiNER/SapBERT despite being the same weights, so without
+    this, whichever request is the first to ever trigger query-time gap
+    completion (agentic_completion.py) eats a ~15-20s cold load that every
+    other query already paid for at startup.
+
+    GLiNER/BertNER load their actual model weights lazily on the first
+    extract_batch() call, not on construction — so a dummy call is required
+    here, not just building the pipeline object.
+    """
+    from medgraphia.domain import Language, SourceMeta
+    from medgraphia.domain.document import Chunk
+
+    linker = _get_entity_linker()
+
+    ner = _get_ner_pipeline()
+    dummy_chunk = Chunk(
+        doc_id="warmup",
+        source=SourceMeta(source_id="warmup"),
+        language=Language.EN,
+        text="Metformin is used to treat type 2 diabetes.",
+    )
+    warmed = ner.extract_batch([dummy_chunk])
+    linker.link_chunks_batch(warmed)
+
+
 async def docs_to_chunks(docs: list[Any]) -> list[Any]:
     """Run freshly-fetched docs through chunk -> NER -> link, returning linked chunks."""
     from medgraphia.ingestion.chunker import MedicalChunker

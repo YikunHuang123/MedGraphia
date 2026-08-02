@@ -165,6 +165,15 @@ def _build_extra_kwargs(provider: LLMProvider, cfg: Any) -> dict[str, Any]:
             base = getattr(cfg, "llm_base_url", "") or "http://localhost:11434"
             kwargs["api_base"] = base
             kwargs["api_key"] = "ollama"
+            # Ollama's default keep_alive is 5 minutes — any gap longer than that
+            # (very common between chat turns) unloads the model from VRAM, so the
+            # next call pays a full reload (~5-7s measured for llama-guard3:1b,
+            # vs ~0.5-0.7s when still resident). Keep it loaded for 30 minutes.
+            # Must go through extra_body — litellm silently drops a top-level
+            # keep_alive kwarg instead of forwarding it to Ollama (verified live:
+            # passing it directly left the 5-minute default in place; extra_body
+            # is the same escape hatch already used for Qwen3's `think` flag).
+            kwargs["extra_body"] = {"keep_alive": "30m"}
 
     return kwargs
 

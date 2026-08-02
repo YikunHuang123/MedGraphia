@@ -9,6 +9,7 @@ no relation extraction, the two entities simply join the same chunk graph.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from medgraphia.logger import get_logger
@@ -38,11 +39,16 @@ async def complete_gap(entity_a: str, entity_b: str, pubmed_limit: int = 5) -> t
         logger.info("gap_completion_no_results", entity_a=entity_a, entity_b=entity_b)
         return f"No published evidence found connecting {entity_a} and {entity_b}.", []
 
+    t0 = time.monotonic()
     chunks = await docs_to_chunks(docs)
+    t1 = time.monotonic()
+    logger.info("gap_completion_ner_linking_done", docs=len(docs), chunks=len(chunks), seconds=round(t1 - t0, 2))
     if not chunks:
         return f"Found {len(docs)} related article(s) but could not extract usable passages.", []
 
     await write_chunks_to_graph(docs, chunks)
+    t2 = time.monotonic()
+    logger.info("gap_completion_graph_write_done", seconds=round(t2 - t1, 2))
 
     logger.info("gap_completion_ingested", docs=len(docs), chunks=len(chunks))
     return (

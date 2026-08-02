@@ -23,18 +23,23 @@ async def get_session(session_id: str) -> Session | None:
 
 async def create_or_get_session(session_id: str | None) -> Session:
     """
-    Retrieve an existing session or create a new one in Neo4j.
+    Retrieve an existing session, or construct a new one in memory.
+
+    A brand-new session is NOT written to Neo4j here — only save_session()
+    persists it, once a turn actually completes. Persisting eagerly would
+    leave an empty, title-less session behind whenever the caller disconnects
+    (e.g. closes the tab) before the first exchange finishes — a common case
+    for streaming chat, where the ASGI request is simply cancelled mid-flight.
     """
     from uuid import uuid4
 
-    from medgraphia.graph.queries import get_chat_session, upsert_chat_session
+    from medgraphia.graph.queries import get_chat_session
 
     sid = session_id or str(uuid4())
     session = await get_chat_session(sid)
 
     if session is None:
         session = Session(session_id=sid)
-        await upsert_chat_session(session)
 
     return session
 

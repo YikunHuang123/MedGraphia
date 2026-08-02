@@ -200,5 +200,13 @@ class GLiNERNER:
         if self._model is None:
             logger.info("gliner_loading", model=self._model_name)
             self._model = _GLiNERModel.from_pretrained(self._model_name)
-            logger.info("gliner_loaded", model=self._model_name)
+            # from_pretrained() defaults to CPU — GLiNER never moves itself to
+            # GPU on its own, unlike a plain transformers pipeline(device=...).
+            import torch
+
+            if torch.cuda.is_available():
+                self._model = self._model.to("cuda")
+            elif torch.backends.mps.is_available():
+                self._model = self._model.to("mps")
+            logger.info("gliner_loaded", model=self._model_name, device=str(next(self._model.parameters()).device))
         return self._model

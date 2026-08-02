@@ -145,6 +145,15 @@ def _route_after_assess(state: CompletionState) -> str:
     return "end"
 
 
+def _route_after_tool(state: CompletionState) -> str:
+    # Once the cap is hit, another assess() call would be discarded by
+    # _route_after_assess anyway — skip it instead of paying for an LLM
+    # round-trip whose answer can never be acted on.
+    if state.get("tool_calls_made", 0) < state.get("max_tool_calls", 2):
+        return "assess"
+    return "end"
+
+
 # ---------------------------------------------------------------------------
 # Graph builder
 # ---------------------------------------------------------------------------
@@ -156,7 +165,8 @@ def _build_completion_graph() -> Any:
 
     Node sequence: assess -> (execute_tool -> assess)* -> END
     Loops back to assess after each tool call so the model can request a
-    second pair, bounded by max_tool_calls.
+    second pair, bounded by max_tool_calls. Skips the final assess once the
+    cap is hit, since its answer would be discarded anyway.
     """
     try:
         from langgraph.graph import END, StateGraph  # type: ignore[import]
@@ -170,7 +180,7 @@ def _build_completion_graph() -> Any:
 
     graph.set_entry_point("assess")
     graph.add_conditional_edges("assess", _route_after_assess, {"execute_tool": "execute_tool", "end": END})
-    graph.add_edge("execute_tool", "assess")
+    graph.add_conditional_edges("execute_tool", _route_after_tool, {"assess": "assess", "end": END})
 
     return graph.compile()
 

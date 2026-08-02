@@ -31,3 +31,7 @@ data/re/*
 Readme_ZH.md
 .agents/
 AGENTS.md
+
+*.log
+.mcp.json
+.playwright-mcp/

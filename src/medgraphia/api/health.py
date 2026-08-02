@@ -89,6 +89,15 @@ async def _warm_up_models() -> None:
 
         logger.info("warmup_synthetic_inference_done")
 
+        # 5. Load the separate NER/entity-linker instance used by query-time
+        # gap completion (ingestion/lightweight_extract.py) — it doesn't share
+        # model instances with step 1's retrieval pipeline, so without this the
+        # first-ever gap-completion trigger pays its own ~15-20s cold load.
+        from medgraphia.ingestion.lightweight_extract import warm_up as warm_up_gap_completion
+
+        warm_up_gap_completion()
+        logger.info("warmup_gap_completion_done")
+
         # 5. Mark as warm
         _IS_WARM = True
         logger.info("warmup_complete", message="All models are hot and ready for traffic.")

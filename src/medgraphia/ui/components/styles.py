@@ -246,7 +246,7 @@ header {{ background: transparent !important; }}
     background: {ACCENT}; border-radius: 5px;
     padding: 2px 8px; flex-shrink: 0; margin-top: 1px;
 }}
-.mg-cite-title {{ font-size: 0.85rem; font-weight: 700; color: {PRIMARY}; margin-bottom: 3px; }}
+.mg-cite-title {{ font-size: 0.85rem; font-weight: 700; color: {PRIMARY}; margin-bottom: 3px; overflow-wrap: break-word; word-break: break-word; }}
 .mg-cite-meta  {{ font-size: 0.72rem; color: {TEXT_MUTED}; margin-bottom: 6px; }}
 .mg-cite-snippet {{ font-size: 0.82rem; color: {TEXT_MAIN}; line-height: 1.6; }}
 
