@@ -1,10 +1,20 @@
 # 🧬 MedGraphia
 
-A multilingual medical QA system powered by a Knowledge-Graph based Graph-RAG architecture. It
-achieves deep cross-lingual alignment (English, Chinese, German) via the MeSH ontology. By
-constructing long-short-term memory through time-decay graph edges and integrating multi-tier LLM
-intelligent routing with DSPy-optimized prompt management for rigorous reasoning, it builds a safe,
-traceable clinical AI brain.
+A multilingual (English, Chinese, German) medical QA system built on an **Agentic GraphRAG**
+architecture, achieving deep cross-lingual alignment via the MeSH ontology. The system combines
+time-decayed long/short-term memory, multi-tier LLM intelligent routing, and DSPy-optimized prompt
+management into a safe, traceable clinical AI brain.
+
+Inspired by recent GraphRAG research (UnWeaver, LinearRAG, HippoRAG2, among others), this project
+replaces costly LLM-based relation extraction with a **bipartite entity-chunk graph + PPR-style
+propagation** for structured multi-hop reasoning — it is the graph's **connectivity structure**,
+not the semantics of typed edges, that drives multi-hop reasoning.
+
+The knowledge graph **expands in real time** as users ask questions: it starts from a graph built on
+a base medical corpus, then grows either by proactively fetching incremental literature for a named
+entity, or — when a question touches an entity absent from the graph — by having the agentic system
+automatically retrieve the relevant papers and merge them into the graph on the fly (optimized down
+to roughly 10 seconds of added latency), so the graph keeps getting stronger the more it is used.
 
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -20,7 +30,6 @@ traceable clinical AI brain.
 ## 📋 Table of Contents
 
 - [Features](#-features)
-- [LLM Core Functional Capabilities](#-llm-core-functional-capabilities)
 - [Architecture](#-architecture)
 - [Knowledge Graph Schema](#-knowledge-graph-schema)
 - [Tech Stack](#-tech-stack)
@@ -28,11 +37,10 @@ traceable clinical AI brain.
 - [Deployment](#-deployment)
 - [Installation](#-installation)
 - [Usage](#-usage)
-- [Evaluation](#-evaluation)
+- [RAGAS Evaluation](#-ragas-evaluation)
+- [Performance and Engineering Optimization](#-performance-and-engineering-optimization)
 - [Configuration](#-configuration)
 - [Project Structure](#-project-structure)
-- [Roadmap](#-roadmap)
-- [Contributing](#-contributing)
 - [License & Contact](#-license--contact)
 
 ---
@@ -41,16 +49,15 @@ traceable clinical AI brain.
 
 | Feature                                                         | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 |-----------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 🧠 Advanced GraphRAG Engine | A deep implementation of GraphRAG principles: <br>• **Local Search**: Bipartite entity-chunk graph + Neo4j GDS **Personalized PageRank** for structural multi-hop reasoning — no LLM relation extraction needed.<br>• **Global Search**: **Leiden algorithm** community detection over entity co-occurrence + LLM-generated hierarchical summaries for cross-corpus synthesis.<br>• **Hybrid RRF**: Merging PPR-ranked chunks, dense/sparse vector search, and community insights via Reciprocal Rank Fusion.<br>• **Semantic Glue**: All data is anchored to MeSH CUIs, enabling the graph to act as a cross-lingual and cross-document relational bridge.                                                                                                                                |
+| 🧠 Advanced GraphRAG Engine | A deep implementation of GraphRAG principles: <br>• **Local Search**: Bipartite entity-chunk graph + Neo4j GDS **Personalized PageRank** for structural multi-hop reasoning — no LLM relation extraction needed, and no relation edges are ever written or read.<br>• **Global Search**: **Leiden algorithm** community detection over entity co-occurrence + LLM-generated hierarchical summaries for cross-corpus synthesis.<br>• **Hybrid RRF**: Merging PPR-ranked chunks, dense/sparse vector search, and community insights via Reciprocal Rank Fusion.<br>• **Semantic Glue**: All data is anchored to MeSH CUIs, enabling the graph to act as a cross-lingual and cross-document relational bridge.                                                                                                                                |
+| 🌱 Incremental Knowledge Graph Expansion | Lets the graph grow stronger the more it is used, agentically, at two trigger points that share the same NER / entity-linking pipeline:<br>• **Build-Time**: During a domain-scoped build, entities that stay under-covered in the graph trigger a small supplementary PubMed fetch, keeping the graph connected without a full re-crawl.<br>• **Query-Time**: A LangGraph tool-calling loop — before answering, the LLM judges whether the retrieved evidence is missing a connection between key entities, and if so calls a tool that fires a targeted PubMed search to ingest new chunks on the fly. Newly-fetched chunks are folded back into the numbered context, so the final answer can cite them with a real inline `[N]` marker like any other source. |
 | 🌐 Multilingual (ZH / EN / DE) align                            | All surface forms of the same concept ("心肌梗死 / myocardial infarction / Myokardinfarkt") are aligned to a single CUI (MeSH ID) via SapBERT-XLMR for graph retrieval. At query time, **multilingual expansion** (Step 0.5) translates the query into all three corpus languages via `QueryTranslator` and runs parallel per-language Qdrant searches with quota-based merging                                                                                                                                                                                                                                                                                                                |
 | 🔬️ DSPy-driven Prompt Optimization                    | Use **DSPy** to manage and optimize prompts. Optimization strategies include:<br>• **Automated Prompt Compilation**: Using **GEPA** (reflective prompt evolution, chosen over `MIPROv2` for its far better sample efficiency on our small hand-curated + synthetic datasets) to automatically select and inject the best reasoning traces (CoT) into the prompt.<br>• **Synthetic Data Factory**: Built-in pipeline to reverse-engineer high-quality, multilingual QA pairs from grounded graph chunks.<br>• **Adversarial Tuning**: Defending against false pronouns and hallucinated knowledge via explicitly negative training examples.<br>• **Clinical Tiering**: The Rewriter is trained to simultaneously condense queries and classify their clinical complexity (SMALL/MEDIUM/LARGE) for the LLM Router. |
 | ⏳ Long-Short Term Memory System                                 | • **Short-Term:** LLM-based Contextual Query Rewriting resolves pronouns across recent chat turns into standalone queries. <br>• **Long-Term:** Async Neo4j updates build cross-session user profiles: interaction-count reinforcement (`weight × 0.9 + 1.0` on repeat mentions) combined with a lazy **exponential time-decay** (30-day half-life, computed at read time) so stale one-off interests fade, enabling language-agnostic personalization.                                                                                                                                                                                                                                                                                                                                                                                 |
-| 🕵️ Agentic Query-Time Graph Completion                          | A LangGraph tool-calling loop: before answering, the LLM judges whether the retrieved evidence is missing a connection between key entities, and if so calls a tool that fires a targeted PubMed search and re-runs the offline NER / entity-linking stack to ingest new chunks on the fly. Newly-fetched chunks are folded back into the numbered context, so the final answer can cite them with a real inline `[N]` marker like any other source. |
-| 🌱 Build-Time Frontier Entity Expansion                          | During a domain-scoped build, entities that stay under-covered in the graph trigger a small supplementary PubMed fetch through the same NER / linking path, keeping the graph connected without a full re-crawl. |
 | 🏥 Two-Stage Cascade NER & Entity Linking                       | GLiNER zero-shot multilingual coarse pass + language-specific BERT precision pass (`biomedical-ner-all` EN, `Adapting/bert-base-chinese-finetuned-NER-biomedical` ZH, `GerMedBERT_NER_V01_BRONCO_CARDIO` DE) → SapBERT-XLMR dense retrieval linking to CUI (MeSH ID)                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| 🕸️ Relation-Free Multi-Hop Retrieval (PPR)                     | Instead of costly, unstable LLM relation extraction, multi-hop reasoning comes from graph *connectivity*: entities co-occurring in the same chunk form an implicit bipartite graph, and a transient Neo4j GDS in-memory projection + Personalized PageRank ranks the most relevant chunks for a query — no relation edges are ever written or read. |
 | 🏗️ Section-aware Chunking                                      | Text is split based on structural hierarchy (Section → Sub-section → Paragraph) rather than fixed token counts. Each chunk carries a metadata section_path, ensuring contextual grounding during retrieval.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| 🔀 Multi-Model LLM Router                                       | Automatically divide user problems into three levels according to the complexity, and call different llm models                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 🔀 Multi-Model LLM Router                                       | Automatically classifies each question into one of three tiers by complexity (**E+I scoring**: entity count + intent depth), then dispatches it to a different LLM model                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ⚡ vLLM Sleep Mode Tier Switching | Whichever tier the LLM router picks gets its vLLM engine woken in real time; every other tier stays asleep and off the GPU:<br>• **Wake-on-demand**: when the router selects a tier, it calls vLLM's `/wake_up` endpoint to wake that engine if it's asleep, and lets it re-sleep automatically after a period of inactivity.<br>• **VRAM reuse**: a sleeping engine frees 90%+ of its weight and KV-cache memory, letting a single 16GB GPU rotate through multiple tiers (e.g. 3B/9B/14B) instead of keeping them all resident at once.<br>• **Measured numbers**: a 3B model takes ~7s to sleep and frees ~13GB of VRAM, then ~3s to wake and resume inference — an order of magnitude faster than a cold start.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 👁️ Multilingual PDF files support (Multi-Engine Parsing & OCR) | Hybrid pipeline using Docling (EN/DE) and MinerU (ZH) for structural layout analysis (tables/formulas). Integrated Tesseract 5 + PaddleOCR fallback for scanned medical records.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 🔗 Mandatory Evidence Citations                                 | Every answer is traceable to a specific chunk, section path, and versioned source — unanswerable questions are refused rather than fabricated                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | 🛡️ Safety Guardrails                                           | Two-stage proactive defense: Llama-Guard 3 input filtering (pre-retrieval) + output moderation (post-generation); aligned with S1-S14 safety categories; mandatory medical disclaimers and automatic model provisioning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -64,80 +71,54 @@ traceable clinical AI brain.
 
 #### **1. Ingestion Pipeline**
 
-The ingestion pipeline orchestrates the offline knowledge-graph build process, transforming raw documents into a structured, query-ready graph and vector database. It consists of 7 distinct stages:
+The offline knowledge-graph build pipeline turns raw documents into a structured, query-ready graph and vector database through 9 logical stages; fetching and frontier expansion are configuration-dependent:
 
-*   **1. Load**: Reads raw data from the local file system (`data/raw`), including structured JSON data (e.g., PubMed, FDA, DrugBank, GerMed) and unstructured local PDF files (e.g., EMA SmPC), converting them into internal `RawDocument` objects.
-    *   *Key Aspect*: Utilizes specialized parsers (`StructuredParser`) to uniformly handle heterogeneous, multi-source medical data across different languages and formats, providing a standardized foundation for downstream tasks.
-*   **2. Parse**: Transforms unstructured documents into structured content. For complex formats like PDFs, it uses parsers like `DoclingParser` to extract content while preserving layouts.
-    *   *Key Aspect*: Overcomes the layout analysis challenges of complex medical PDFs, extracting "layout-aware" data that preserves hierarchical structures (titles, paragraphs, tables) to avoid destroying semantic context through brute-force splitting.
-*   **3. Chunk**: Performs "section-aware" text chunking of structured documents via `MedicalChunker` and normalizes medical terminology using `MedicalNormalizer`, concurrently writing document and chunk nodes to Neo4j.
-    *   *Key Aspect*: Optimizes performance by utilizing CPU-bound multi-threading for chunking (bypassing the Python GIL) combined with highly concurrent async I/O for safe Neo4j node writing, drastically improving ingestion throughput.
-*   **4. NER (Named Entity Recognition)**: Extracts key medical entities (e.g., drugs, diseases, symptoms) from text chunks using a multilingual approach, primarily relying on the GLiNER model and supplemented by language specific medical BERT model for high-precision filtering.
-    *   *Key Aspect*: Leverages GLiNER's zero-shot/few-shot flexibility to adapt to complex medical entity types, and implements a chunk-level degradation and retry mechanism for batch failures to ensure pipeline robustness.
-*   **5. Link (Entity Linking)**: Maps extracted entities to standard medical knowledge bases (MeSH). Uses a dense SapBERT retrieval index precomputed over the entire multilingual MeSH dictionary to find the best CUI match by semantic similarity.
-    *   *Key Aspect*: The critical step for disambiguating entities and normalizing the knowledge graph. The precomputed dense index balances alignment accuracy with computational efficiency.
-*   **6. Embed**: Uses the BGE-M3 model to generate dense and sparse vector representations for each text chunk, upserting them into the Qdrant vector database.
-    *   *Key Aspect*: Generating hybrid vectors (dense for deep semantics, sparse for precise keyword matching) is the core foundation enabling high-quality Hybrid RAG for subsequent retrieval.
-*   **7. Community (Community Detection)**: Applies the Leiden algorithm to an **entity co-occurrence graph** (two entities are linked if they're mentioned in the same chunk, weighted by shared-chunk count) to detect communities, then invokes an LLM to generate summaries for these clusters and writes them back to Neo4j.
-    *   *Key Aspect*: No relation extraction required — clustering runs directly on chunk co-occurrence, inspired by 2025-2026 relation-free GraphRAG research (LinearRAG, AtomicRAG). Partitioning the knowledge graph into hierarchical semantic communities empowers the system to handle macro-level medical queries requiring a global perspective.
+1.  **Load**: `StructuredParser` uniformly reads structured JSON under `data/raw` (PubMed, FDA, DrugBank, GerMed) and unstructured local PDFs (EMA SmPC) into internal `RawDocument` objects, giving heterogeneous multi-source data a standardized entry point.
+2.  **Parse**: Complex formats (PDFs) go through `DoclingParser`, which extracts content while preserving layout — "layout-aware" data (titles, paragraphs, table hierarchy) that avoids destroying semantic context via brute-force splitting.
+3.  **Chunk**: `MedicalChunker` performs section-aware chunking, `MedicalNormalizer` normalizes medical terminology, and both are written to Neo4j. Chunking uses CPU-bound multi-threading (bypassing the GIL) with highly concurrent async I/O for writes, meaningfully raising ingestion throughput.
+4.  **NER**: GLiNER zero-/few-shot coarse pass + language-specific medical BERT precision pass extract drugs, diseases, symptoms, and other entities; a chunk-level degrade-and-retry mechanism keeps the pipeline robust against batch failures.
+5.  **Link**: `EntityLinker` matches extracted entities to standard MeSH CUIs via a precomputed multilingual SapBERT dense index — the key step for disambiguating entities and normalizing the graph, where the precomputed index trades off alignment accuracy against compute cost.
+6.  **Embed**: BGE-M3 produces dense + sparse dual-path vectors per chunk, written to Qdrant as the foundation for downstream hybrid retrieval.
+7.  **Community**: Runs the Leiden algorithm over an **entity co-occurrence graph** (entities sharing a chunk are linked, edge weight = shared-chunk count) to detect communities, then has an LLM summarize each cluster and write it back to Neo4j. No relation extraction — clustering runs directly on co-occurrence, following 2025–2026 relation-free GraphRAG research (LinearRAG, AtomicRAG), letting the system answer macro-level queries that need a global view.
 
-#### **2. Cross-Lingual Ontology Alignment**
-The system achieves deep cross-lingual alignment (ZH, EN, DE) through a unified MeSH ontology and a parallel multi-language retrieval mechanism:
-*   **Offline Entity Unification:** During ingestion, a two-stage Cascade NER pipeline (GLiNER + language-specific BERT) extracts medical entities. The `EntityLinker` then utilizes **SapBERT-XLMR** to map diverse surface forms (e.g., *"心肌梗死"*, *"myocardial infarction"*, *"Myokardinfarkt"*) to a single, globally unique **MeSH CUI** (Concept Unique Identifier). The Neo4j Knowledge Graph stores edges based on these language-agnostic CUIs, allowing relations extracted from German or English documents to be directly connected to Chinese nodes.
-*   **Online Parallel Retrieval:** During the query phase, the `QueryTranslator` asynchronously translates the user's input into all supported corpus languages. The pipeline then executes parallel hybrid vector searches (dense + sparse via BGE-M3) on Qdrant, enforcing a per-language retrieval quota. This ensures that sparse vector matching (which relies on exact token overlap) functions correctly across language boundaries before merging the candidates via RRF.
+#### **2. Relation-Free Multi-Hop Reasoning: Connectivity Instead of Relation Semantics**
+Traditional GraphRAG relies on an LLM or a fine-tuned pretrained model to extract typed relation edges (e.g. "Drug -interacts_with→ Drug") — costly, error-prone, and a predefined relation taxonomy can never cover the long tail of medical associations. MedGraphia's core assumption is simpler: **if two entities appear in the same chunk of text, they likely share some medical association**, without needing to know in advance whether that association is "treats," "contraindicated with," or "side effect of."
 
-#### **2. Long-Short Term Memory System**
-MedGraphia manages context through a dual-layer memory architecture:
-*   **Short-Term Memory:** A dedicated `Rewriter` module (DSPy-optimized) resolves coreference and ellipsis from a **5-message sliding window** (approx. 2.5 conversation turns). This ensures that history is condensed into a standalone search query to maintain high retrieval precision without overwhelming the LLM with raw transcripts.
-*   **Long-Term Memory:** User-entity interactions are persisted in Neo4j via `INTERESTED_IN` relationships. The system implements a **Recurrent Interaction Decay** logic: every time a user interacts with a clinical entity, the existing interest weight is discounted by a factor (default **0.9**) before adding a unit increment ($W_{new} = W_{old} \times 0.9 + 1.0$). During retrieval, this allows the system to prioritize a user's long-term chronic history (which accumulates weight over time) while naturally deprioritizing transient symptoms.
+*   **Build time**: every "co-occurring in the same chunk" entity pair is implicitly linked into a **bipartite graph** (entity nodes + chunk nodes) — no typed relation edge is ever written.
+*   **Query time**: Neo4j GDS runs **Personalized PageRank** over this graph, propagating outward from the entities a query hits — chunks reached by shorter, denser co-occurrence paths score higher. This is, in essence, substituting the graph's **connectivity structure** for the **semantics of relation types** to achieve multi-hop reasoning.
 
-#### **3. DSPy-driven Logic Self-Evolution**
-Instead of static prompts, MedGraphia uses **DSPy programs** that evolve through automated data-driven compilation:
-*   **Synthetic Data Factory:** Using a high-capability Teacher model, the system reverse-engineers high-quality, multilingual QA pairs from grounded graph chunks. This "Reverse-RAG" approach ensures that training examples are anchored in real database evidence. 
-*   **Teacher-Guided Bayesian Optimization (MIPROv2):** For complex modules like the Query Rewriter (which handles both semantic resolution and routing difficulty scoring) for the small model, MedGraphia employs the advanced **MIPROv2** algorithm. 
-    *   **The Teacher model (large)** analyzes the training set and brainstorms multiple variations of instructional prompts.
-    *   **The Student model (small)** executes these variations on a validation set.
-    *   **The Optimizer** uses a Bayesian search algorithm (Tree-structured Parzen Estimator) driven by a **Continuous Multiplicative Metric** (which penalizes routing errors but softly rewards reasoning traces). Over multiple trials, it discovers the exact linguistic instructions and few-shot examples that maximize the small local model's clinical accuracy, effectively bridging the capability gap between a 7B model and flagship LLMs.
-    *   **The Metric** — Performance is judged by a three-part composite score: 85% rewrite quality (continuous 0–1 score from an LLM judge), 15% reasoning trace completeness, and a multiplicative routing gate that caps the total at 30% when the clinical complexity tier is misclassified. This design prevents gaming any single dimension while preserving a stable gradient signal across all Bayesian trials.
-    *   **The Result** — Starting from a baseline of **60%** on the held-out validation set, MIPROv2 converged to **76.7%** after 18 trials — demonstrating that a compact local model can match the routing precision of a flagship LLM when given the right few-shot demonstrations and instructions.
-    *   **Generator Optimization (Clinical Rigor & Citation Density):** The Answer Generator is also optimized via **MIPROv2** to enforce strict evidence grounding and prevent hallucinations. The optimizer is driven by a bespoke, multi-dimensional `answer_metric` designed to directly proxy RAGAS Faithfulness requirements:
-        *   **Citation Set Correctness (25%)**: Penalizes hallucinated citations while allowing minor tolerance for over-citation.
-        *   **Inline Citation Strictness (15%)**: Mandates that every expected citation appears explicitly as an `[N]` marker in the text.
-        *   **Refusal & Synthesis Quality (25%)**: Rewards concise refusals when context is insufficient, and heavily penalizes false refusals (e.g., saying "sorry" when the cross-lingual context actually contains the answer).
-        *   **Citation Density (35%)**: The core faithfulness proxy. The metric splits the generated answer into sentences (using a clinical-safe regex that respects decimal numbers like "pH 7.4" or "0.5 mg" without breaking them). It strongly penalizes any factual sentence longer than 15 characters that lacks a corresponding inline citation marker, forcing the LLM to ground *every single claim*.
-    *   **Data Strategy (Generator):** To ensure the Bayesian search generalizes to unseen clinical queries, the synthetic dataset is strictly split (80/20 train/val), while highly-curated "golden" handcrafted examples are preserved exclusively as training demonstrations.
+#### **3. Cross-Lingual Ontology Alignment**
+A unified MeSH ontology + parallel multilingual retrieval achieve deep ZH/EN/DE cross-lingual alignment:
 
-#### **4. Hierarchical Multi-Model Routing**
-To optimize for latency and cost, the system employs a tiered routing logic orchestrated via **Pydantic-AI**:
-*   **Complexity Rubric (E+I Score):** During the rewriting phase, the `Rewriter` calculates a **Complexity Score** by summing two dimensions: **Entities** (E, 1-3 based on count) and **Intent** (I, 1-3 based on depth/ambiguity). 
-*   **Tiered Dispatch:** Queries are routed based on the total score: **SMALL** (≤3), **MEDIUM** (4), or **LARGE** (≥5). Simple administrative or single-entity questions are handled by local, low-latency models, while complex multi-hop clinical decisions are dispatched to flagship cloud models, ensuring safety and precision only where needed.
+*   **Offline Entity Unification**: After a two-stage cascade NER pass (GLiNER + language-specific BERT) extracts entities, `EntityLinker` uses SapBERT-XLMR to map the same concept's different-language surface forms — "心肌梗死" / "myocardial infarction" / "Myokardinfarkt" — onto one global MeSH CUI (e.g. `D009203`). Neo4j stores edges keyed on this language-agnostic CUI, so a relation extracted from a German document connects directly to a Chinese node.
+*   **Online Parallel Retrieval**: At query time, `QueryTranslator` asynchronously translates the user's input into all three corpus languages, and Qdrant runs per-language-quota parallel hybrid search (dense + sparse) before merging via RRF — this is what lets sparse vector matching, which depends on exact token overlap, still hit correctly across language boundaries.
 
-#### **5. Hybrid Global-Local Retrieval**
-The system fuses three distinct retrieval strategies to ensure comprehensive coverage:
-*   **Local Graph Traversal:** Neo4j GDS **Personalized PageRank** over a transient in-memory bipartite entity-chunk projection, seeded at query CUIs, ranks the most structurally relevant chunks — no relation edges involved.
-*   **Global Community Summarization:** Semantic search over **Leiden-detected entity communities** in Neo4j to answer broad, cross-corpus overview questions.
-*   **Hybrid Vector Search:** Parallel BGE-M3 dense and sparse indexing on Qdrant. Results are merged via **Reciprocal Rank Fusion (RRF)** and prioritized by a cross-encoder reranker, ensuring both semantic depth and lexical precision (e.g., drug dosages).
+#### **4. Long-Short Term Memory System**
+A dual-layer memory architecture manages conversational context:
 
-#### **6. Parent-Child Document Retrieval (Small Chunk Search, Large Chunk Recall)**
-Medical guidelines and FDA labels are inherently long and context-dependent. Fixed-size chunking often slices critical evidence (e.g., adverse reactions, dosage instructions) mid-sentence, leading to severe context truncation. MedGraphia solves this using a dynamic **Parent-Child Retrieval** architecture:
-*   **Small Chunk Search (Vector/Graph):** Documents are split into dense, highly semantic sub-chunks (max 300 tokens) to guarantee precise vector matching and high retrieval precision.
-*   **Large Chunk Recall (LLM Generation):** At query time, retrieved child chunks automatically pull their full `parent_text` (the complete clinical section) via Qdrant payloads before being injected into the LLM context window.
-*   **Impact:** This ensures the generator LLM sees the complete clinical picture without re-triggering expensive database queries, completely eliminating the "hard-cutoff" hallucination problem.
+*   **Short-Term**: `Rewriter` (DSPy-optimized) resolves coreference and ellipsis from a 5-message sliding window (~2.5 turns), condensing history into a standalone search query instead of letting the LLM drown in raw transcript.
+*   **Long-Term**: User-entity interactions persist to Neo4j's `INTERESTED_IN` relationship, with two stacked decay mechanisms — ① interaction-count reinforcement: each repeat mention does `weight = weight × 0.9 + 1.0`; ② read-time exponential time-decay: computed at query time as `weight × e^(-λΔt)` (30-day half-life, `Δt` from `last_accessed`, no cron job needed). Retrieval seeds PPR with the user's top-5 interest entities — live-verified: under equal starting weights, recently-accessed interests do rank ahead of long-stale ones. Anonymous sessions never write to this mechanism, so different visitors' retrieval results can't cross-contaminate.
 
----
+#### **5. DSPy-driven Prompt Self-Evolution**
+**DSPy programs** replace static prompts, evolving through automated data-driven compilation:
 
-## 🤖 LLM Core Functional Capabilities
+*   **Synthetic Data Factory**: A Teacher model reverse-engineers high-quality multilingual QA pairs from grounded graph chunks ("Reverse-RAG"), ensuring training examples are anchored in real database evidence.
+*   **Optimizer choice — GEPA**: MIPROv2's Bayesian search was the original choice, but its sample efficiency was limited on this project's small hand-curated + synthetic dataset. Switching to **GEPA** (reflective prompt evolution) deliberately puts the reflection model (Gemini) on a different provider from the student model being optimized (DeepSeek) — avoiding the blind spot of a model reflecting on its own output, so reflection gets a genuine outside-observer diagnosis.
+*   **Feedback-driven evaluation**: GEPA's metric returns not just a score but a diagnostic string (e.g. "missing citation [2]", "misclassified complexity tier") that the reflection model uses to analyze the failure and rewrite the prompt accordingly — this is the core reason it beats classic Bayesian search on sample efficiency.
+*   **Measured results**: The Rewriter went from a baseline of **0.398** to **0.790** after compilation (+0.393); the Generator went from **0.821** to **1.000** (+0.179). The Generator's `answer_metric` is a composite score anchored on **citation density** (penalizing factual statements that lack a supporting `[N]` marker, using a clinical-safe regex that leaves decimals like "pH 7.4" intact), layered with citation-set correctness, inline-citation strictness, and refusal quality, so no single dimension can be gamed.
 
-MedGraphia leverages Large Language Models across the entire data lifecycle, from offline knowledge construction to real-time clinical reasoning.
+#### **6. Hierarchical Multi-Model Routing**
+`Pydantic-AI`-orchestrated tiered routing, dispatched by an **E+I complexity score**:
 
-| Capability                     | Module | Tech Stack | Prompt Management |
-|:-------------------------------|:---|:---|:---|
-| **Contextual Query Rewriting** | `Rewriter` | `dspy.Predict` | **DSPy Optimized**: Resolves coreference and ellipsis (e.g., "What are its side effects?") into standalone queries using conversation history. |
-| **Clinical Answer Generation** | `Generator` | `dspy.ChainOfThought` | **DSPy Optimized**: Synthesizes multilingual context into evidence-based answers with mandatory inline [N] citations and medical disclaimers. |
-| **Community Summarization**    | `Summarizer` | `dspy.Predict` | **DSPy Optimized**: Generates hierarchical summaries for Leiden-detected entity co-occurrence clusters to support global, cross-corpus thematic queries. |
-| **Multilingual Translation**   | `Translator` | `dspy.Predict` | **DSPy Optimized**: Parallel translation of queries into ZH, EN, and DE to eliminate lexical bias in sparse/hybrid retrieval paths. |
-| **Intelligent Intent Routing** | `Router` | `pydantic-ai` | **Typed Agent**: Classifies queries into 5 intent tiers (e.g., FAQ vs. Multi-hop) and generates a structured retrieval plan. |
-| **Proactive Safety Guarding**  | `Guard` | `Llama-Guard 3` | **Direct Inference**: Performs two-stage (input/output) safety filtering against S1-S14 hazard categories. |
+*   **Scoring rule**: `Rewriter` computes **entity count E** (1–3) and **intent depth I** (1–3) during rewriting; complexity = E + I. Example: "What are the side effects of metformin?" → E=1 (single entity), I=1 (simple factual lookup) → total 2 → **SMALL** tier. "71-year-old female with renal impairment — precautions for metformin plus contrast agent?" → E=3 (multiple entities + population constraint), I=2 (multi-hop clinical decision) → total 5 → **LARGE** tier.
+*   **Tiered dispatch**: total ≤3 → **SMALL** (local low-latency model), 4 → **MEDIUM**, ≥5 → **LARGE** (flagship cloud model) — simple queries don't pay latency for precision they don't need, and only genuinely complex clinical decisions get routed to the strongest model.
+
+#### **7. Parent-Child Document Retrieval (Small Chunk Search, Large Chunk Recall)**
+Medical guidelines and FDA labels are long and context-dependent; fixed-size chunking often slices critical evidence (adverse reactions, dosage instructions) mid-sentence. MedGraphia solves this with a dynamic **parent-child retrieval** architecture:
+
+*   **Small chunk search**: documents split into dense sub-chunks (max 300 tokens) for precise vector matching.
+*   **Large chunk recall**: once a query hits a child chunk, its full `parent_text` (the complete clinical section) is pulled via Qdrant payload and injected into the LLM context.
+*   **Impact**: the generator sees the full clinical picture without re-triggering a database query, eliminating "hard-cutoff" hallucination at the source.
 
 ---
 
@@ -145,130 +126,63 @@ MedGraphia leverages Large Language Models across the entire data lifecycle, fro
 
 ### Build Pipeline (Offline)
 
-```
-┌────────────────────────────────── DATA SOURCES ──────────────────────────────────────┐
-│ [EN] PubMed, FDA, DrugBank │ [ZH] Medical QA (Huatuo) │ [DE] Clin. Cases (GERNERMED) │
-│ [EN] EMA SmPC (Local PDFs) │ [Anchor] MeSH Multilingual Descriptor Index             │
-└──────────────────────────────────────────┬───────────────────────────────────────────┘
-                                           │  (API / bulk download)
-         ┌─────────────────────────────────┼──────────────────────────────────┐
-         │                                 │                                  │
-┌────────▼────────────┐          ┌──────────▼────────────┐          ┌─────────▼─────────┐
-│  Parse & OCR        │          │ Section-aware Chunking│          │  Multi-lang NER:  │
-│  Docling  (EN / DE) │─────────▶│ anchor: section →     │─────────▶│  GLiNER + BERT    │
-│  MinerU   (ZH)      │          │ paragraph → sentence  │          │                   │
-│  Tesseract+PaddleOCR│          │ + FHIR Timing Norm.   │          └─────────┬─────────┘
-└─────────────────────┘          └───────────────────────┘                    │
-                                                                              │
-                    ┌─────────────────────────────────────────────────────────▼──────────┐
-                    │  Entity Linking: SapBERT-XLMR dense retrieval → MeSH ID            │
-                    │  ZH / EN / DE surface forms → MeSH ID (e.g. D009203 = MI)          │
-                    └─────────────────────────────────────┬──────────────────────────────┘
-                                                          │
-                    ┌─────────────────────────────────────▼────────────────────────────────┐
-                    │  Frontier Entity Expansion (domain-scoped builds only)               │
-                    │  Under-covered entities → light PubMed fetch →                       │
-                    │  same NER/link path, merged back into the graph                      │
-                    └────────────────────────┬─────────────────────────────────────────────┘
-                                             │
-              ┌──────────────────────────────┼──────────────────────────┐
-              │                              │                          │
-   ┌──────────▼────────────────┐  ┌──────────▼───────────────┐          │
-   │  Leiden Community         │  │  BGE-M3 Embedding        │          │
-   │  Detection (co-occurrence)│  │  dense + sparse          │          │
-   │  + LLM community summaries│  │                          │          │
-   └──────────┬────────────────┘  └───────────┬──────────────┘          │
-              └─────────────────────┬─────────┘                         │
-                                    │                                   │
-          ┌─────────────────────────▼───────────────────────────────────▼──────────┐
-          │                          STORAGE LAYER                                 │
-          │   ┌─────────────────────────┐   ┌────────────────┐   ┌──────────────┐  │
-          │   │  Neo4j 5.x              │   │  Qdrant        │   │  Local Disk  │  │
-          │   │  Knowledge Graph        │   │  Vector Store  │   │              │  │
-          │   │  entities · co-occurs  │   │  dense + sparse│   │  raw docs    │  │
-          │   │  community summaries    │   │  hybrid index  │   │  provenance  │  │
-          │   └─────────────────────────┘   └────────────────┘   └──────────────┘  │
-          └────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph SRC["Data Sources"]
+        direction LR
+        EN["EN: PubMed / FDA / DrugBank<br/>EMA SmPC (local PDFs)"]
+        ZH["ZH: Medical QA (Huatuo)"]
+        DE["DE: Clinical Cases (GERNERMED)"]
+        MESH["Anchor: MeSH multilingual descriptor index"]
+    end
+
+    PARSE["Parse & OCR<br/>Docling(EN/DE) · MinerU(ZH) · Tesseract+PaddleOCR"]
+    CHUNK["Section-aware Chunking<br/>section → paragraph → sentence + FHIR timing norm."]
+    NER["Multilingual NER<br/>GLiNER + BERT"]
+    LINK["Entity Linking<br/>SapBERT-XLMR dense retrieval → MeSH ID"]
+    FRONTIER["Frontier Entity Expansion (domain-scoped builds only)<br/>under-covered entities → light PubMed fetch → merged back into graph"]
+
+    COMM["Leiden Community Detection + LLM summaries"]
+    EMBED["BGE-M3 Embedding (dense+sparse)"]
+
+    DISK[("Local Disk<br/>raw documents")]
+    NEO[("Neo4j 5.x<br/>entities · co-occurrence · community summaries")]
+    QDR[("Qdrant<br/>dense+sparse hybrid index")]
+
+    SRC -->|API / bulk download| PARSE
+    PARSE --> DISK
+    PARSE --> CHUNK --> NER --> LINK --> FRONTIER
+    FRONTIER --> COMM --> NEO
+    FRONTIER --> EMBED --> QDR
+    FRONTIER --> NEO
 ```
 
-### Query Pipeline 
+### Query Pipeline
 
-```
-               User Query + Conversation History (Long-Short Memory)
-                                     │
-                                     ▼
-          ┌────────────────────────────────────────────────────────┐
-          │  Llama-Guard Input Filter (Proactive Defense)          │
-          │  (Checks S1-S14 violations before retrieval)           │
-          └──────────────────────────┬─────────────────────────────┘
-                                     │
-                                     ▼
-          ┌────────────────────────────────────────────────────────┐
-          │  Query Rewriter — context-aware query condensation     │
-          │  (resolves coreference/ellipsis via chat history)      │
-          └──────────────────────────┬─────────────────────────────┘
-                                     │
-          ┌──────────────────────────▼─────────────────────────────┐
-          │  Parallel Multilingual Query Expansion                 │
-          │  QueryTranslator: query → ZH / EN / DE translations    │
-          │  → Per-language Qdrant quota searches → merged pool    │
-          │  (eliminates sparse-vector lexical bias across langs)  │
-          └──────────────────────────┬─────────────────────────────┘
-                                     │
-          ┌──────────────────────────│─────────────────────────────┐
-          │                          ▼                             │
-          │  LangGraph Router — Intent & Entity Mapping            │
-          │  ① Query NER & linking to MeSH CUI                    │
-          │  ② Intent classification into 5 QueryTypes            │
-          │  ③ Retrieval Plan generation                          │
-          └──────────────────────────┬─────────────────────────────┘
-                                     │
-              ┌──────────────────────┼──────────────────────┐
-              │                      │                      │
-    ┌─────────▼─────────┐   ┌─────────▼─────────┐  ┌────────▼──────────────┐
-    │  Graph Retrieval  │   │  Hybrid Vector:   │  │  Community Summary    │
-    │  Neo4j GDS PPR     │   │  (BGE-M3)         │  │  Global search over   │
-    │  bipartite entity- │   │  dense + sparse   │  │  Leiden communities   │
-    │  chunk projection  │   │  on Qdrant        │  │  (Multi-hop/Overview) │
-    └─────────┬─────────┘   └────────┬──────────┘  └────────┬──────────────┘
-              └──────────────────────┼──────────────────────┘
-                                     │
-                          ┌──────────▼───────────────┐
-                          │  RRF Fusion (Reciprocal) │
-                          │  + bge-reranker-v2-m3    │
-                          │    multilingual cross    │
-                          └──────────┬───────────────┘
-                                     │
-          ┌──────────────────────────▼─────────────────────────────┐
-          │  LLM Router — tier-based model selection               │
-          │  - Tier: SMALL (FAQ) / MEDIUM (Inter.) / LARGE (Decis.)│
-          │  - Infrastructure: LiteLLM + LangGraph                 │
-          └──────────────────────────┬─────────────────────────────┘
-                                     │
-          ┌──────────────────────────▼─────────────────────────────┐
-          │  Agentic Gap Completion (LangGraph)                    │
-          │  - LLM judges whether evidence is missing a connection │
-          │  - If so: tool call → targeted fetch + NER/link ingest │
-          └──────────────────────────┬─────────────────────────────┘
-                                     │
-          ┌──────────────────────────▼─────────────────────────────┐
-          │  Generation Pipeline — cited answer construction       │
-          │  - Context-aware Pydantic-typed prompts                │
-          │  - Automated inline [N] citation injection             │
-          │  - Medical disclaimer & evidence provenance            │
-          └──────────────────────────┬─────────────────────────────┘
-                                     │
-                     ┌───────────────▼────────────────┐
-                     │  Post-Processing & Persistence │
-                     │  - Save interaction to Neo4j   │
-                     │  - Async User Interest Update  │
-                     │    (Long Memory)               │
-                     └───────────────┬────────────────┘
-                                     │
-                     ┌───────────────▼────────────────┐
-                     │  FastAPI / Streamlit UI         │
-                     │  Langfuse Tracing & Logs        │
-                     └────────────────────────────────┘
+```mermaid
+flowchart TD
+    INPUT["User Query + Conversation History (Long-Short Memory)"]
+    GUARD["Llama-Guard Input Filter<br/>checks S1-S14 violations before retrieval"]
+    REWRITE["Query Rewriter<br/>resolves coreference/ellipsis via chat history, condenses into a standalone query"]
+    EXPAND["Parallel Multilingual Query Expansion<br/>QueryTranslator: query → ZH/EN/DE<br/>per-language Qdrant quota search → merged pool"]
+    ROUTE["LangGraph Router<br/>① Query NER & linking to MeSH CUI<br/>② Intent classification (5 QueryTypes)<br/>③ Retrieval plan generation"]
+
+    subgraph RETRIEVE["Three-Way Parallel Retrieval"]
+        direction LR
+        GRAPH["Graph Retrieval<br/>Neo4j GDS PPR<br/>bipartite entity-chunk projection"]
+        VECTOR["Hybrid Vector Retrieval<br/>BGE-M3 dense+sparse<br/>on Qdrant"]
+        COMMUNITY["Community Summary Retrieval<br/>global search over Leiden communities<br/>(multi-hop/overview)"]
+    end
+
+    FUSION["RRF Fusion + bge-reranker-v2-m3<br/>multilingual cross-encoder reranking"]
+    LLMROUTE["LLM Router<br/>SMALL(FAQ) / MEDIUM(Inter.) / LARGE(Decis.)<br/>LiteLLM + LangGraph"]
+    GAP["Agentic Gap Completion<br/>LLM judges whether evidence is missing a connection between key entities<br/>if so: targeted fetch + NER/link ingest of new chunks"]
+    GEN["Generation Pipeline<br/>Pydantic-typed prompts · automated inline [N] citations<br/>medical disclaimer & evidence provenance"]
+    PERSIST["Post-Processing & Persistence<br/>interaction saved to Neo4j · async user-interest update (long memory)"]
+    UI["FastAPI / Streamlit UI<br/>Langfuse tracing & logs"]
+
+    INPUT --> GUARD --> REWRITE --> EXPAND --> ROUTE --> RETRIEVE
+    RETRIEVE --> FUSION --> LLMROUTE --> GAP --> GEN --> PERSIST --> UI
 ```
 
 ---
@@ -309,7 +223,7 @@ Nodes supporting the RAG workflow and system metadata.
 
 ### Relationship Types
 
-No typed semantic relations are extracted or stored — multi-hop reasoning comes from graph *connectivity* (entities co-occurring via shared chunks) rather than LLM-extracted edges. See [🕸️ Relation-Free Multi-Hop Retrieval](#-features) above.
+No typed semantic relations are extracted or stored — multi-hop reasoning comes from graph *connectivity* (entities co-occurring via shared chunks) rather than LLM-extracted edges. See [Relation-Free Multi-Hop Reasoning: Connectivity Instead of Relation Semantics](#2-relation-free-multi-hop-reasoning-connectivity-instead-of-relation-semantics) above.
 
 | Type | Source → Target | Description |
 |---|---|---|
@@ -327,30 +241,30 @@ The `/graph/entity` API (Graph Explorer) derives a synthetic `CO_OCCURS_WITH` ed
 
 | Layer | Technology                                                                                                                                    | Notes                                                                                                                                                                |
 |---|-----------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Language** | Python 3.12                                                                                                                                   |                                                                                                                                                                      |
+| **Language** | Python 3.12                                                                                                                                   | Fully type-annotated + Pydantic validation                                                                                                                                                      |
 | **API Framework** | FastAPI + Uvicorn                                                                                                                             | SSE streaming support                                                                                                                                                |
-| **Agent Orchestration** | LangGraph (LangChain)                                                                                                                         | Stateful, branching, retriable query agent                                                                                                                           |
-| **Prompt Optimization** | DSPy                                                                                                                                          | Optimized via **Adversarial Few-Shot Bootstrapping**; enforces clinical rigor through pre-compiled reasoning traces                                                  |
-| **GraphRAG Framework** | Custom Implementation                                                                                                                         | Fuses **Leiden community summarization** (Global), **PPR-based bipartite graph retrieval** (Local), and **MeSH-anchored semantic alignment** for complex cross-corpus reasoning. |
+| **Containerization** | Docker + Docker Compose                                                                                                                       | Multi-target Dockerfiles                                                                                                                                             |
 | **Graph Database** | Neo4j 5.x                                                                                                                                     | Nodes and relationships                                                                                                                                              |
 | **Vector Store** | Qdrant                                                                                                                                        | Native dense + sparse hybrid                                                                                                                                         |
-| **Embedding** | BGE-M3 (BAAI)                                                                                                                                 | Dense + sparse                                                                                                                                                       |
-| **Entity NER** | GLiNER (`Ihor/gliner-biomed-large-v1.0`) · `biomedical-ner-all` (EN) · `Adapting/bert-base-chinese-finetuned-NER-biomedical` (ZH) · `GerMedBERT_NER_V01_BRONCO_CARDIO` (DE) | Multi-lang, domain-specialized biomedical GLiNER                                                                                                                                       |
-| **Entity Linking** | SapBERT-XLMR (dense retrieval)                                                                                                                           | Cross-lingual → MeSH ID                                                                                                                                              |
-| **Graph Algorithms** | Neo4j GDS (Personalized PageRank)                                                                                                                       | Transient in-memory bipartite entity-chunk projection for relation-free multi-hop retrieval                                                                          |
-| **Reranker** | bge-reranker-v2-m3                                                                                                                            | Cross-encoder, multilingual                                                                                                                                          |
-| **Community Detection** | Leiden algorithm                                                                                                                              | Graph clustering for global QA                                                                                                                                       |
+| **Cache & Task Queue** | **Redis 7** + Arq                                                                                                                             | NER result cache + Redis-backed async worker queue                                                                                                                   |
 | **Document Parsing** | Docling (EN/DE) · MinerU (ZH)                                                                                                                 | Section-aware; table / formula extraction                                                                                                                            |
 | **OCR** | Tesseract 5 + PaddleOCR                                                                                                                       | Fallback for scanned PDFs and images                                                                                                                                 |
+| **Entity NER** | GLiNER (`Ihor/gliner-biomed-large-v1.0`) · `biomedical-ner-all` (EN) · `Adapting/bert-base-chinese-finetuned-NER-biomedical` (ZH) · `GerMedBERT_NER_V01_BRONCO_CARDIO` (DE) | Multi-lang, domain-specialized biomedical GLiNER                                                                                                                                       |
+| **Entity Linking** | SapBERT-XLMR (dense retrieval)                                                                                                                           | Cross-lingual → MeSH ID                                                                                                                                              |
+| **Embedding** | BGE-M3 (BAAI)                                                                                                                                 | Dense + sparse                                                                                                                                                       |
+| **GraphRAG Framework** | Custom Implementation                                                                                                                         | Fuses **Leiden community summarization** (Global), **PPR-based bipartite graph retrieval** (Local), and **MeSH-anchored semantic alignment** for complex cross-corpus reasoning. |
+| **Graph Algorithms** | Neo4j GDS (Personalized PageRank)                                                                                                                       | Transient in-memory bipartite entity-chunk projection                                                                          |
+| **Community Detection** | Leiden algorithm                                                                                                                              | Graph clustering for global QA                                                                                                                                       |
+| **Reranker** | bge-reranker-v2-m3                                                                                                                            | Cross-encoder, multilingual                                                                                                                                          |
 | **LLM Inference** | LiteLLM Gateway                                                                                                                               | Unified API layer. Supports **DeepSeek**, **OpenAI**, **Anthropic**, **Groq**, **Ollama**, and **vLLM**.                                                                       |
+| **Prompt Optimization** | DSPy (**GEPA**)                                                                                                                                          | Reflective prompt evolution; the reflection model and the model being optimized are deliberately on different providers to avoid self-reflection blind spots; pre-compiled reasoning traces enforce clinical rigor                                                  |
+| **Agent Orchestration** | LangGraph (LangChain)                                                                                                                         | Stateful, branching, retriable query agent                                                                                                                           |
 | **Safety** | Llama-Guard-3-1B                                                                                                                              | Input + output filtering; S1-S14 policy                                                                                                                              |
-| **Observability** | Langfuse (self-hosted)                                                                                                                        | prompt/token/latency/cost tracing                                                                                                                                    |
 | **Evaluation** | RAGAS                                                                                                                                         | Faithfulness · Answer Relevance · Context Precision/Recall · **Synthetic Testset Generation**                                                                        |
+| **Observability** | Langfuse (self-hosted)                                                                                                                        | prompt/token/latency/cost tracing                                                                                                                                    |
 | **Auth** | API Key                                                                                                                                       | Simple and secure key-based access control                                                                                                                           |
 | **Pipeline Orchestration** | Prefect 3                                                                                                                           | Prefect for complex DAG orchestration                                                              |
-| **Cache & Task Queue** | **Redis 7** + Arq                                                                                                                             | NER result cache + Redis-backed async worker queue                                                                                                                   |
 | **UI** | Streamlit                                                                                                                                     | Chat · KG explorer · pipeline monitor · admin                                                                                                                        |
-| **Containerization** | Docker + Docker Compose                                                                                                                       | Multi-target Dockerfiles                                                                                                                                             |
 
 ---
 
@@ -358,106 +272,39 @@ The `/graph/entity` API (Graph Explorer) derives a synthetic `CO_OCCURS_WITH` ed
 
 ### 1 — Offline Build Pipeline
 
-When you run `scripts/pipeline/build_graph.py` (or trigger the Prefect DAG), data flows through seven stages:
+Run `scripts/pipeline/build_graph.py` (or trigger the Prefect DAG) to kick off a build — the full 7-stage flow is covered above in the architecture diagram and in "Technical Deep Dives" §1. A few details the diagram doesn't spell out:
 
-**Stage 1 — Fetch**
-
-Data is ingested from a multilingual corpus across three languages:
-- **English (EN)**: 
-    - **PubMed**: Large-scale clinical abstracts (fetched via E-utilities or loaded from `data/raw/pubmed`).
-    - **FDA DailyMed**: Structured US drug labels (REST API).
-    - **EMA SmPC**: European drug labels (local PDFs in `data/raw/ema_smpc`).
-    - **DrugBank**: High-quality pharmacological data (XML).
-- **Chinese (ZH)**: 
-    - **Huatuo-Lite**: Large-scale medical QA dataset (`data/raw/huatuo`).
-- **German (DE)**: 
-    - **GERNERMED**: Specialized German clinical case data (`data/raw/germed`).
-
-**Stage 2 — Parse**
-
-Documents are converted into a unified `RawDocument` schema using language-optimized engines:
-- **Multilingual PDFs (EN/DE)**: Handled by **Docling** to preserve complex tables and section paths.
-- **Chinese Academic PDFs**: Optimized via **MinerU** for double-column layouts and formula extraction.
-- **Structured Datasets (ZH/DE/EN)**: The `StructuredParser` handles JSON/JSONL formats (Huatuo, GERNERMED, PubMed-preparsed) to ensure high-fidelity knowledge extraction.
-- **Scanned Artifacts**: Fallback to **OCR (Tesseract 5 + PaddleOCR)** for image-only medical records.
-
-**Stage 3 — Section-aware Chunking + Normalization**
-
-Text is split following the document's structural hierarchy (`section → paragraph → sentence`). Each chunk carries a `section_path` metadata tag. A domain normalizer (`MedicalNormalizer`) unifies clinical expressions across languages:
-- **Dosing**: `"每日两次"`, `"bid"`, `"twice daily"` → `"bid"` (**FHIR Timing code**).
-- **Units**: `"500mg"` → `"500 mg"`, `"10μg"` → `"10 mcg"`.
-
-**Stage 4 — Multi-language NER**
-
-A two-stage pipeline extracts medical entities across 8 categories (`EntityType.DISEASE`, `DRUG`, `SYMPTOM`, `GENE`, `PROCEDURE`, `ANATOMY`, `PHYSIOLOGY`, `LIVING_BEING`):
-1. **Coarse pass**: GLiNER (`Ihor/gliner-biomed-large-v1.0`, domain-adapted for biomedical NER) performs zero-shot multilingual entity detection across EN, ZH, and DE.
-2. **Fine pass**: Language-specific BERT models refine candidate spans for higher precision.
-    - **English**: `biomedical-ner-all`.
-    - **Chinese**: `Adapting/bert-base-chinese-finetuned-NER-biomedical`.
-    - **German**: `GerMedBERT_NER_V01_BRONCO_CARDIO`.
-
-**Stage 5 — Entity Linking to MeSH ID**
-
-Provisional mentions are resolved to global **MeSH CUIs**:
-1. **SapBERT-XLMR dense retrieval**: The entire multilingual MeSH dictionary is encoded into a vector index ahead of time; mentions are matched via GPU cosine similarity to find the best CUI.
-2. **Graph Write**: Linked entities and `MENTIONED_IN` relationships are written to Neo4j.
-
-**Stage 6 — Embedding**
-
-Chunks are embedded using **BGE-M3**, producing both **dense** (semantic) and **sparse** (lexical) vectors. These are indexed in Qdrant for hybrid retrieval.
-
-**Stage 7 — Community Detection**
-
-The **Leiden algorithm** clusters an **entity co-occurrence graph** (two entities are linked if they're mentioned in the same chunk, weighted by shared-chunk count) — no relation extraction involved. An LLM then generates hierarchical summaries for each community, which are stored in Neo4j to support global "overview" queries.
+- **Data source list**: EN — PubMed (clinical abstracts, fetched via E-utilities or loaded from `data/raw/pubmed`), FDA DailyMed (US drug labels, REST API), EMA SmPC (EU drug labels, local PDFs in `data/raw/ema_smpc`), DrugBank (pharmacological data, XML); ZH — Huatuo-Lite (`data/raw/huatuo`); DE — GERNERMED (`data/raw/germed`).
+- **Normalization example** (`MedicalNormalizer`): dosing unified to FHIR timing codes ("每日两次"/"bid"/"twice daily" → `bid`); unit formatting unified ("500mg" → "500 mg").
+- **The 8 NER entity categories**: `DISEASE`, `DRUG`, `SYMPTOM`, `GENE`, `PROCEDURE`, `ANATOMY`, `PHYSIOLOGY`, `LIVING_BEING`.
 
 ---
 
 ### 2 — Online Query Pipeline
 
-When a user submits a query, the system executes a multi-stage pipeline orchestrated by the API and the `RetrievalPipeline`:
+The full flow is covered above in the architecture diagram and "Technical Deep Dives". A few details worth calling out:
 
-**Step 0 — Proactive Defense (Safety Check)**
-Before any processing, **Llama-Guard 3** inspects the input query and conversation history. Violations of S1-S14 safety categories (e.g., self-harm, illegal acts) trigger an immediate safe refusal.
-
-**Step 1 — Contextual Rewriting (Short-Term Memory)**
-If conversation history exists, the `QueryRewriter` resolves pronouns and ellipsis (e.g., "What are its side effects?" → "What are the side effects of Metformin?"), and create an overview of historical chat records in a fixed window, to create a standalone search query.
-
-**Step 2 — Intent Routing & Multilingual Expansion**
-- **NER & Linking**: The `QueryRouter` runs a multilingual NER pass on the query to identify medical entities and link them to MeSH CUIs. Results are transparently cached in Redis (TTL 1 h) via `route_async()`; cache hits skip BERT/SapBERT inference and reduce routing latency from **~2550 ms to < 5 ms**.
-- **Intent Classification**: The query is classified into one of five categories: `CLINICAL_DECISION`, `DRUG_INTERACTION`, `LITERATURE_MULTIHOP`, `CROSS_CORPUS`, or `PATIENT_FAQ`.
-- **Multilingual expansion**: To eliminate lexical bias in sparse retrieval, the `QueryTranslator` translates the query into all three corpus languages (ZH / EN / DE) in parallel.
-
-**Step 3 — Three-Path Retrieval & Fusion**
-The system executes a concurrent retrieval plan:
-1. **Graph Traversal**: A transient Neo4j GDS in-memory projection (bipartite entity-chunk graph) + **Personalized PageRank** seeded at query CUIs ranks the most structurally relevant chunks — no relation edges to traverse.
-2. **Hybrid Vector Search**: Parallel per-language Qdrant searches using BGE-M3 (dense + sparse) with quota-based merging.
-3. **Community Summary**: Semantic search over Leiden-detected community summaries for global insights.
-
-**Reciprocal Rank Fusion (RRF)** merges these paths, followed by a **bge-reranker-v2-m3** cross-encoder pass to select the top-20 most relevant context passages.
-
-**Step 4 — Generation & Clinical Rigor**
-- **LLM Routing**: The `LLMRouter` selects the optimal model tier (`SMALL`, `MEDIUM`, or `LARGE`) based on query complexity and language preference.
-- **DSPy Prompt**: The generation is handled by a **compiled DSPy program** that enforces reasoning chains (CoT) and clinical rigor through pre-tuned few-shot demonstrations.
-- **Output Moderation**: A final Llama-Guard check ensures the generated answer is safe before delivery.
-
-**Step 5 — Persistence & Long-Term Memory**
-- **Evidence Citation**: The system injects numbered citations `[1][2]` that map exactly to the source chunks and section paths.
-- **Async Interest Update**: User interactions are recorded in Neo4j by creating or updating `INTERESTED_IN` relationships, reinforced on repeat mentions (`weight = weight × 0.9 + 1.0`) and read back with a lazy exponential time-decay (30-day half-life, computed at query time from `last_accessed` — no cron job needed) so old one-off interests fade even if never revisited, building a longitudinal user profile for language-agnostic personalization. Anonymous (unauthenticated) sessions are excluded so unrelated visitors can't bias each other's retrieval.
-
+- **Safety check scope**: Llama-Guard 3 blocks categories spanning S1-S14, including self-harm and illegal acts — a hit triggers an immediate refusal before retrieval ever runs.
+- **Query rewrite example**: `QueryRewriter` resolves pronouns like "What are its side effects?" against conversation history into a standalone query, e.g. "What are the side effects of Metformin?".
+- **The 5 intent classes**: `CLINICAL_DECISION`, `DRUG_INTERACTION`, `LITERATURE_MULTIHOP`, `CROSS_CORPUS`, `PATIENT_FAQ`.
+- **Routing cache**: query-side NER + entity-linking results are cached in Redis (TTL 1h); a cache hit skips BERT/SapBERT inference and cuts routing latency from **300–500 ms down to 5 ms**.
 
 ---
 
 ## 🚀 Deployment
 
-MedGraphia is a single unified stack. Scale it by adjusting `.env` values (Neo4j memory, LLM provider, dataset size) without changing the compose file or code path.
+MedGraphia defaults to cloud LLM APIs (DeepSeek/OpenAI/Anthropic, etc.) — the only real local GPU consumers are the small models in the retrieval pipeline. Measured on a 4060 Ti 16G:
 
-| Dimension | Small / Laptop | Server / Production |
+| Local Model | Purpose | Measured VRAM |
 |---|---|---|
-| **Hardware** | 16 GB M1/M2 Mac or RTX 3060+ PC | 32 GB+ RAM server |
-| **LLM** | Ollama 7B 4-bit GGUF (local, zero API cost) | Cloud API: DeepSeek / OpenAI / Anthropic |
-| **Data scope** | Single domain, 100–500 abstracts | Multi-domain full corpus |
-| **Neo4j memory** | `NEO4J_PAGE_CACHE=1G` | `NEO4J_PAGE_CACHE=16G+` |
-| **Compose file** | `docker-compose.yml` | `docker-compose.yml` |
+| bge-reranker-v2-m3 | Retrieval reranking | ~1.3 GB |
+| BAAI/bge-m3 | Vector embedding (dense+sparse) | ~1.3 GB |
+| SapBERT-XLMR | Entity linking | ~1.7 GB |
+| GLiNER-biomed-large | NER coarse pass | ~1.4 GB |
+| biomedical-ner-all et al. (BERT) | NER precision pass | ~0.2 GB |
+| **Total** | | **~6.3 GB** |
+
+If you also enable Llama-Guard (running locally via Ollama), add ~1.5 GB; if you switch the generator to local inference too (Ollama/vLLM), reserve additional VRAM sized to that model. **Minimum recommended: 8GB+ VRAM** (retrieval pipeline only); **12GB+ if running local generation + guardrails as well**.
 
 ---
 
@@ -489,7 +336,7 @@ NEO4J_PASSWORD=your-neo4j-password
 
 # LLM provider — pick one:
 DEFAULT_LLM_PROVIDER=ollama          # local, zero API cost (requires Ollama on host)
-DEFAULT_LLM_MODEL=qwen2.5:14b
+DEFAULT_LLM_MODEL=qwen2.5:7b
 LLM_BASE_URL=http://host.docker.internal:11434
 
 # Or use a cloud provider:
@@ -545,7 +392,7 @@ Install Ollama from [ollama.com](https://ollama.com), then pull the models and s
 
 ```bash
 # Pull the inference model (used by extractor / rewriter / generator / summarizer)
-ollama pull qwen2.5:14b
+ollama pull qwen2.5:7b
 
 # Pull the safety guard model
 ollama pull llama-guard3:1b
@@ -558,7 +405,7 @@ Then set the following in your `.env`:
 
 ```bash
 DEFAULT_LLM_PROVIDER=ollama
-DEFAULT_LLM_MODEL=qwen2.5:14b
+DEFAULT_LLM_MODEL=qwen2.5:7b
 LLM_BASE_URL=http://localhost:11434
 
 LLAMA_GUARD_PROVIDER=ollama
@@ -635,7 +482,7 @@ curl http://localhost:8058/admin/pipeline/status \
 
 ```json
 {
-  "stage": "relation_extraction",
+  "stage": "running",
   "documents_processed": 312,
   "documents_total": 500,
   "nodes_created": 48203,
@@ -677,7 +524,7 @@ curl -X POST http://localhost:8058/chat \
     }
   ],
   "retrieval_paths_used": ["graph_traversal", "hybrid_vector"],
-  "model_used": "deepseek/deepseek-chat"
+  "model_used": "deepseek/deepseek-v4-pro"
 }
 ```
 
@@ -687,14 +534,14 @@ curl -X POST http://localhost:8058/chat \
 curl -N -X POST http://localhost:8058/chat/stream \
   -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
-  -d '{"message": "T2DM 患者二甲双胍的剂量调整原则？", "session_id": "sess_abc123"}'
+  -d '{"message": "What are the dosage adjustment principles for metformin in T2DM patients?", "session_id": "sess_abc123"}'
 ```
 
 ```
-data: {"delta": "根据中国2型糖尿病防治指南"}
-data: {"delta": "（2024年版），二甲双胍的起始剂量"}
-data: {"delta": "通常为500 mg，每日2次..."}
-data: {"done": true, "citations": [...], "disclaimer": "本回答仅供参考，不构成诊疗建议，请遵医嘱。"}
+data: {"delta": "According to the ADA 2024 Standards of Care"}
+data: {"delta": ", the starting dose of metformin"}
+data: {"delta": " is typically 500 mg twice daily..."}
+data: {"done": true, "citations": [...], "disclaimer": "This information is for educational purposes only and does not constitute medical advice."}
 ```
 
 ### Query the knowledge graph directly
@@ -707,20 +554,22 @@ curl "http://localhost:8058/graph/entity?name=metformin&lang=en&hops=2" \
 
 ```json
 {
-  "entity": {"cui": "C0025598", "label": "Metformin", "type": "Drug"},
+  "entity": {"cui": "C0025598", "label": "Metformin", "labels": ["Drug"]},
   "subgraph": {
-    "nodes": 14,
-    "edges": 31,
-    "relations": [
-      {"type": "CO_OCCURS_WITH", "target": {"cui": "C0011860", "label": "T2DM"}, "confidence": 5},
-      {"type": "CO_OCCURS_WITH", "target": {"cui": "C0009413", "label": "Contrast Media"}, "confidence": 2},
-      {"type": "CO_OCCURS_WITH", "target": {"cui": "C0035222", "label": "Renal Failure"}, "confidence": 1}
+    "nodes": [
+      {"id": "4:xxx:1", "cui": "C0025598", "label": "Metformin", "labels": ["Drug"]},
+      {"id": "4:xxx:2", "cui": "C0011860", "label": "Type 2 Diabetes Mellitus", "labels": ["Disease"]},
+      {"id": "4:xxx:3", "cui": "C0009924", "label": "Contrast Media", "labels": ["Drug"]}
+    ],
+    "edges": [
+      {"type": "CO_OCCURS_WITH", "source": "4:xxx:1", "target": "4:xxx:2", "confidence": 47},
+      {"type": "CO_OCCURS_WITH", "source": "4:xxx:1", "target": "4:xxx:3", "confidence": 12}
     ]
   }
 }
 ```
 
-Edges are derived on the fly — two entities are connected if they co-occur in a shared chunk, with `confidence` set to the shared-chunk count (see [Relationship Types](#relationship-types)).
+*Note: `edges` only ever has one type, `CO_OCCURS_WITH` — no "treats"/"contraindicated-with" style semantic relations. This is the "relation-free multi-hop reasoning" design principle showing up directly at the API level; `confidence` is the shared-chunk count between the two entities, not a predefined semantic strength.*
 
 ### 🧬 DSPy Prompt Optimization (Self-Improvement)
 
@@ -740,7 +589,7 @@ python scripts/dspy/generate_synthetic_data.py 50
 Run the DSPy Teleprompter to evaluate the synthetic data and bootstrap the best Chain-of-Thought (CoT) reasoning traces into compiled JSON files.
 
 ```bash
-# Compiles Rewriter and Generator modules using BootstrapFewShot / MIPROv2
+# Compiles Rewriter and Generator modules using GEPA (reflective prompt evolution)
 python scripts/dspy/optimize.py
 ```
 
@@ -748,7 +597,7 @@ python scripts/dspy/optimize.py
 
 ---
 
-## 📊 Evaluation
+## 📊 RAGAS Evaluation
 
 MedGraphia includes a comprehensive evaluation suite using RAGAS for quality measurement and automated testset generation.
 
@@ -791,46 +640,98 @@ python scripts/evaluation/eval_rag_metrics.py \
 
 **Parameters:**
 - `--judge-provider`: Judge model provider — `openai` / `deepseek` / `gemini` (default `openai`).
-- `--judge-model`: Judge model name; defaults per provider when left unset (`gpt-4o-mini` / `deepseek-chat` / `gemini-2.5-flash`).
+- `--judge-model`: Judge model name; defaults per provider when left unset (`gpt-5.1` / `deepseek-pro` / `gemini-3.1-pro`).
 
-**🏆 Performance Leap (Parent-Child Optimization & DSPy MIPROv2)**
+### 🕸️ Relation-Extraction Architecture Ablation
 
-By implementing the **Parent-Child Retrieval architecture** (expanding LLM context boundaries) combined with **DSPy prompt tuning** and fuzzy semantic deduplication, the system's baseline local 7B model achieved a significant leap in clinical QA rigor:
+To validate the relation-free graph design, we compared two GraphRAG architectures using the same test set, generation model, and RAGAS evaluation pipeline:
 
-*   **Faithfulness**: Surged from `0.714` to **`0.849`** (Responses are strictly grounded in medical evidence without hallucinations).
-*   **Answer Relevancy**: Improved from `0.698` to **`0.882`** (Direct, highly professional answers to complex medical queries).
-*   **Context Precision**: Jumped from `0.574` to **`0.832`** (Highly relevant documents are ranked at the top of the context).
-*   **Context Recall**: Increased from `0.555` to **`0.699`** (Better capture of long-tail medical facts via parent-text expansion).
+| Architecture | Faithfulness | Answer Relevancy | Context Precision | Context Recall |
+|---|---:|---:|---:|---:|
+| Small LLM + typed relation extraction | 0.682 | 0.698 | 0.574 | 0.555 |
+| Bipartite Entity-Chunk + PPR | **0.694** | **0.750** | **0.871** | **0.759** |
+| Difference | +0.012 | +0.052 | +0.297 | +0.204 |
+
+The initial results show that, under the current data scale and model-resource constraints, Bipartite Entity-Chunk + PPR outperforms the small-LLM typed relation-extraction baseline across all four RAGAS metrics.
+
+This result illustrates the error-propagation problem of typed relation extraction. Extraction depends on the LLM's ability to identify entities, infer relations, and classify relation types. Smaller models are more likely to miss relations or create incorrect ones, introducing missing edges and spurious edges into the graph. Multi-hop retrieval can then propagate along these incorrect structures, bringing irrelevant passages into the context and degrading answer generation.
+
+Larger LLMs can reduce some extraction errors, but relation extraction requires an additional LLM call for each of a large number of text chunks, so cost and processing latency grow approximately linearly with corpus size. In contrast, the Bipartite Entity-Chunk graph retains only structural entity-to-chunk connectivity and uses Neo4j GDS Personalized PageRank for propagation-based retrieval. It avoids generating typed semantic relations for every chunk, offering a better balance between retrieval stability, scaling cost, and resource consumption.
+
+> Note: This comparison is intended to validate the architectural direction. The metric difference is a strict architectural comparison only when the test set, corpus, generation model, prompts, judge model, and retrieval parameters are held constant.
+
+### **🏆 GEPA Prompt Optimization: Before vs. After**
+
+Across an 81-example multilingual test set covering EN/ZH/DE, the Rewriter and Generator were recompiled with **GEPA**, replacing the earlier MIPROv2 setup. The four RAGAS metrics did not improve uniformly; all changes are reported transparently:
+
+| **Metric** | **Before** | **After** | **Change** |
+|---|---:|---:|---:|
+| Faithfulness | 0.694 | **0.769** | +0.075 ↑ |
+| Context Precision | 0.871 | **0.893** | +0.022 ↑ |
+| Answer Relevancy | 0.750 | 0.724 | -0.026 ↓ |
+| Context Recall | 0.759 | 0.729 | -0.031 ↓ |
+
+Against commonly used production-quality reference thresholds (Faithfulness 0.75, Context Precision 0.70, Answer Relevancy 0.80, Context Recall 0.80), **Faithfulness and Context Precision now pass, while Answer Relevancy and Context Recall remain 0.07–0.08 below target**. This is the known "faithfulness-versus-relevancy seesaw": GEPA's citation-density penalty makes the Generator ground answers more strictly in evidence, but also makes them more conservative and narrower in coverage. It is a real remaining trade-off.
+
+---
+
+## ⚡ Performance and Engineering Optimization
+
+### Query-Time Knowledge Completion Latency Optimization
+
+When retrieved evidence is insufficient, MedGraphia performs a targeted PubMed search, runs NER and entity linking, writes new text to Neo4j/Qdrant, and folds the resulting evidence back into the numbered answer context. End-to-end instrumentation identified and removed three bottlenecks in this high-cost path:
+
+| Metric | Before | After | Change |
+|---|---:|---:|---:|
+| Two-call completion-stage latency | ~85.1 s | **12.9 s** | **-85%** |
+| Per-round NER + entity linking | ~15 s | **1.1–1.6 s** | **~10–13× faster** |
+| Redundant LLM Assess after the tool-call limit | ~40 s | **0 s** | Skipped through conditional routing |
+
+- **Real-inference warmup**: runs NER and entity linking at startup instead of only constructing objects, preventing the first completion request from loading models on demand.
+- **Conditional routing**: ends directly once the maximum tool-call count is reached, removing an extra LLM Assess whose result would always be discarded.
+- **Adaptive GPU placement**: explicitly moves GLiNER to CUDA/MPS when available, fixing the default CPU-only execution path.
+
+> Measurements come from real two-round completion requests and cover the completion stage only, not final answer generation. Different out-of-corpus entities introduce some variation, so the figures demonstrate the scale of the end-to-end optimization rather than a strict same-input microbenchmark.
 
 ---
 
 ## ⚙️ Configuration
 
-All settings are loaded from `.env` via Pydantic Settings. Key variables:
+All settings are loaded from `.env` via Pydantic Settings. Copy the environment template before the first run:
 
-| Variable | Default | Description |
+```bash
+cp .env.example .env
+```
+
+`.env.example` contains the complete variable list. The key configuration groups are:
+
+| Group | Main variables | Purpose |
 |---|---|---|
-| **Architecture** | | |
-| `AUTH_STRATEGY` | `apikey` | Authentication strategy: `none` or `apikey` (Default) |
-| **Neo4j** | | |
-| `NEO4J_URI` | `bolt://localhost:7687` | Neo4j connection URI |
-| `NEO4J_PAGE_CACHE` | `1G` | Page cache size (e.g., `1G` for laptop, `32G` for server) |
-| **Vector Store** | | |
-| `VECTOR_STORE` | `qdrant` | Only `qdrant` is supported |
-| **LLM & Embedding** | | |
-| `DEFAULT_LLM_PROVIDER` | `groq` | `openai` \| `anthropic` \| `deepseek` \| `gemini` \| `groq` \| `ollama` \| `local` |
-| `EMBEDDING_PROVIDER`| `ollama` | `huggingface` \| `openai` \| `ollama` |
-| **Observability** | | |
-| `TRACING_ENABLED` | `false` | Enable Langfuse tracing |
-| **Compliance** | | |
-| `GUARDRAILS_ENABLED`| `true` | Enable Llama-Guard safety checks |
-| `LLAMA_GUARD_PROVIDER`| `ollama` | Provider for the safety model |
-| `LLAMA_GUARD_MODEL`| `llama-guard3:1b`| Model name for the safety guardrails |
-| **Cache & Task Queue** | |
-| `REDIS_URL` | *(unset)* | Redis connection string. When set, enables NER result caching and Arq task-queue dispatch (e.g. `redis://redis:6379/0`). Omit to run without Redis. |
-| **Multilingual Retrieval** | | |
-| `MULTILINGUAL_RETRIEVAL_ENABLED` | `true` | Translate query into ZH/EN/DE before vector search to eliminate hybrid-search lexical bias across corpus languages |
-| `MULTILINGUAL_PER_LANG_QUOTA` | `7` | Max chunks retrieved per language in per-language quota mode; total candidate pool = `3 × quota + unfiltered_pass` |
+| Data services | `NEO4J_*`, `QDRANT_*`, `REDIS_URL` | Configure the graph database, vector store, optional NER cache, and Arq task queue |
+| Default LLM | `DEFAULT_LLM_PROVIDER`, `DEFAULT_LLM_MODEL`, `LLM_BASE_URL` | Fallback LLM when no task-specific model is selected; supports Ollama, vLLM, DeepSeek, OpenAI, Anthropic, Gemini, and Groq |
+| Tiered routing | `LLM_SMALL_*`, `LLM_MEDIUM_*`, `LLM_LARGE_*` | Configure the SMALL, MEDIUM, and LARGE tiers; the current default combines vLLM Qwen2.5-3B with two DeepSeek cloud tiers |
+| Embeddings | `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_BASE_URL` | Configure BGE-M3 or an Ollama embedding service |
+| Observability | `TRACING_ENABLED`, `METRICS_ENABLED` | Configure Langfuse tracing and metrics |
+| vLLM | `VLLM_BASE_URL` | OpenAI-compatible vLLM endpoint, defaulting to `http://localhost:8010/v1` |
+| Safety guardrails | `GUARDRAILS_ENABLED`, `LLAMA_GUARD_*` | Configure Llama-Guard 3 input and output checks; enabling it requires additional VRAM |
+| Query-time completion | `GAP_COMPLETION_ENABLED`, `GAP_COMPLETION_MAX_TOOL_CALLS`, `GAP_COMPLETION_PUBMED_LIMIT` | Control targeted PubMed retrieval and graph completion |
+| Multilingual retrieval | `MULTILINGUAL_RETRIEVAL_ENABLED`, `MULTILINGUAL_PER_LANG_QUOTA` | Control ZH/EN/DE query translation and per-language retrieval quotas |
+| Authentication and service | `AUTH_STRATEGY`, `ADMIN_BOOTSTRAP_KEY`, `API_HOST`, `API_PORT` | Configure API authentication, the admin bootstrap key, and the listening address |
+
+The current default local/cloud LLM routing is:
+
+```dotenv
+LLM_SMALL_PROVIDER=vllm
+LLM_SMALL_MODEL=Qwen/Qwen2.5-3B-Instruct
+LLM_MEDIUM_PROVIDER=deepseek
+LLM_MEDIUM_MODEL=deepseek-v4-flash
+LLM_LARGE_PROVIDER=deepseek
+LLM_LARGE_MODEL=deepseek-v4-pro
+```
+
+For local deployment, NER, entity linking, embeddings, reranking, and optional Llama-Guard models consume GPU memory. See [Deployment](#-deployment) for the model list and measured VRAM requirements. When using vLLM, start the corresponding OpenAI-compatible service first, then set the selected tier's provider to `vllm`.
+
+Code-level defaults are defined in `src/medgraphia/config.py`, while `.env.example` is the copyable environment template. At runtime, the active `.env` values take precedence.
 
 ---
 
@@ -861,19 +762,24 @@ MedGraphia/
 │   │   └── import_mesh.py          # Load MeSH Descriptor Index into local data dir
 │   ├── pipeline/
 │   │   ├── build_graph.py          # Bootstrap: thin CLI wrapper for ingestion/pipeline.py
-│   │   ├── clean_short_chunks.py   # Utility to remove low-info chunks
 │   │   ├── embed_entities.py       # Standalone entity embedding task
-│   │   ├── extract_relations_only.py # Schema-guided RE only mode
 │   │   ├── ingest_multilingual.py  # Ingest multilingual corpus
-│   │   ├── retrieval.py            # Ad-hoc retrieval test script
-│   │   ├── ask_llm.py              # One-shot LLM query helper
-│   │   └── test_api.py             # API smoke-test script
+│   │   └── ingest_processed_corpus.py # Ingest processed corpus
 │   ├── admin/
 │   │   ├── check_neo4j.py          # Verify Neo4j connectivity and schema
+│   │   ├── check_duplicates.py     # Check duplicate data
+│   │   ├── clean_short_chunks.py   # Remove low-information chunks
 │   │   ├── count_neo4j_nodes.py    # Report node/edge counts by label
 │   │   ├── inspect_data.py         # Inspect parsed document data
 │   │   ├── reset_databases.py      # Wipe Neo4j + Qdrant for a fresh run
-│   │   └── setup_chat_storage.py   # Create Neo4j chat history indexes
+│   │   ├── search_duplicates.py    # Search duplicate entities and documents
+│   │   ├── setup_chat_storage.py   # Create Neo4j chat history indexes
+│   │   └── upgrade_to_parent_child.py # Upgrade to parent-child retrieval
+│   ├── tests/
+│   │   ├── ask_llm.py              # One-shot LLM query helper
+│   │   ├── check_ner_pollution.py  # Check NER pollution
+│   │   ├── retrieval.py            # Ad-hoc retrieval test script
+│   │   └── test_api.py             # API smoke-test script
 │   └── evaluation/
 │       ├── generate_testset.py      # Automated synthetic testset generation (RAGAS)
 │       ├── eval_rag_metrics.py      # RAG pipeline evaluation (Faithfulness, etc.)
@@ -886,14 +792,13 @@ MedGraphia/
     ├── logger.py                   # Structured logging setup
     │
     ├── domain/                     # Domain model package
-    │   ├── base.py                 # Core types: Entity, Relation, Language, QueryType
+    │   ├── base.py                 # Core types: EntityType, Language, QueryType
     │   ├── document.py             # RawDocument, ParsedSection, Chunk, SourceMeta
     │   ├── medical.py              # Medical entity hierarchy
     │   ├── chat.py                 # Session, Message, Citation models
     │   └── community.py            # Community node model
     │
     ├── data/                       # Authorized data source connectors
-    │   ├── dspy/                   # Compiled DSPy programs (optimized reasoning traces)
     │   ├── pubmed.py               # PubMed E-utilities API (NCBI — compliant, versioned)
     │   ├── ema_smpc.py             # EMA SmPC XML bulk downloader
     │   ├── fda_dailymed.py         # FDA DailyMed REST API
@@ -901,7 +806,7 @@ MedGraphia/
     │   └── mesh.py                 # MeSH Descriptor Index loader (automatic download)
     │
     ├── ingestion/                  # Offline build pipeline
-    │   ├── pipeline.py             # Prefect flow + 8 task stages (fetch→parse→chunk→ner→link→extract→embed→community)
+    │   ├── pipeline.py             # Prefect flow + 9 logical stages (fetch→load→parse→chunk→ner→link→frontier_expand→embed→community)
     │   ├── parsers/
     │   │   ├── docling_parser.py   # Docling: EN/DE medical PDF (tables, formulas, figures)
     │   │   ├── mineru_parser.py    # MinerU: ZH academic PDF (double-column, formula)
@@ -915,7 +820,6 @@ MedGraphia/
     │   │   ├── pipeline.py         # MedicalNERPipeline: combines GLiNER + BERT, deduplicates spans
     │   │   └── _types.py           # Internal MentionSpan type
     │   ├── entity_linker.py        # SapBERT-XLMR dense retrieval → MeSH ID cross-lingual alignment
-    │   ├── relation_extractor.py   # LLM schema-guided RE (closed relation type set)
     │   ├── community_builder.py    # Leiden algorithm + LLM community summary generation
     │   └── embedder.py             # BGE-M3: dense + sparse (100+ languages) → Qdrant
     │
@@ -945,6 +849,7 @@ MedGraphia/
     │   ├── rewriter.py             # QueryRewriter: condense history into standalone query
     │   ├── query_translator.py     # QueryTranslator: translate query into ZH/EN/DE
     │   ├── query_ner.py            # NER on incoming query for entity-based graph lookup
+    │   ├── query_time_completion.py # Query-time gap completion and targeted PubMed fetch
     │   ├── graph_retriever.py      # Neo4j GDS Personalized PageRank over bipartite entity-chunk graph
     │   ├── vector_retriever.py     # BGE-M3 dense + sparse hybrid search on Qdrant
     │   ├── community_retriever.py  # Leiden community summary search (global QA)
@@ -955,13 +860,15 @@ MedGraphia/
     │   ├── pipeline.py             # GenerationPipeline: context prep → routing → LLM → citations
     │   ├── llm_router.py           # Route by query type / language → SMALL / MEDIUM / LARGE tier
     │   ├── citation.py             # Inline citation injection → provenance
-    │   └── guard.py                # Llama-Guard 3 safety filtering logic
+    │   ├── guard.py                # Llama-Guard 3 safety filtering logic
+    │   └── agentic_completion.py   # Tool-driven query-time knowledge completion loop
     │
     ├── prompts/                    # Pydantic-typed prompt modules (DSPy signatures)
     │   ├── answer_generation.py
     │   ├── community_summary.py
     │   ├── query_rewriting.py
-    │   └── safety.py
+    │   ├── safety.py
+    │   └── synthetic.py
     │
     ├── api/                        # FastAPI application
     │   ├── __init__.py             # App factory with lifespan management

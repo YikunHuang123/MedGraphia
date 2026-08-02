@@ -27,6 +27,7 @@ data/re/*
 
 .claude/
 .agent/
+.codex/
 
 Readme_ZH.md
 .agents/
