@@ -125,7 +125,7 @@ def _build_litellm_model_id(provider: LLMProvider, model_name: str) -> str:
             return model_name
 
 
-def _build_extra_kwargs(provider: LLMProvider, cfg: Any) -> dict[str, Any]:
+def _build_extra_kwargs(provider: LLMProvider, cfg: Any, model_name: str = "") -> dict[str, Any]:
     """Build litellm keyword arguments (api_key, api_base) for each provider."""
     kwargs: dict[str, Any] = {}
 
@@ -182,8 +182,16 @@ def _build_extra_kwargs(provider: LLMProvider, cfg: Any) -> dict[str, Any]:
             kwargs["extra_body"] = {"keep_alive": "30m"}
 
         case LLMProvider.VLLM:
-            base = getattr(cfg, "vllm_base_url", "") or "http://localhost:8000/v1"
-            kwargs["api_base"] = base
+            # Each vLLM-backed tier is its own engine/process — route by the
+            # exact model_name being called, not by tier (this layer doesn't
+            # know about tiers), falling back to the generic vllm_base_url.
+            if model_name == getattr(cfg, "llm_small_model", None):
+                base = getattr(cfg, "vllm_small_base_url", "")
+            elif model_name == getattr(cfg, "llm_medium_model", None):
+                base = getattr(cfg, "vllm_medium_base_url", "")
+            else:
+                base = getattr(cfg, "vllm_base_url", "")
+            kwargs["api_base"] = base or "http://localhost:8000/v1"
             kwargs["api_key"] = "vllm"  # vLLM's OpenAI-compatible server ignores this unless --api-key is set
 
     return kwargs
@@ -274,7 +282,7 @@ class LiteLLMGateway:
             provider = LLMProvider.OLLAMA
 
         model_name = model_override or cfg.default_llm_model
-        extra = _build_extra_kwargs(provider, cfg)
+        extra = _build_extra_kwargs(provider, cfg, model_name)
         return cls(provider=provider, model_name=model_name, extra_kwargs=extra)
 
     @classmethod
@@ -287,12 +295,23 @@ class LiteLLMGateway:
         from medgraphia.config import get_settings
 
         cfg = get_settings()
-        extra = _build_extra_kwargs(provider, cfg)
+        extra = _build_extra_kwargs(provider, cfg, model_name)
         return cls(provider=provider, model_name=model_name, extra_kwargs=extra)
 
     # ------------------------------------------------------------------
     # Async single-turn completion
     # ------------------------------------------------------------------
+
+    async def _ensure_vllm_awake(self) -> None:
+        """If this gateway targets a Sleep-Mode vLLM engine, wake it before calling."""
+        if self._provider != LLMProvider.VLLM:
+            return
+        base_url = self._extra_kwargs.get("api_base")
+        if not base_url:
+            return
+        from medgraphia.llm.vllm_sleep_manager import get_sleep_manager
+
+        await get_sleep_manager().ensure_awake(base_url)
 
     async def acomplete(self, request: CompletionRequest) -> CompletionResponse:
         """
@@ -301,6 +320,7 @@ class LiteLLMGateway:
         Returns a CompletionResponse; never raises — errors are captured in
         response.metadata["error"] and response.ok will be False.
         """
+        await self._ensure_vllm_awake()
         try:
             import litellm
         except ImportError:
@@ -399,6 +419,7 @@ class LiteLLMGateway:
             async for chunk in gateway.astream(req):
                 print(chunk, end="", flush=True)
         """
+        await self._ensure_vllm_awake()
         try:
             import litellm
         except ImportError:

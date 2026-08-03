@@ -98,6 +98,14 @@ async def _warm_up_models() -> None:
         warm_up_gap_completion()
         logger.info("warmup_gap_completion_done")
 
+        # 6. Start the vLLM Sleep Mode idle monitor, so SMALL/MEDIUM-tier
+        # engines that go quiet get put back to sleep automatically instead
+        # of sitting resident in VRAM between requests.
+        from medgraphia.llm.vllm_sleep_manager import get_sleep_manager
+
+        get_sleep_manager().start_idle_monitor()
+        logger.info("warmup_vllm_sleep_monitor_done")
+
         # 5. Mark as warm
         _IS_WARM = True
         logger.info("warmup_complete", message="All models are hot and ready for traffic.")

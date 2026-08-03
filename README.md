@@ -414,6 +414,31 @@ LLAMA_GUARD_MODEL=llama-guard3:1b
 
 > **Note:** The first API startup will automatically pull `llama-guard3:1b` if it is not already present locally.
 
+#### 0.5 Optional: Run Local Inference with vLLM + Sleep Mode
+
+As an alternative to Ollama, the SMALL/MEDIUM tiers can run on local vLLM with Sleep Mode enabled for on-demand wake and idle auto-sleep (mechanism described under "⚡ Performance and Engineering Optimization").
+
+Start the two vLLM engines sequentially — starting both at once causes them to conflict during GPU memory profiling, so the first must finish starting before the second begins:
+
+```bash
+VLLM_SERVER_DEV_MODE=1 python -m vllm.entrypoints.openai.api_server \
+  --model Qwen/Qwen2.5-0.5B-Instruct --port 8010 --enable-sleep-mode
+
+VLLM_SERVER_DEV_MODE=1 python -m vllm.entrypoints.openai.api_server \
+  --model Qwen/Qwen2.5-3B-Instruct --port 8011 --enable-sleep-mode
+```
+
+Set the corresponding tier's provider to vLLM in your `.env`:
+
+```bash
+LLM_SMALL_PROVIDER=vllm
+LLM_SMALL_MODEL=Qwen/Qwen2.5-0.5B-Instruct
+LLM_MEDIUM_PROVIDER=vllm
+LLM_MEDIUM_MODEL=Qwen/Qwen2.5-3B-Instruct
+```
+
+When a request is routed to a given tier, MedGraphia wakes the corresponding engine automatically, then puts it back to sleep after `VLLM_SLEEP_IDLE_SECONDS` (default 120s) of inactivity. **The vLLM engines must be running before the API starts** — MedGraphia only handles wake/sleep scheduling, not launching the vLLM processes themselves.
+
 #### 1. Dataset Download
 If you are running the project locally and want to construct the knowledge graph from scratch, you need to fetch the raw data first. We provide several scripts to download English, Chinese, and German medical datasets.
 
@@ -693,6 +718,37 @@ When retrieved evidence is insufficient, MedGraphia performs a targeted PubMed s
 
 > Measurements come from real two-round completion requests and cover the completion stage only, not final answer generation. Different out-of-corpus entities introduce some variation, so the figures demonstrate the scale of the end-to-end optimization rather than a strict same-input microbenchmark.
 
+### Llama-Guard Cold-Start Latency Optimization
+
+Llama-Guard runs locally via Ollama, which by default evicts an idle model from VRAM after 5 minutes. In real conversations, the time users spend reading a response and composing the next question routinely exceeds this window, causing frequent evictions and forcing a full reload on the next call.
+
+| Scenario | Latency | Change |
+|---|---:|---:|
+| Gap < 5 min (model resident) | ~671 ms | baseline |
+| Gap > 5 min (triggers reload) | ~5.5–7.3 s | — |
+| After fix (keep_alive extended to 30 min) | ~671 ms | **~88% reduction** |
+
+- **Root cause**: the latency is not a fixed first-call cost but a recurring one — Ollama's 5-minute idle-eviction policy is retriggered repeatedly under normal conversational pacing.
+- **Implementation detail**: LiteLLM silently drops top-level keyword arguments outside its provider parameter whitelist, so passing `keep_alive` directly has no effect; it must be passed via `extra_body` to be forwarded to Ollama correctly. This mirrors the approach already used elsewhere in the project to suppress Qwen3's `<think>` output.
+- **Verification**: after setting `extra_body={"keep_alive": "30m"}`, Ollama's `/api/ps` endpoint confirmed the reported expiry time was pushed back to 30 minutes.
+
+### vLLM Sleep Mode Tier Switching (Optional Feature)
+
+SMALL/MEDIUM tiers default to cloud APIs; for local inference, they can be switched to vLLM with Sleep Mode enabled, letting a single GPU rotate through both tiers without keeping both engines resident in VRAM at once (see "Installation" for the setup steps).
+
+| Metric | Value |
+|---|---:|
+| SMALL tier (0.5B) wake latency | 0.26 s |
+| MEDIUM tier (3B) wake latency | 7.98 s |
+| VRAM freed with both tiers asleep | ~6.9 GB |
+| Idle-to-sleep threshold | 120 s (configurable) |
+
+- **Request-driven wake-on-demand**: on a hit for a given tier, the system first queries vLLM's `/is_sleeping` status and calls `/wake_up` if the engine is asleep; it is not put back to sleep immediately after inference, avoiding repeated wake cycles during a multi-turn conversation.
+- **Background idle monitor**: a separate coroutine scans each engine's last-used timestamp every 30 seconds and calls `/sleep` on any engine idle past the threshold, independent of the next incoming request.
+- **Wake check on the DSPy call path**: DSPy caches its LM instance after first construction, so subsequent calls bypass the construction logic entirely. To ensure paths that invoke models through DSPy (the Generator and Rewriter) also trigger a wake correctly, the wake check is implemented as a step the DSPy-side LM getter runs on every call, not only when the cache misses.
+
+> Figures come from real `/chat` requests that triggered actual wake and sleep events. Test entities and context size vary between runs, so the numbers illustrate the mechanism's effectiveness and latency scale rather than a strict same-input benchmark.
+
 ---
 
 ## ⚙️ Configuration
@@ -709,10 +765,10 @@ cp .env.example .env
 |---|---|---|
 | Data services | `NEO4J_*`, `QDRANT_*`, `REDIS_URL` | Configure the graph database, vector store, optional NER cache, and Arq task queue |
 | Default LLM | `DEFAULT_LLM_PROVIDER`, `DEFAULT_LLM_MODEL`, `LLM_BASE_URL` | Fallback LLM when no task-specific model is selected; supports Ollama, vLLM, DeepSeek, OpenAI, Anthropic, Gemini, and Groq |
-| Tiered routing | `LLM_SMALL_*`, `LLM_MEDIUM_*`, `LLM_LARGE_*` | Configure the SMALL, MEDIUM, and LARGE tiers; the current default combines vLLM Qwen2.5-3B with two DeepSeek cloud tiers |
+| Tiered routing | `LLM_SMALL_*`, `LLM_MEDIUM_*`, `LLM_LARGE_*` | Configure the SMALL, MEDIUM, and LARGE tiers; all three default to DeepSeek cloud models, with SMALL/MEDIUM optionally switchable to local vLLM (see below) |
 | Embeddings | `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_BASE_URL` | Configure BGE-M3 or an Ollama embedding service |
 | Observability | `TRACING_ENABLED`, `METRICS_ENABLED` | Configure Langfuse tracing and metrics |
-| vLLM | `VLLM_BASE_URL` | OpenAI-compatible vLLM endpoint, defaulting to `http://localhost:8010/v1` |
+| vLLM (optional) | `VLLM_SMALL_BASE_URL`, `VLLM_MEDIUM_BASE_URL`, `VLLM_SLEEP_IDLE_SECONDS` | Per-tier vLLM engine endpoints (default ports 8010/8011) + idle-to-sleep threshold (default 120s) |
 | Safety guardrails | `GUARDRAILS_ENABLED`, `LLAMA_GUARD_*` | Configure Llama-Guard 3 input and output checks; enabling it requires additional VRAM |
 | Query-time completion | `GAP_COMPLETION_ENABLED`, `GAP_COMPLETION_MAX_TOOL_CALLS`, `GAP_COMPLETION_PUBMED_LIMIT` | Control targeted PubMed retrieval and graph completion |
 | Multilingual retrieval | `MULTILINGUAL_RETRIEVAL_ENABLED`, `MULTILINGUAL_PER_LANG_QUOTA` | Control ZH/EN/DE query translation and per-language retrieval quotas |

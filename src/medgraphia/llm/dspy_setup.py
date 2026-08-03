@@ -44,6 +44,16 @@ def get_lm(
             provider = cfg.judge_llm_provider
             model = cfg.judge_llm_model
 
+    if provider == "vllm":
+        # LM objects are cached below, so this is the only per-call hook we
+        # get — must run on every call (cache hit or miss), not just once at
+        # construction, otherwise a tier that goes back to sleep never wakes
+        # up again for subsequent requests.
+        from medgraphia.llm.vllm_sleep_manager import get_sleep_manager
+
+        base_url = cfg.vllm_small_base_url if model == cfg.llm_small_model else cfg.vllm_medium_base_url
+        get_sleep_manager().ensure_awake_sync(base_url)
+
     cache_key = f"{provider}/{model}/{task}/{temperature}"
     if cache_key in _LM_CACHE:
         return _LM_CACHE[cache_key]
@@ -89,7 +99,13 @@ def get_lm(
             api_base = cfg.llm_base_url or "http://localhost:11434"
         elif provider == "vllm":
             api_key = "vllm"  # ignored unless the vLLM server was started with --api-key
-            api_base = cfg.vllm_base_url or "http://localhost:8000/v1"
+            # Each vLLM-backed tier is its own engine — route by model_name, not tier.
+            if model == cfg.llm_small_model:
+                api_base = cfg.vllm_small_base_url
+            elif model == cfg.llm_medium_model:
+                api_base = cfg.vllm_medium_base_url
+            else:
+                api_base = cfg.vllm_base_url or "http://localhost:8000/v1"
 
     try:
         kwargs = {}

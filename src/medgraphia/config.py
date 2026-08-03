@@ -96,6 +96,15 @@ class Settings(BaseSettings):
     # calls into vLLM's OpenAI-compatible endpoint too.
     vllm_base_url: str = "http://localhost:8010/v1"
 
+    # Per-model vLLM endpoints, keyed by model_name (not tier — the gateway
+    # layer doesn't know about tiers). Each engine is its own vLLM process
+    # with Sleep Mode enabled; falls back to vllm_base_url when a model_name
+    # isn't listed here.
+    vllm_small_base_url: str = "http://localhost:8010/v1"
+    vllm_medium_base_url: str = "http://localhost:8011/v1"
+    # Seconds of inactivity before an idle vLLM engine is put back to sleep.
+    vllm_sleep_idle_seconds: int = 120
+
 
     # Model used for community summary generation; defaults to default_llm_model if empty
     community_summary_llm: str = ""
@@ -139,8 +148,16 @@ class Settings(BaseSettings):
     # llm_medium_model: str = "Qwen3.5:9b"          # e.g. "deepseek-chat"
     # llm_large_provider: str = "ollama"        # e.g. "openai"
     # llm_large_model: str = "qwen3:14b"           # e.g. "gpt-4o"
-    llm_small_provider: str = "vllm"
-    llm_small_model: str = "Qwen/Qwen2.5-3B-Instruct"
+    #
+    # Optional: run SMALL/MEDIUM locally on vLLM with Sleep Mode instead
+    # (see llm/vllm_sleep_manager.py) — requires the vLLM engines to already
+    # be running with --enable-sleep-mode on the ports below before startup:
+    #   llm_small_provider: str = "vllm"
+    #   llm_small_model: str = "Qwen/Qwen2.5-0.5B-Instruct"    # vllm_small_base_url, default port 8010
+    #   llm_medium_provider: str = "vllm"
+    #   llm_medium_model: str = "Qwen/Qwen2.5-3B-Instruct"     # vllm_medium_base_url, default port 8011
+    llm_small_provider: str = "deepseek"
+    llm_small_model: str = "deepseek-v4-flash"
     llm_medium_provider: str = "deepseek"
     llm_medium_model: str = "deepseek-v4-flash"
     llm_large_provider: str = "deepseek"
