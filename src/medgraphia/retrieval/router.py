@@ -34,6 +34,7 @@ class RouterState(TypedDict, total=False):
     language: Language
     query_entities: QueryEntities
     query_type: QueryType
+    has_signal: bool
     retrieval_plan: RetrievalPlan
     error: str
 
@@ -58,6 +59,10 @@ class RetrievalPlan:
     graph_hops: int = 2
     vector_limit: int = 20
     community_limit: int = 5
+
+    # True when the query matched no medical keyword rule and linked no
+    # entity — e.g. a greeting. Callers should skip retrieval entirely.
+    is_chitchat: bool = False
 
     @property
     def linked_cuis(self) -> list[str]:
@@ -179,9 +184,10 @@ _RULES: list[tuple[QueryType, list[str], int]] = [
 ]
 
 
-def _classify_by_rules(query: str, entities: QueryEntities) -> QueryType:
+def _classify_by_rules(query: str, entities: QueryEntities) -> tuple[QueryType, bool]:
     """
-    Return the most-likely QueryType for a query using keyword rules.
+    Return the most-likely QueryType for a query using keyword rules, plus
+    whether any medical signal (keyword match or linked entity) was found.
 
     Scoring:
       - Each matching pattern contributes 1 point to its category.
@@ -189,8 +195,13 @@ def _classify_by_rules(query: str, entities: QueryEntities) -> QueryType:
       - Tie-break: categories are checked in _RULES order; the first that
         meets its threshold wins (priority: DRUG_INTERACTION > CROSS_CORPUS >
         LITERATURE_MULTIHOP > PATIENT_FAQ > CLINICAL_DECISION).
-      - If no category meets its threshold, fall back to CLINICAL_DECISION
-        (most common query type in a medical system).
+      - If no category meets its threshold, fall back based on whether any
+        medical entity was detected (linked or not — an unlinked mention like
+        an untranslated drug name is still medical signal, just not one the
+        graph can look up): CLINICAL_DECISION if so (safest default for a
+        medical system), PATIENT_FAQ otherwise (e.g. greetings/small talk —
+        no entity and no keyword match means there is nothing to retrieve
+        for; `has_signal` is False so the caller can skip retrieval).
     """
     query_lower = query.lower()
     scores: dict[QueryType, int] = {}
@@ -207,10 +218,13 @@ def _classify_by_rules(query: str, entities: QueryEntities) -> QueryType:
                 query_type=qtype.value,
                 score=scores[qtype],
             )
-            return qtype
+            return qtype, True
 
-    # Fallback: presence of linked entities → assume clinical decision
-    return QueryType.CLINICAL_DECISION
+    # Fallback: any detected entity (linked or not) → assume clinical decision;
+    # otherwise there is no medical content to retrieve for (e.g. "Hi").
+    if entities.has_entities:
+        return QueryType.CLINICAL_DECISION, True
+    return QueryType.PATIENT_FAQ, False
 
 
 def _plan_from_type(
@@ -218,6 +232,7 @@ def _plan_from_type(
     query: str,
     language: Language,
     entities: QueryEntities,
+    has_signal: bool = True,
 ) -> RetrievalPlan:
     """
     Map a QueryType to a RetrievalPlan with appropriate retriever settings.
@@ -298,6 +313,8 @@ def _plan_from_type(
         if plan.graph_hops == 0:
             plan.graph_hops = 1
 
+    plan.is_chitchat = not has_signal
+
     return plan
 
 
@@ -330,8 +347,8 @@ def _build_routing_graph(ner_linker: QueryNERLinker) -> Any:
         entities: QueryEntities = state.get("query_entities") or QueryEntities(
             query=state["query"], language=state.get("language", Language.EN)
         )
-        qtype = _classify_by_rules(state["query"], entities)
-        return {**state, "query_type": qtype}
+        qtype, has_signal = _classify_by_rules(state["query"], entities)
+        return {**state, "query_type": qtype, "has_signal": has_signal}
 
     def plan_node(state: RouterState) -> RouterState:
         qtype: QueryType = state.get("query_type", QueryType.CLINICAL_DECISION)
@@ -343,6 +360,7 @@ def _build_routing_graph(ner_linker: QueryNERLinker) -> Any:
             state["query"],
             state.get("language", Language.EN),
             entities,
+            has_signal=state.get("has_signal", True),
         )
         return {**state, "retrieval_plan": plan}
 
@@ -411,8 +429,8 @@ class QueryRouter:
 
         # Fallback path (no LangGraph or graph invocation failed)
         entities = self._ner_linker.analyze(query, language=lang)
-        qtype = _classify_by_rules(query, entities)
-        return _plan_from_type(qtype, query, lang, entities)
+        qtype, has_signal = _classify_by_rules(query, entities)
+        return _plan_from_type(qtype, query, lang, entities, has_signal=has_signal)
 
     async def route_async(self, query: str, language: Language | None = None) -> RetrievalPlan:
         """
@@ -437,8 +455,8 @@ class QueryRouter:
 
         cached = await ner_cache_get(query, lang)
         if cached is not None:
-            qtype = _classify_by_rules(query, cached)
-            plan = _plan_from_type(qtype, query, lang, cached)
+            qtype, has_signal = _classify_by_rules(query, cached)
+            plan = _plan_from_type(qtype, query, lang, cached, has_signal=has_signal)
             logger.info(
                 "router_routed_cached",
                 query_type=plan.query_type.value,

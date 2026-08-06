@@ -214,12 +214,14 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     reranker_threshold: float = 0.25  # Minimum score for a passage to be considered relevant
     reranker_fallback_top_n: int = 2  # Kept even below threshold so context is never empty
+    reranker_noise_floor: float = 0.05  # Below this, fallback content is noise — skip generation entirely
 
     # ------------------------------------------------------------------
     # Multilingual retrieval
     # ------------------------------------------------------------------
     multilingual_retrieval_enabled: bool = True
     multilingual_per_lang_quota: int = 12
+    query_translator_model: str = "facebook/nllb-200-distilled-600M"
 
     # ------------------------------------------------------------------
     # Query-time knowledge graph completion

@@ -20,7 +20,7 @@ from medgraphia.logger import get_logger
 
 logger = get_logger(__name__)
 
-_PROJECTION_NODE_LABELS = [t.value for t in EntityType if t is not EntityType.UNKNOWN] + ["Chunk"]
+_PROJECTION_NODE_LABELS = [t.value for t in EntityType] + ["Chunk"]
 
 
 # ---------------------------------------------------------------------------

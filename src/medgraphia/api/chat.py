@@ -320,6 +320,80 @@ async def chat_stream(
                 retrieval_paths = list({item.source.value for item in items})
                 span.end(output=f"{len(items)} items")
 
+            # ── Chitchat short-circuit ──────────────────────────────────────
+            # No medical signal (e.g. a greeting) — skip the GEPA-tuned
+            # generator and stream a static reply instead.
+            if getattr(reranked, "is_chitchat", False):
+                from medgraphia.prompts import get_chitchat_message
+
+                chitchat_text = get_chitchat_message(language)
+                yield _sse({"type": "chunk", "content": chitchat_text})
+
+                session.messages.append(
+                    Message(session_id=session.session_id, role="user", content=body.message)
+                )
+                session.messages.append(
+                    Message(
+                        session_id=session.session_id,
+                        role="assistant",
+                        content=chitchat_text,
+                        citations=[],
+                        model_used="static",
+                        retrieval_paths_used=[],
+                    )
+                )
+                await save_session(session)
+
+                yield _sse({"type": "citations", "citations": []})
+                yield _sse(
+                    {
+                        "type": "done",
+                        "session_id": session.session_id,
+                        "model_used": "static",
+                        "query_type": query_type.value,
+                        "disclaimer": "",
+                    }
+                )
+                trace.update(output=chitchat_text)
+                return
+
+            # ── No-evidence short-circuit ────────────────────────────────────
+            # Reranker fallback content scored below the noise floor — skip the
+            # LLM call, the context is already known to be useless.
+            if getattr(reranked, "no_evidence", False):
+                from medgraphia.prompts import get_disclaimer, get_no_info_message
+
+                no_info_text = get_no_info_message(language)
+                yield _sse({"type": "chunk", "content": no_info_text})
+
+                session.messages.append(
+                    Message(session_id=session.session_id, role="user", content=body.message)
+                )
+                session.messages.append(
+                    Message(
+                        session_id=session.session_id,
+                        role="assistant",
+                        content=no_info_text,
+                        citations=[],
+                        model_used="static",
+                        retrieval_paths_used=retrieval_paths,
+                    )
+                )
+                await save_session(session)
+
+                yield _sse({"type": "citations", "citations": []})
+                yield _sse(
+                    {
+                        "type": "done",
+                        "session_id": session.session_id,
+                        "model_used": "static",
+                        "query_type": query_type.value,
+                        "disclaimer": get_disclaimer(language),
+                    }
+                )
+                trace.update(output=no_info_text)
+                return
+
             # ── Step 2 & 3: Stream LLM tokens via Unified Generation Pipeline ──
             accumulated: list[str] = []
 
@@ -463,6 +537,43 @@ async def _run_full_pipeline(
         complexity_tier = getattr(reranked, "complexity_tier", None)
         retrieval_paths = list({item.source.value for item in items})
         span.end(output=f"{len(items)} items")
+
+    # ── Chitchat short-circuit ──────────────────────────────────────────────
+    # No medical signal in the query (e.g. a greeting) — skip the GEPA-tuned
+    # generator entirely rather than force a grounded answer from no context.
+    if getattr(reranked, "is_chitchat", False):
+        from medgraphia.prompts import get_chitchat_message
+
+        return {
+            "answer": get_chitchat_message(language),
+            "citations": [],
+            "retrieval_paths": [],
+            "model_used": "static",
+            "query_type": query_type,
+            "disclaimer": "",
+            "linked_cuis": [],
+            "unlinked_mentions": [],
+            "top_graph_cui": None,
+        }
+
+    # ── No-evidence short-circuit ────────────────────────────────────────────
+    # Reranker fallback content scored below the noise floor — the retrieved
+    # context is known-useless, so skip the LLM call instead of burning one on
+    # a context the reranker already knows won't produce a grounded answer.
+    if getattr(reranked, "no_evidence", False):
+        from medgraphia.prompts import get_disclaimer, get_no_info_message
+
+        return {
+            "answer": get_no_info_message(language),
+            "citations": [],
+            "retrieval_paths": [],
+            "model_used": "static",
+            "query_type": query_type,
+            "disclaimer": get_disclaimer(language),
+            "linked_cuis": [],
+            "unlinked_mentions": [],
+            "top_graph_cui": None,
+        }
 
     # ── Generation ────────────────────────────────────────────────────────────
     with trace.span("generation", input=query) as span:

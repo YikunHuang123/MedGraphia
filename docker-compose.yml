@@ -12,7 +12,7 @@ services:
   # Neo4j 5.x — knowledge graph database
   # --------------------------------------------------------------------------
   neo4j:
-    image: neo4j:5.20-community
+    image: neo4j:2026.05.0
     container_name: medgraphia_neo4j
     restart: unless-stopped
     ports:
@@ -38,14 +38,14 @@ services:
   # Qdrant — vector store (dense + sparse hybrid)
   # --------------------------------------------------------------------------
   qdrant:
-    image: qdrant/qdrant:v1.9.0
+    image: qdrant/qdrant:v1.18.2
     container_name: medgraphia_qdrant
     restart: unless-stopped
     ports:
       - "6333:6333"
       - "6334:6334"
-    environment:
-      QDRANT__SERVICE__API_KEY: "${QDRANT_API_KEY:-}"
+    # environment:
+    #   QDRANT__SERVICE__API_KEY: "${QDRANT_API_KEY:-}"
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
@@ -155,7 +155,14 @@ services:
         condition: service_healthy
 
 volumes:
+  # These two are pinned to the pre-existing, fully-ingested volumes by exact
+  # name (external: true) so `docker compose up` never silently spins up a
+  # fresh empty volume under a different compose-project-name prefix again.
   neo4j_data:
+    external: true
+    name: neo4j_data
   neo4j_logs:
   qdrant_data:
+    external: true
+    name: qdrant_data
   redis_data:

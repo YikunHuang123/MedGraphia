@@ -52,6 +52,8 @@ class RerankedResult:
     unlinked_mentions: list[str] = field(default_factory=list)
     entity_labels: dict[str, str] = field(default_factory=dict)  # cui -> label, linked entities only
     complexity_tier: ModelTier | None = None
+    is_chitchat: bool = False  # no medical signal detected; caller should skip DSPy generation
+    no_evidence: bool = False  # fallback content scored below the noise floor; caller should skip DSPy generation
 
     def texts(self) -> list[str]:
         return [it.text for it in self.items]
@@ -87,6 +89,7 @@ class Reranker:
         use_fp16: bool = True,
         threshold: float | None = None,
         fallback_top_n: int | None = None,
+        noise_floor: float | None = None,
     ) -> None:
         self._model_name = model_name
         self._use_fp16 = use_fp16
@@ -94,12 +97,17 @@ class Reranker:
         self._fallback_top_n = (
             fallback_top_n if fallback_top_n is not None else settings.reranker_fallback_top_n
         )
+        self._noise_floor = noise_floor if noise_floor is not None else settings.reranker_noise_floor
         self._model: Any = None  # lazy-loaded
         self._backend: str | None = None  # "flag" | "sentence_transformers"
 
     @classmethod
     def from_settings(cls) -> Reranker:
-        return cls(threshold=settings.reranker_threshold, fallback_top_n=settings.reranker_fallback_top_n)
+        return cls(
+            threshold=settings.reranker_threshold,
+            fallback_top_n=settings.reranker_fallback_top_n,
+            noise_floor=settings.reranker_noise_floor,
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -174,6 +182,11 @@ class Reranker:
             item.metadata["reranker_score"] = float(score)
             reranked_items.append(item)
 
+        # Fallback content scoring below the noise floor isn't "weak evidence" the
+        # LLM can hedge on — it's noise. Skip generation entirely rather than
+        # burning an LLM call on a context the reranker already knows is useless.
+        no_evidence = used_fallback and bool(ranked) and ranked[0][0] < self._noise_floor
+
         logger.info(
             "reranker_done",
             input=len(items),
@@ -181,11 +194,13 @@ class Reranker:
             top_score=f"{ranked[0][0]:.4f}" if ranked else "n/a",
             threshold=self._threshold,
             used_fallback=used_fallback,
+            no_evidence=no_evidence,
         )
         return RerankedResult(
             items=reranked_items,
             query=query,
             reranked=True,
+            no_evidence=no_evidence,
         )
 
     # ------------------------------------------------------------------

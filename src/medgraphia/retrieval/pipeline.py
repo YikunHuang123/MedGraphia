@@ -145,6 +145,19 @@ class RetrievalPipeline:
         # ---------------------------------------------------------
         plan: RetrievalPlan = await self.router.route_async(search_query, language=language)
 
+        # No medical keyword matched and no entity was linked (e.g. a greeting) —
+        # there is nothing to retrieve. Skip graph/vector/community/reranking
+        # entirely so downstream generation doesn't hand chitchat to the
+        # GEPA-tuned clinical generator, which expects grounded context.
+        if plan.is_chitchat:
+            logger.info("retrieval_pipeline_skipped_chitchat", query_type=plan.query_type.value)
+            return RerankedResult(
+                query=search_query,
+                query_type=plan.query_type,
+                complexity_tier=complexity_tier,
+                is_chitchat=True,
+            )
+
         # ---------------------------------------------------------
         # Step 2: Concurrent Retrieval
         # ---------------------------------------------------------

@@ -256,6 +256,7 @@ The `/graph/entity` API (Graph Explorer) derives a synthetic `CO_OCCURS_WITH` ed
 | **Graph Algorithms** | Neo4j GDS (Personalized PageRank)                                                                                                                       | Transient in-memory bipartite entity-chunk projection                                                                          |
 | **Community Detection** | Leiden algorithm                                                                                                                              | Graph clustering for global QA                                                                                                                                       |
 | **Reranker** | bge-reranker-v2-m3                                                                                                                            | Cross-encoder, multilingual                                                                                                                                          |
+| **Query Translation** | NLLB-200-distilled-600M (Meta)                                                                                                                | Local inference in place of a cloud LLM call; translation is a mechanical task, so a dedicated model beats a general-purpose LLM — roughly 10x faster                |
 | **LLM Inference** | LiteLLM Gateway                                                                                                                               | Unified API layer. Supports **DeepSeek**, **OpenAI**, **Anthropic**, **Groq**, **Ollama**, and **vLLM**.                                                                       |
 | **Prompt Optimization** | DSPy (**GEPA**)                                                                                                                                          | Reflective prompt evolution; the reflection model and the model being optimized are deliberately on different providers to avoid self-reflection blind spots; pre-compiled reasoning traces enforce clinical rigor                                                  |
 | **Agent Orchestration** | LangGraph (LangChain)                                                                                                                         | Stateful, branching, retriable query agent                                                                                                                           |
@@ -302,7 +303,8 @@ MedGraphia defaults to cloud LLM APIs (DeepSeek/OpenAI/Anthropic, etc.) — the 
 | SapBERT-XLMR | Entity linking | ~1.7 GB |
 | GLiNER-biomed-large | NER coarse pass | ~1.4 GB |
 | biomedical-ner-all et al. (BERT) | NER precision pass | ~0.2 GB |
-| **Total** | | **~6.3 GB** |
+| NLLB-200-distilled-600M | Multilingual query translation | ~1.2 GB |
+| **Total** | | **~7.5 GB** |
 
 If you also enable Llama-Guard (running locally via Ollama), add ~1.5 GB; if you switch the generator to local inference too (Ollama/vLLM), reserve additional VRAM sized to that model. **Minimum recommended: 8GB+ VRAM** (retrieval pipeline only); **12GB+ if running local generation + guardrails as well**.
 
@@ -896,14 +898,13 @@ MedGraphia/
     ├── programs/                   # DSPy Programs: Encapsulated business logic
     │   ├── rewriter.py             # Context-aware query rewrite module
     │   ├── generator.py            # Clinical answer generation module (CoT)
-    │   ├── summarizer.py           # Community summarization module
-    │   └── translator.py           # Medical terminology translation module
+    │   └── summarizer.py           # Community summarization module
     │
     ├── retrieval/                  # Online query pipeline (three-path hybrid)
     │   ├── pipeline.py             # RetrievalPipeline: orchestrates all retrieval steps
     │   ├── router.py               # Query classification → retrieval strategy selection
     │   ├── rewriter.py             # QueryRewriter: condense history into standalone query
-    │   ├── query_translator.py     # QueryTranslator: translate query into ZH/EN/DE
+    │   ├── query_translator.py     # QueryTranslator: translate query into ZH/EN/DE (local NLLB-200)
     │   ├── query_ner.py            # NER on incoming query for entity-based graph lookup
     │   ├── query_time_completion.py # Query-time gap completion and targeted PubMed fetch
     │   ├── graph_retriever.py      # Neo4j GDS Personalized PageRank over bipartite entity-chunk graph

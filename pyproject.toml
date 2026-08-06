@@ -55,6 +55,7 @@ dependencies = [
     "transformers==4.41.2",
     "torch>=2.3.0",
     "gliner>=0.2.0",
+    "sentencepiece>=0.2.0",  # NLLB-200 tokenizer (query_translator.py)
 
     # BM25 (entity linking candidate retrieval)
     "rank-bm25>=0.2.2",

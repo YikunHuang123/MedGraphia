@@ -19,6 +19,13 @@ _QUERY_SOURCE = SourceMeta(
     source_version="",
 )
 
+# The product's own name is not a medical concept, but its "Med..." prefix
+# sits close to real biomedical terms in embedding space — SapBERT confidently
+# (score ~0.8) mislinks it to unrelated MeSH concepts like "Medical Writing".
+# Meta-questions about the assistant itself ("what is MedGraphia?") must not
+# be treated as having medical signal because of this false positive.
+_SELF_REFERENCE_MENTIONS = {"medgraphia"}
+
 
 @dataclass
 class QueryEntities:
@@ -86,6 +93,9 @@ class QueryNERLinker:
 
             # Stage 1: NER
             chunk_with_ner = self._ner_pipeline.extract(chunk)
+            chunk_with_ner.entities = [
+                e for e in chunk_with_ner.entities if e.label.strip().lower() not in _SELF_REFERENCE_MENTIONS
+            ]
             if not chunk_with_ner.entities:
                 logger.debug("query_ner_no_entities", query_len=len(query))
                 return result

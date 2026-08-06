@@ -21,6 +21,15 @@ _NO_INFO_MESSAGES: dict[Language, str] = {
     Language.DE: "Es liegen leider nicht genügend medizinische Informationen in der Datenbank vor, um diese Frage zu beantworten.",
 }
 
+# Static reply for greetings/small talk — no medical signal, so it bypasses
+# retrieval and the GEPA-tuned generator entirely instead of forcing a
+# grounded answer out of an empty context.
+_CHITCHAT_MESSAGES: dict[Language, str] = {
+    Language.EN: "Hello! I'm MedGraphia, a medical knowledge assistant. Ask me about diseases, drugs, treatments, or related research.",
+    Language.ZH: "你好！我是 MedGraphia 医疗知识问答助手，你可以问我关于疾病、药物、治疗方案或相关研究的问题。",
+    Language.DE: "Hallo! Ich bin MedGraphia, ein medizinischer Wissensassistent. Fragen Sie mich zu Krankheiten, Medikamenten, Behandlungen oder verwandter Forschung.",
+}
+
 _CROSSLANG_ZH = "数据库内容可能包含中文、英文或德文，请综合所有语言的相关内容并用中文回答。"
 _CROSSLANG_EN = "Context paragraphs may be in English, Chinese, or German — synthesize all relevant content and respond in English."
 _CROSSLANG_DE = "Die Kontextabsätze können auf Englisch, Chinesisch oder Deutsch verfasst sein — fassen Sie alle relevanten Inhalte zusammen und antworten Sie auf Deutsch."
@@ -97,6 +106,10 @@ def get_no_info_message(language: Language) -> str:
     return _NO_INFO_MESSAGES.get(language, _NO_INFO_MESSAGES[Language.EN])
 
 
+def get_chitchat_message(language: Language) -> str:
+    return _CHITCHAT_MESSAGES.get(language, _CHITCHAT_MESSAGES[Language.EN])
+
+
 def get_system_prompt(query_type: QueryType, language: Language) -> str:
     key = (query_type, language)
     if key not in _SYSTEM_PROMPTS:
@@ -128,5 +141,6 @@ __all__ = [
     "LLAMA_GUARD_SYSTEM_PROMPT",
     "get_disclaimer",
     "get_no_info_message",
+    "get_chitchat_message",
     "get_system_prompt",
 ]
