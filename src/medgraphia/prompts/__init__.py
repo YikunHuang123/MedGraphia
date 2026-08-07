@@ -21,13 +21,10 @@ _NO_INFO_MESSAGES: dict[Language, str] = {
     Language.DE: "Es liegen leider nicht genügend medizinische Informationen in der Datenbank vor, um diese Frage zu beantworten.",
 }
 
-# Static reply for greetings/small talk — no medical signal, so it bypasses
-# retrieval and the GEPA-tuned generator entirely instead of forcing a
-# grounded answer out of an empty context.
-_CHITCHAT_MESSAGES: dict[Language, str] = {
-    Language.EN: "Hello! I'm MedGraphia, a medical knowledge assistant. Ask me about diseases, drugs, treatments, or related research.",
-    Language.ZH: "你好！我是 MedGraphia 医疗知识问答助手，你可以问我关于疾病、药物、治疗方案或相关研究的问题。",
-    Language.DE: "Hallo! Ich bin MedGraphia, ein medizinischer Wissensassistent. Fragen Sie mich zu Krankheiten, Medikamenten, Behandlungen oder verwandter Forschung.",
+_CHITCHAT_SYSTEM_PROMPTS: dict[Language, str] = {
+    Language.EN: "You are MedGraphia, a friendly medical knowledge assistant. The user is engaging in casual conversation or greetings. Respond politely and warmly in English. If the user asks non-medical questions (like coding, math, general trivia), politely decline and remind them you are specialized in medical knowledge. Keep your response concise.",
+    Language.ZH: "你是 MedGraphia 医疗知识问答助手。用户正在进行闲聊或问候。请用中文热情、友善地回复。如果用户问及非医疗领域的问题（如写代码、算数、通用闲聊），请委婉拒绝，并提醒他们你专注于解答疾病、药物和医学研究等问题。回复请尽量简短。",
+    Language.DE: "Sie sind MedGraphia, ein freundlicher medizinischer Wissensassistent. Der Benutzer führt eine lockere Unterhaltung oder begrüßt Sie. Antworten Sie höflich und herzlich auf Deutsch. Wenn der Benutzer nicht-medizinische Fragen stellt, lehnen Sie höflich ab und weisen Sie ihn darauf hin, dass Sie auf medizinisches Wissen spezialisiert sind. Halten Sie Ihre Antwort kurz.",
 }
 
 _CROSSLANG_ZH = "数据库内容可能包含中文、英文或德文，请综合所有语言的相关内容并用中文回答。"
@@ -106,8 +103,8 @@ def get_no_info_message(language: Language) -> str:
     return _NO_INFO_MESSAGES.get(language, _NO_INFO_MESSAGES[Language.EN])
 
 
-def get_chitchat_message(language: Language) -> str:
-    return _CHITCHAT_MESSAGES.get(language, _CHITCHAT_MESSAGES[Language.EN])
+def get_chitchat_system_prompt(language: Language) -> str:
+    return _CHITCHAT_SYSTEM_PROMPTS.get(language, _CHITCHAT_SYSTEM_PROMPTS[Language.EN])
 
 
 def get_system_prompt(query_type: QueryType, language: Language) -> str:
@@ -141,6 +138,6 @@ __all__ = [
     "LLAMA_GUARD_SYSTEM_PROMPT",
     "get_disclaimer",
     "get_no_info_message",
-    "get_chitchat_message",
+    "get_chitchat_system_prompt",
     "get_system_prompt",
 ]

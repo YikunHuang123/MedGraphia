@@ -324,10 +324,39 @@ async def chat_stream(
             # No medical signal (e.g. a greeting) — skip the GEPA-tuned
             # generator and stream a static reply instead.
             if getattr(reranked, "is_chitchat", False):
-                from medgraphia.prompts import get_chitchat_message
+                from medgraphia.prompts import get_chitchat_system_prompt
+                from medgraphia.llm.gateway import LiteLLMGateway, CompletionRequest
+                from medgraphia.config import get_settings
 
-                chitchat_text = get_chitchat_message(language)
-                yield _sse({"type": "chunk", "content": chitchat_text})
+                cfg = get_settings()
+                gateway = LiteLLMGateway.from_settings(
+                    provider_override=cfg.rewriter_llm_provider,
+                    model_override=cfg.rewriter_llm_model,
+                )
+
+                system_prompt = get_chitchat_system_prompt(language)
+                
+                recent_turns = cfg.qa_memory_recent_turns
+                history_str = "No history."
+                if session.messages:
+                    history_str = ""
+                    for m in session.messages[-recent_turns:]:
+                        role = "User" if m.role == "user" else "Assistant"
+                        history_str += f"{role}: {m.content}\n"
+                
+                user_prompt = f"Chat History:\n{history_str}\n\nUser's latest message: {body.message}"
+                
+                req = CompletionRequest(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=0.6,
+                    max_tokens=300,
+                )
+
+                chitchat_text = ""
+                async for chunk in gateway.astream(req):
+                    chitchat_text += chunk
+                    yield _sse({"type": "chunk", "content": chunk})
 
                 session.messages.append(
                     Message(session_id=session.session_id, role="user", content=body.message)
@@ -338,7 +367,7 @@ async def chat_stream(
                         role="assistant",
                         content=chitchat_text,
                         citations=[],
-                        model_used="static",
+                        model_used=gateway.model_id,
                         retrieval_paths_used=[],
                     )
                 )
@@ -349,7 +378,7 @@ async def chat_stream(
                     {
                         "type": "done",
                         "session_id": session.session_id,
-                        "model_used": "static",
+                        "model_used": gateway.model_id,
                         "query_type": query_type.value,
                         "disclaimer": "",
                     }
@@ -562,13 +591,42 @@ async def _run_full_pipeline(
     # No medical signal in the query (e.g. a greeting) — skip the GEPA-tuned
     # generator entirely rather than force a grounded answer from no context.
     if getattr(reranked, "is_chitchat", False):
-        from medgraphia.prompts import get_chitchat_message
+        from medgraphia.prompts import get_chitchat_system_prompt
+        from medgraphia.llm.gateway import LiteLLMGateway, CompletionRequest
+        from medgraphia.config import get_settings
+
+        cfg = get_settings()
+        gateway = LiteLLMGateway.from_settings(
+            provider_override=cfg.rewriter_llm_provider,
+            model_override=cfg.rewriter_llm_model,
+        )
+
+        system_prompt = get_chitchat_system_prompt(language)
+        
+        recent_turns = cfg.qa_memory_recent_turns
+        history_str = "No history."
+        if history:
+            history_str = ""
+            for m in history[-recent_turns:]:
+                role = "User" if m.role == "user" else "Assistant"
+                history_str += f"{role}: {m.content}\n"
+        
+        user_prompt = f"Chat History:\n{history_str}\n\nUser's latest message: {query}"
+        
+        req = CompletionRequest(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.6,
+            max_tokens=300,
+        )
+        
+        resp = await gateway.acomplete(req)
 
         return {
-            "answer": get_chitchat_message(language),
+            "answer": resp.text,
             "citations": [],
             "retrieval_paths": [],
-            "model_used": "static",
+            "model_used": gateway.model_id,
             "query_type": query_type,
             "disclaimer": "",
             "linked_cuis": [],

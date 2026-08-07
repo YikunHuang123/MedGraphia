@@ -99,30 +99,19 @@ def _build_litellm_model_id(provider: LLMProvider, model_name: str) -> str:
     if not model_name:
         return ""
 
-    # If the model name already contains a slash, assume it's already prefixed
-    if "/" in model_name:
+    prefix = provider.value
+    if provider == LLMProvider.VLLM:
+        prefix = "hosted_vllm"
+    elif provider == LLMProvider.OPENAI:
+        # OpenAI doesn't strictly need a prefix in litellm, but if we want to be safe:
+        # Actually litellm supports 'openai/...' or just '...'.
+        # We'll just return model_name if it's OPENAI and doesn't start with a known litellm provider.
         return model_name
 
-    match provider:
-        case LLMProvider.OPENAI:
-            return model_name  # "gpt-4o", "gpt-4o-mini", …
-        case LLMProvider.ANTHROPIC:
-            return f"anthropic/{model_name}"  # "anthropic/claude-3-5-sonnet-20241022"
-        case LLMProvider.DEEPSEEK:
-            return f"deepseek/{model_name}"  # "deepseek/deepseek-chat"
-        case LLMProvider.GEMINI:
-            return f"gemini/{model_name}"  # "gemini/gemini-1.5-pro"
-        case LLMProvider.GROQ:
-            return f"groq/{model_name}"  # "groq/llama-3.3-70b-versatile"
-        case LLMProvider.OLLAMA:
-            return f"ollama/{model_name}"  # "ollama/qwen2.5:7b"
-        case LLMProvider.VLLM:
-            # litellm's dedicated prefix for self-hosted OpenAI-compatible vLLM
-            # servers — unlike a plain "openai/" prefix, it skips params vLLM's
-            # server doesn't accept (e.g. "user").
-            return f"hosted_vllm/{model_name}"
-        case _:
-            return model_name
+    if model_name.startswith(f"{prefix}/"):
+        return model_name
+        
+    return f"{prefix}/{model_name}"
 
 
 def _build_extra_kwargs(provider: LLMProvider, cfg: Any, model_name: str = "") -> dict[str, Any]:
