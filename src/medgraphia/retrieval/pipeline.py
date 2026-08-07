@@ -345,7 +345,7 @@ class RetrievalPipeline:
         # Use top(25) to ensure the cross-encoder has enough candidates when top_k=10.
         rerank_candidates = fusion_result.top(25)
 
-        final_result = self.reranker.rerank(
+        final_result = await self.reranker.rerank(
             query=search_query,
             fusion_result=rerank_candidates,
             top_k=top_k,
@@ -375,7 +375,7 @@ class RetrievalPipeline:
                 )
                 if new_chunks:
                     retry_items = [chunk_to_fused_item(c) for c in new_chunks]
-                    final_result = self.reranker.rerank(
+                    final_result = await self.reranker.rerank(
                         query=search_query,
                         fusion_result=FusionResult(items=retry_items, query=search_query),
                         top_k=top_k,

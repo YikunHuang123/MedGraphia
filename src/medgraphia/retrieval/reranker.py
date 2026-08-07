@@ -105,6 +105,7 @@ class Reranker:
     @classmethod
     def from_settings(cls) -> Reranker:
         return cls(
+            model_name=settings.reranker_model,
             threshold=settings.reranker_threshold,
             fallback_top_n=settings.reranker_fallback_top_n,
             noise_floor=settings.reranker_noise_floor,
@@ -114,7 +115,7 @@ class Reranker:
     # Public API
     # ------------------------------------------------------------------
 
-    def rerank(
+    async def rerank(
         self,
         query: str,
         fusion_result: FusionResult,
@@ -146,13 +147,84 @@ class Reranker:
                 reranked=False,
             )
 
-        # Build (query, text) pairs
-        pairs = [(query, it.text) for it in items]
+        # Build texts list
+        documents = [it.text for it in items]
 
         try:
-            scores = self._score_pairs(pairs)
+            from medgraphia.config import get_settings
+            import httpx
+            cfg = get_settings()
+            
+            # 1. Base URL override and fallback
+            api_url = cfg.reranker_api_url
+            if not api_url:
+                if cfg.reranker_provider == "siliconflow":
+                    api_url = "https://api.siliconflow.com/v1/rerank"
+                elif cfg.reranker_provider == "jina":
+                    api_url = "https://api.jina.ai/v1/rerank"
+                elif cfg.reranker_provider == "cohere":
+                    api_url = "https://api.cohere.v1/rerank"
+                elif cfg.reranker_provider in ["fireworks", "fireworks_ai"]:
+                    api_url = "https://api.fireworks.ai/inference/v1/rerank"
+                else:
+                    raise ValueError(f"Unknown reranker_provider '{cfg.reranker_provider}'. Please set reranker_api_url explicitly.")
+
+            # 2. API Key override and fallback
+            api_key = cfg.reranker_api_key.get_secret_value()
+            if not api_key:
+                # Dynamically fetch the global key for this provider
+                p_name = cfg.reranker_provider.lower()
+                if p_name == "fireworks":
+                    p_name = "fireworks_ai"
+                # For fireworks_ai, the config attribute is fireworks_api_key
+                if p_name == "fireworks_ai":
+                    global_key_attr = "fireworks_api_key"
+                else:
+                    global_key_attr = f"{p_name}_api_key"
+                secret_obj = getattr(cfg, global_key_attr, None)
+                if secret_obj and hasattr(secret_obj, "get_secret_value"):
+                    api_key = secret_obj.get_secret_value()
+            
+            if not api_key:
+                raise ValueError(
+                    f"No API key configured for reranker provider '{cfg.reranker_provider}'. "
+                    "Set either reranker_api_key or the global provider key in config."
+                )
+
+            payload = {
+                "model": self._model_name,
+                "query": query,
+                "return_documents": False,
+                "top_n": len(documents)
+            }
+            if cfg.reranker_provider in ["siliconflow", "jina", "cohere", "fireworks", "fireworks_ai"]:
+                payload["documents"] = documents
+            else:
+                payload["texts"] = documents
+
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    api_url,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json=payload,
+                    timeout=10.0
+                )
+                response.raise_for_status()
+                data = response.json()
+            
+            # Reconstruct scores array aligned with original documents order
+            # The API returns `results` which might be sorted. Each has an `index`.
+            scores = [0.0] * len(documents)
+            for res in data.get("results", []):
+                idx = res.get("index")
+                if idx is not None and 0 <= idx < len(scores):
+                    scores[idx] = float(res.get("relevance_score", 0.0))
+            
         except Exception as exc:
-            logger.warning("reranker_score_failed", error=str(exc))
+            logger.warning("reranker_score_failed", error=repr(exc))
             return RerankedResult(
                 items=items[:top_k],
                 query=query,
@@ -207,93 +279,4 @@ class Reranker:
     # ------------------------------------------------------------------
 
     def _load_model(self) -> None:
-        """Try FlagEmbedding first, fall back to sentence-transformers."""
-        if self._model is not None:
-            return
-
-        # ── Determine best available device ──────────────────────────────────
-        import torch
-
-        device = "cpu"
-        if torch.backends.mps.is_available():
-            device = "mps"
-        elif torch.cuda.is_available():
-            device = "cuda"
-
-        logger.info("reranker_device_selected", device=device)
-
-        # FlagEmbedding (preferred backend, listed as a required dependency).
-        # Only an ImportError justifies falling back to sentence-transformers — that
-        # means the package genuinely isn't installed. Any other exception (bad args,
-        # corrupt download, incompatible version) is a real bug and must fail loudly
-        # instead of silently downgrading to a different backend with a different
-        # score distribution, which would corrupt reranker_threshold comparisons.
-        try:
-            from FlagEmbedding import FlagReranker  # type: ignore[import]
-        except ImportError:
-            FlagReranker = None  # noqa: N806
-
-        if FlagReranker is not None:
-            logger.info(
-                "reranker_loading", model=self._model_name, backend="FlagEmbedding", device=device
-            )
-            self._model = FlagReranker(self._model_name, use_fp16=self._use_fp16, device=device)
-            self._backend = "flag"
-            logger.info("reranker_loaded", backend="FlagEmbedding")
-            return
-
-        # Attempt 2: sentence-transformers CrossEncoder (only reached if FlagEmbedding
-        # is not installed at all).
-        try:
-            from sentence_transformers import CrossEncoder  # type: ignore[import]
-
-            logger.info(
-                "reranker_loading",
-                model=self._model_name,
-                backend="sentence-transformers",
-                device=device,
-            )
-            self._model = CrossEncoder(
-                self._model_name,
-                max_length=512,
-                device=device,
-            )
-            self._backend = "sentence_transformers"
-            logger.info("reranker_loaded", backend="sentence-transformers")
-            return
-        except ImportError:
-            pass
-        except Exception as exc:
-            logger.warning("reranker_st_load_failed", error=str(exc))
-
-        raise RuntimeError(
-            "No reranker backend available. Install one of:\n"
-            "  pip install FlagEmbedding\n"
-            "  pip install sentence-transformers"
-        )
-
-    def _score_pairs(self, pairs: list[tuple[str, str]]) -> list[float]:
-        """
-        Compute relevance scores for (query, passage) pairs.
-
-        FlagReranker.compute_score() and CrossEncoder.predict() have
-        different signatures and return different types; this method normalises
-        both to a list[float].
-        """
-        if self._backend == "flag":
-            # FlagReranker.compute_score accepts list of [query, passage] pairs
-            flag_pairs = [[q, p] for q, p in pairs]
-            raw = self._model.compute_score(flag_pairs, normalize=True)
-            # May return a numpy array or a list of floats
-            if hasattr(raw, "tolist"):
-                return raw.tolist()
-            return [float(s) for s in raw]
-
-        elif self._backend == "sentence_transformers":
-            # CrossEncoder.predict returns numpy array of shape (N,)
-            raw = self._model.predict(pairs, show_progress_bar=False)
-            if hasattr(raw, "tolist"):
-                return raw.tolist()
-            return [float(s) for s in raw]
-
-        return [0.0] * len(pairs)
+        pass

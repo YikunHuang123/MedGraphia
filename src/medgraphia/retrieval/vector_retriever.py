@@ -17,6 +17,8 @@ from medgraphia.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Global cache to prevent reloading the BGE-M3 model on every request
+_MODEL_CACHE: dict[str, Any] = {}
 
 # ---------------------------------------------------------------------------
 # Output types
@@ -137,7 +139,9 @@ class VectorRetriever:
         result = VectorRetrievalResult(query=query)
 
         try:
-            dense, sparse = self._encode_query(query)
+            # Run blocking PyTorch model loading and inference in a background thread
+            # so we don't freeze the async event loop (which causes Neo4j to time out).
+            dense, sparse = await asyncio.to_thread(self._encode_query, query)
             store = self._get_store()
             collection = self._resolve_collection()
 
@@ -283,6 +287,12 @@ class VectorRetriever:
     def _load_model(self) -> None:
         if self._model is not None:
             return
+        
+        global _MODEL_CACHE
+        if self._model_name in _MODEL_CACHE:
+            self._model = _MODEL_CACHE[self._model_name]
+            return
+
         try:
             from FlagEmbedding import BGEM3FlagModel  # type: ignore[import]
         except ImportError as exc:
@@ -291,6 +301,7 @@ class VectorRetriever:
             ) from exc
         logger.info("vector_retriever_loading_model", model=self._model_name)
         self._model = BGEM3FlagModel(self._model_name, use_fp16=True)
+        _MODEL_CACHE[self._model_name] = self._model
         logger.info("vector_retriever_model_loaded")
 
     def _get_store(self) -> Any:

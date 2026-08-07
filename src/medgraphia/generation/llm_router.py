@@ -277,6 +277,8 @@ class LLMRouter:
 
 def _parse_provider(value: str) -> LLMProvider:
     """Parse provider string, defaulting to OLLAMA for unknown values."""
+    if value == "fireworks":
+        value = "fireworks_ai"
     try:
         return LLMProvider(value)
     except ValueError:
@@ -307,6 +309,14 @@ def _api_key_available(provider: LLMProvider) -> bool:
             return bool(get_val("groq_api_key"))
         case LLMProvider.GEMINI:
             return bool(get_val("gemini_api_key"))
+        case LLMProvider.FIREWORKS_AI:
+            return bool(get_val("fireworks_api_key"))
+        case LLMProvider.SILICONFLOW:
+            return bool(get_val("siliconflow_api_key"))
+        case LLMProvider.CEREBRAS:
+            return bool(get_val("cerebras_api_key"))
+        case LLMProvider.TOGETHER_AI:
+            return bool(get_val("together_api_key"))
         case LLMProvider.OLLAMA:
             return True  # Ollama is always "available" (runs locally, no key needed)
     return False

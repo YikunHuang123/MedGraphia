@@ -61,12 +61,15 @@ def get_lm(
     if cache_key in _LM_CACHE:
         return _LM_CACHE[cache_key]
 
-    # Construct model_id ensuring provider prefix is present for LiteLLM
-    # e.g., "deepseek/deepseek-chat" or "openai/gpt-4o"
-    # vLLM is the odd one out: litellm's dedicated prefix for a self-hosted
-    # OpenAI-compatible vLLM server is "hosted_vllm/", not "vllm/".
-    litellm_prefix = "hosted_vllm" if provider == "vllm" else provider
-    if model.startswith(f"{litellm_prefix}/"):
+    # Providers that expose an OpenAI-compatible API: route through "openai/" prefix
+    # so LiteLLM respects the api_key kwarg instead of calling their native SDK
+    # (which only reads from environment variables and ignores kwarg).
+    _OPENAI_COMPAT_PROVIDERS = {"cerebras", "siliconflow", "vllm"}
+    if provider in _OPENAI_COMPAT_PROVIDERS:
+        litellm_prefix = "hosted_vllm" if provider == "vllm" else "openai"
+    else:
+        litellm_prefix = provider
+    if model.startswith(f"{litellm_prefix}/") or model.startswith("openai/"):
         model_id = model
     else:
         model_id = f"{litellm_prefix}/{model}"
@@ -89,29 +92,49 @@ def get_lm(
         api_key = cfg.translator_llm_api_key.get_secret_value()
         api_base = cfg.translator_llm_base_url or None
     else:
-        # Fallback to standard provider credentials
-        if provider == "openai":
-            api_key = cfg.openai_api_key.get_secret_value()
-            api_base = cfg.openai_base_url or None
-        elif provider == "groq":
-            api_key = cfg.groq_api_key.get_secret_value()
-        elif provider == "deepseek":
-            api_key = cfg.deepseek_api_key.get_secret_value()
-        elif provider == "anthropic":
-            api_key = cfg.anthropic_api_key.get_secret_value()
-        elif provider == "gemini":
-            api_key = cfg.gemini_api_key.get_secret_value()
-        elif provider == "ollama":
-            api_base = cfg.llm_base_url or "http://localhost:11434"
-        elif provider == "vllm":
-            api_key = "vllm"  # ignored unless the vLLM server was started with --api-key
-            # Each vLLM-backed tier is its own engine — route by model_name, not tier.
+        # Dynamically resolve credentials by convention: `{provider}_api_key` and `{provider}_base_url`
+        # Map fireworks_ai provider to fireworks_api_key config attribute
+        attr_prefix = "fireworks" if provider == "fireworks_ai" else provider
+        key_attr = f"{attr_prefix}_api_key"
+        base_attr = f"{attr_prefix}_base_url"
+
+        secret_obj = getattr(cfg, key_attr, None)
+        if secret_obj and hasattr(secret_obj, "get_secret_value"):
+            api_key = secret_obj.get_secret_value() or None
+
+        if not api_base:
+            api_base = getattr(cfg, base_attr, None) or None
+
+        # Provider-specific base URL fallbacks for providers without a config field
+        if not api_base:
+            _BASE_URLS = {
+                "cerebras": "https://api.cerebras.ai/v1",
+                "siliconflow": "https://api.siliconflow.com/v1",
+                "ollama": cfg.llm_base_url or "http://localhost:11434",
+                "vllm": cfg.vllm_base_url or "http://localhost:8000/v1",
+            }
+            api_base = _BASE_URLS.get(provider)
+
+        # vLLM needs a dummy key and per-model routing
+        if provider == "vllm":
+            api_key = api_key or "vllm"
             if model == cfg.llm_small_model:
                 api_base = cfg.vllm_small_base_url
             elif model == cfg.llm_medium_model:
                 api_base = cfg.vllm_medium_base_url
-            else:
-                api_base = cfg.vllm_base_url or "http://localhost:8000/v1"
+
+    # Providers that expose an OpenAI-compatible API but whose native SDK ignores
+    # the api_key kwarg and only reads env vars — inject the key into the env before
+    # creating the LM so LiteLLM's native provider code can find it.
+    _PROVIDER_ENV_VARS: dict[str, str] = {
+        "cerebras": "CEREBRAS_API_KEY",
+        "siliconflow": "OPENAI_API_KEY",  # used when routed through openai/ prefix
+        "groq": "GROQ_API_KEY",
+        "fireworks_ai": "FIREWORKS_API_KEY",
+    }
+    if api_key and provider in _PROVIDER_ENV_VARS:
+        import os
+        os.environ.setdefault(_PROVIDER_ENV_VARS[provider], api_key)
 
     try:
         kwargs = {}

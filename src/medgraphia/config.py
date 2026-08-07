@@ -75,7 +75,12 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr = SecretStr("")
     gemini_api_key: SecretStr = SecretStr("")
     groq_api_key: SecretStr = SecretStr("")
-
+    openrouter_api_key: SecretStr = SecretStr("")
+    fireworks_api_key: SecretStr = SecretStr("")
+    together_api_key: SecretStr = SecretStr("")
+    siliconflow_api_key: SecretStr = SecretStr("")
+    cerebras_api_key: SecretStr = SecretStr("")
+    fireworks_api_key: SecretStr = SecretStr("")
 
     # Global default LLM.
     # Directly used (no per-task override available):
@@ -85,7 +90,7 @@ class Settings(BaseSettings):
     #   - llm/gateway.py (from_settings)   : provider_override or default
     #   - llm/dspy_setup.py                : provider_override or default
     #   - generation/llm_router.py         : each tier's provider/model attr or default
-    default_llm_provider: Literal["deepseek", "openai", "anthropic", "gemini", "groq", "ollama", "vllm", "local"] = "ollama"
+    default_llm_provider: Literal["deepseek", "openai", "anthropic", "gemini", "groq", "ollama", "vllm", "local", "cerebras", "siliconflow", "fireworks_ai"] = "ollama"
     default_llm_model: str = "qwen3:14b"
     llm_base_url: str = "http://localhost:11434"
     llm_max_tokens: int = 2048
@@ -114,18 +119,18 @@ class Settings(BaseSettings):
     # Task-specific LLM overrides
     # rewriter_llm_provider: str = "ollama"
     # rewriter_llm_model: str = "qwen3.5:9b"
-    rewriter_llm_provider: str = "groq"
-    rewriter_llm_model: str = "openai/gpt-oss-20b"
+    rewriter_llm_provider: str = "cerebras"
+    rewriter_llm_model: str = "gpt-oss-120b"
     rewriter_llm_api_key: SecretStr = SecretStr("")
     rewriter_llm_base_url: str = ""
 
-    summarizer_llm_provider: str = "groq"
-    summarizer_llm_model: str = "openai/gpt-oss-20b"
+    summarizer_llm_provider: str = "cerebras"
+    summarizer_llm_model: str = "gpt-oss-120b"
     summarizer_llm_api_key: SecretStr = SecretStr("")
     summarizer_llm_base_url: str = ""
 
-    translator_llm_provider: str = "groq"
-    translator_llm_model: str = "openai/gpt-oss-20b"
+    translator_llm_provider: str = "cerebras"
+    translator_llm_model: str = "gpt-oss-120b"
     translator_llm_api_key: SecretStr = SecretStr("")
     translator_llm_base_url: str = ""
 
@@ -161,19 +166,21 @@ class Settings(BaseSettings):
     #   llm_small_model: str = "Qwen/Qwen2.5-0.5B-Instruct"    # vllm_small_base_url, default port 8010
     #   llm_medium_provider: str = "vllm"
     #   llm_medium_model: str = "Qwen/Qwen2.5-3B-Instruct"     # vllm_medium_base_url, default port 8011
-    llm_small_provider: str = "deepseek"
-    llm_small_model: str = "deepseek-v4-flash"
-    llm_medium_provider: str = "deepseek"
-    llm_medium_model: str = "deepseek-v4-flash"
-    llm_large_provider: str = "deepseek"
-    llm_large_model: str = "deepseek-v4-pro"
+    llm_small_provider: str = "fireworks"
+    llm_small_model: str = "accounts/fireworks/models/gpt-oss-20b"
+    llm_medium_provider: str = "fireworks"
+    llm_medium_model: str = "accounts/fireworks/models/deepseek-v4-flash"
+    llm_large_provider: str = "fireworks"
+    llm_large_model: str = "accounts/fireworks/models/qwen3p7-plus"
 
     # ------------------------------------------------------------------
     # Safety guardrails
     # ------------------------------------------------------------------
     guardrails_enabled: bool = True
-    llama_guard_provider: str = "ollama"
-    llama_guard_model: str = "llama-guard3:1b"
+    # llama_guard_provider: str = "ollama"
+    # llama_guard_model: str = "llama-guard3:1b"
+    llama_guard_provider: str = "openrouter"
+    llama_guard_model: str = "meta-llama/llama-guard-4-12b"
     ragas_faithfulness_threshold: float = 0.75
 
     # ------------------------------------------------------------------
@@ -217,6 +224,13 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Reranker
     # ------------------------------------------------------------------
+    # reranker_provider: str = "siliconflow"
+    # reranker_model: str = "Qwen/Qwen3-Reranker-0.6B"
+    reranker_provider: str = "fireworks"
+    reranker_model: str = "accounts/fireworks/models/qwen3-reranker-8b"
+    reranker_api_url: str = ""
+    reranker_api_key: SecretStr = SecretStr("")
+
     reranker_threshold: float = 0.25  # Minimum score for a passage to be considered relevant
     reranker_fallback_top_n: int = 2  # Kept even below threshold so context is never empty
     reranker_noise_floor: float = 0.05  # Below this, fallback content is noise — skip generation entirely

@@ -38,13 +38,17 @@ class LlamaGuard:
         self.pure_model_name = self.settings.llama_guard_model
 
         # 2. Ensure model name is correctly prefixed for LiteLLM
-        if "/" in self.pure_model_name:
+        # Some platforms (like OpenRouter) have slashes in their model IDs (e.g., meta-llama/...).
+        # We should only split if the user didn't specify a provider in config, or if they explicitly
+        # prefixed the provider themselves. A safer way is to just use the configured provider.
+        actual_provider = provider_name
+        
+        # If the model string already starts with the provider, e.g., "openrouter/meta-llama/...", avoid duplication
+        if self.pure_model_name.startswith(f"{provider_name}/"):
             self.model_name = self.pure_model_name
-            actual_provider = self.pure_model_name.split("/")[0]
-            self.model_tag = self.pure_model_name.split("/")[1]
+            self.model_tag = self.pure_model_name[len(f"{provider_name}/"):]
         else:
             self.model_name = f"{provider_name}/{self.pure_model_name}"
-            actual_provider = provider_name
             self.model_tag = self.pure_model_name
 
         # 3. Initialize the gateway

@@ -43,6 +43,11 @@ class LLMProvider(str, Enum):
     GROQ = "groq"
     OLLAMA = "ollama"
     VLLM = "vllm"
+    OPENROUTER = "openrouter"
+    FIREWORKS_AI = "fireworks_ai"
+    TOGETHER_AI = "together_ai"
+    CEREBRAS = "cerebras"
+    SILICONFLOW = "siliconflow"
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +161,39 @@ def _build_extra_kwargs(provider: LLMProvider, cfg: Any, model_name: str = "") -
             if key:
                 kwargs["api_key"] = key
 
+        case LLMProvider.OPENROUTER:
+            key = get_secret("openrouter_api_key")
+            if key:
+                kwargs["api_key"] = key
+
+        case LLMProvider.FIREWORKS_AI:
+            key = get_secret("fireworks_api_key")
+            if key:
+                kwargs["api_key"] = key
+                import os
+                os.environ.setdefault("FIREWORKS_API_KEY", key)
+
+        case LLMProvider.TOGETHER_AI:
+            key = get_secret("together_api_key")
+            if key:
+                kwargs["api_key"] = key
+
+        case LLMProvider.CEREBRAS:
+            key = get_secret("cerebras_api_key")
+            if key:
+                kwargs["api_key"] = key
+                import os
+                os.environ.setdefault("CEREBRAS_API_KEY", key)
+            kwargs["api_base"] = "https://api.cerebras.ai/v1"
+
+        case LLMProvider.SILICONFLOW:
+            key = get_secret("siliconflow_api_key")
+            if key:
+                kwargs["api_key"] = key
+                import os
+                os.environ.setdefault("OPENAI_API_KEY", key) # LiteLLM uses openai base for siliconflow
+            kwargs["api_base"] = "https://api.siliconflow.com/v1"
+
         case LLMProvider.OLLAMA:
             base = getattr(cfg, "llm_base_url", "") or "http://localhost:11434"
             kwargs["api_base"] = base
@@ -195,6 +233,8 @@ _JSON_MODE_PROVIDERS = {
     LLMProvider.DEEPSEEK,
     LLMProvider.GEMINI,
     LLMProvider.GROQ,
+    LLMProvider.CEREBRAS,
+    LLMProvider.SILICONFLOW,
     LLMProvider.VLLM,  # vLLM's OpenAI-compatible server implements response_format=json_object
 }
 
