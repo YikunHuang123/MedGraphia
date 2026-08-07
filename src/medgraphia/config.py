@@ -114,18 +114,18 @@ class Settings(BaseSettings):
     # Task-specific LLM overrides
     # rewriter_llm_provider: str = "ollama"
     # rewriter_llm_model: str = "qwen3.5:9b"
-    rewriter_llm_provider: str = "deepseek"
-    rewriter_llm_model: str = "deepseek-v4-flash"
+    rewriter_llm_provider: str = "groq"
+    rewriter_llm_model: str = "openai/gpt-oss-20b"
     rewriter_llm_api_key: SecretStr = SecretStr("")
     rewriter_llm_base_url: str = ""
 
     summarizer_llm_provider: str = "groq"
-    summarizer_llm_model: str = "llama-3.1-8b-instant"
+    summarizer_llm_model: str = "openai/gpt-oss-20b"
     summarizer_llm_api_key: SecretStr = SecretStr("")
     summarizer_llm_base_url: str = ""
 
     translator_llm_provider: str = "groq"
-    translator_llm_model: str = "llama-3.1-8b-instant"
+    translator_llm_model: str = "openai/gpt-oss-20b"
     translator_llm_api_key: SecretStr = SecretStr("")
     translator_llm_base_url: str = ""
 
