@@ -19,6 +19,7 @@ from medgraphia.logger import get_logger
 from medgraphia.retrieval.community_retriever import CommunityRetriever
 from medgraphia.retrieval.fusion import RRFFusion
 from medgraphia.retrieval.graph_retriever import GraphRetriever
+from medgraphia.retrieval.memory_retriever import MemoryRetriever
 from medgraphia.retrieval.query_translator import QueryTranslator, TranslatedQuery
 from medgraphia.retrieval.reranker import RerankedResult, Reranker
 from medgraphia.retrieval.rewriter import QueryRewriter
@@ -50,6 +51,7 @@ class RetrievalPipeline:
         fusion: RRFFusion | None = None,
         reranker: Reranker | None = None,
         query_translator: QueryTranslator | None = None,
+        memory_retriever: MemoryRetriever | None = None,
     ) -> None:
         self.router = router or QueryRouter.from_settings()
         self.rewriter = rewriter or QueryRewriter.from_settings()
@@ -59,6 +61,7 @@ class RetrievalPipeline:
         self.fusion = fusion or RRFFusion.from_settings()
         self.reranker = reranker or Reranker.from_settings()
         self.query_translator = query_translator or QueryTranslator.from_settings()
+        self.memory_retriever = memory_retriever or MemoryRetriever.from_settings()
 
     @classmethod
     def from_settings(cls) -> RetrievalPipeline:
@@ -221,6 +224,18 @@ class RetrievalPipeline:
         else:
             task_names.append("skip_community")
 
+        # Setup per-user QA memory task — independent of the plan's use_graph/
+        # use_vector flags since it reads a private subgraph, not the corpus
+        if user_id and plan.linked_cuis:
+            tasks.append(
+                asyncio.create_task(
+                    self.memory_retriever.retrieve(user_id=user_id, cuis=plan.linked_cuis)
+                )
+            )
+            task_names.append("memory")
+        else:
+            task_names.append("skip_memory")
+
         # Execute all scheduled retrievers in parallel
         # We filter out "skip_*" markers when awaiting
         active_tasks = [t for t in tasks]
@@ -230,6 +245,7 @@ class RetrievalPipeline:
         graph_result = None
         vector_result = None
         community_result = None
+        memory_result = None
 
         result_idx = 0
         for name in task_names:
@@ -249,6 +265,8 @@ class RetrievalPipeline:
                 vector_result = res
             elif name == "community":
                 community_result = res
+            elif name == "memory":
+                memory_result = res
 
         # ---------------------------------------------------------
         # Step 3: Reciprocal Rank Fusion (RRF)
@@ -307,6 +325,53 @@ class RetrievalPipeline:
             top_k=top_k,
         )
 
+        # ---------------------------------------------------------
+        # Step 4.5: Single-entity live gap fill — only when local retrieval
+        # found genuinely nothing (no_evidence), not merely "results are
+        # mediocre". This is deliberately gated on the reranker's own
+        # noise-floor verdict rather than "any entity lacks coverage", so it
+        # fires rarely instead of on every thin single-entity query, and
+        # doesn't mask retrieval bugs (e.g. a real answer existing under a
+        # different CUI) by quietly fetching duplicate content instead.
+        # ---------------------------------------------------------
+        from medgraphia.config import get_settings as _get_settings
+
+        if final_result.no_evidence and _get_settings().single_entity_gap_completion_enabled:
+            # Prefer the highest-confidence *linked* entity (already vetted by
+            # SapBERT against real CUIs) over entities[0] — GLiNER and BERT-NER
+            # both run and can each emit a span for the same mention; a raw
+            # NER fragment (e.g. "romegaly" from "acromegaly") can end up
+            # first in the list ahead of the correct, linked extraction.
+            entity_label = None
+            linked_entities = [
+                e for e in plan.query_entities.entities if not e.cui.startswith("MENTION:")
+            ]
+            if linked_entities:
+                entity_label = max(linked_entities, key=lambda e: e.confidence).label
+            elif plan.query_entities.entities:
+                entity_label = plan.query_entities.entities[0].label
+            if entity_label:
+                from medgraphia.retrieval.fusion import FusionResult, chunk_to_fused_item
+                from medgraphia.retrieval.query_time_completion import complete_single_entity_gap
+
+                cfg = _get_settings()
+                _, new_chunks = await complete_single_entity_gap(
+                    entity_label, pubmed_limit=cfg.gap_completion_pubmed_limit
+                )
+                if new_chunks:
+                    retry_items = [chunk_to_fused_item(c) for c in new_chunks]
+                    final_result = self.reranker.rerank(
+                        query=search_query,
+                        fusion_result=FusionResult(items=retry_items, query=search_query),
+                        top_k=top_k,
+                    )
+                    logger.info(
+                        "single_entity_gap_completion_applied",
+                        entity=entity_label,
+                        new_chunks=len(new_chunks),
+                        no_evidence_after_retry=final_result.no_evidence,
+                    )
+
         # Inject additional metadata into the result for downstream use
         final_result.query_type = plan.query_type
         final_result.linked_cuis = plan.linked_cuis
@@ -315,10 +380,12 @@ class RetrievalPipeline:
             e.cui: e.label for e in plan.query_entities.entities if not e.cui.startswith("MENTION:")
         }
         final_result.complexity_tier = complexity_tier
+        final_result.qa_memories = memory_result.memories if memory_result else []
 
         logger.info(
             "retrieval_pipeline_completed",
             query_type=plan.query_type.value,
             final_items=len(final_result.items),
+            qa_memories=len(final_result.qa_memories),
         )
         return final_result

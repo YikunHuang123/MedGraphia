@@ -19,12 +19,25 @@ _QUERY_SOURCE = SourceMeta(
     source_version="",
 )
 
-# The product's own name is not a medical concept, but its "Med..." prefix
-# sits close to real biomedical terms in embedding space — SapBERT confidently
-# (score ~0.8) mislinks it to unrelated MeSH concepts like "Medical Writing".
-# Meta-questions about the assistant itself ("what is MedGraphia?") must not
-# be treated as having medical signal because of this false positive.
-_SELF_REFERENCE_MENTIONS = {"medgraphia"}
+# Known GLiNER zero-shot false positives on short/ambiguous non-medical
+# tokens (e.g. "hi" and "bye" get tagged as EntityType.PROCEDURE at ~0.5-0.7
+# confidence, well above ner_gliner_threshold) plus the product's own name
+# ("MedGraphia" — its "Med..." prefix sits close to real biomedical terms in
+# embedding space, SapBERT confidently mislinks it to unrelated MeSH concepts
+# like "Medical Writing"). Not every possible false positive is enumerable —
+# this list only covers cases actually observed in production logs — but each
+# one otherwise defeats the chitchat/no-signal routing gate in router.py.
+_KNOWN_NER_FALSE_POSITIVES = {
+    "medgraphia",
+    "hi",
+    "bye",
+    "goodbye",
+    "你好",
+    "拜拜",
+    "再见",
+    "hallo",
+    "tschüss",
+}
 
 
 @dataclass
@@ -94,7 +107,7 @@ class QueryNERLinker:
             # Stage 1: NER
             chunk_with_ner = self._ner_pipeline.extract(chunk)
             chunk_with_ner.entities = [
-                e for e in chunk_with_ner.entities if e.label.strip().lower() not in _SELF_REFERENCE_MENTIONS
+                e for e in chunk_with_ner.entities if e.label.strip().lower() not in _KNOWN_NER_FALSE_POSITIVES
             ]
             if not chunk_with_ner.entities:
                 logger.debug("query_ner_no_entities", query_len=len(query))

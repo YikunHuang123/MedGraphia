@@ -54,6 +54,7 @@ class RerankedResult:
     complexity_tier: ModelTier | None = None
     is_chitchat: bool = False  # no medical signal detected; caller should skip DSPy generation
     no_evidence: bool = False  # fallback content scored below the noise floor; caller should skip DSPy generation
+    qa_memories: list[Any] = field(default_factory=list)  # this user's relevant past QA turns (QAMemory)
 
     def texts(self) -> list[str]:
         return [it.text for it in self.items]

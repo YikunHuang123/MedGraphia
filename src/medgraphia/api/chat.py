@@ -414,6 +414,7 @@ async def chat_stream(
                         complexity_tier=complexity_tier,
                         entity_labels=getattr(reranked, "entity_labels", {}),
                         unlinked_mentions=getattr(reranked, "unlinked_mentions", []),
+                        qa_memories=getattr(reranked, "qa_memories", []),
                     ):
                         accumulated.append(token)
                         yield _sse({"type": "chunk", "content": token})
@@ -482,6 +483,25 @@ async def chat_stream(
                 asyncio.create_task(update_user_interests(user_id=u_id, cuis=cuis_list))
             else:
                 logger.info("no_linked_entities_for_memory")
+
+            # ── Step 5.5: Write this turn to QA memory + reinforce what was used ──
+            u_id = principal.get("id", "anonymous")
+            linked_cuis = getattr(reranked, "linked_cuis", [])
+            if linked_cuis:
+                from medgraphia.graph.queries import reinforce_qa_memory, write_qa_memory
+
+                asyncio.create_task(
+                    write_qa_memory(user_id=u_id, question=body.message, answer=full_text, cuis=linked_cuis)
+                )
+                used_qa_ids = getattr(reranked, "qa_memories", [])
+                if used_qa_ids:
+                    asyncio.create_task(
+                        reinforce_qa_memory(
+                            user_id=u_id,
+                            qa_ids=[m.qa_id for m in used_qa_ids],
+                            cuis=linked_cuis,
+                        )
+                    )
 
             # ── Step 6: Send Metadata Events ────────────────────────────────
             yield _sse(
@@ -586,6 +606,7 @@ async def _run_full_pipeline(
             complexity_tier=complexity_tier,
             entity_labels=getattr(reranked, "entity_labels", {}),
             unlinked_mentions=getattr(reranked, "unlinked_mentions", []),
+            qa_memories=getattr(reranked, "qa_memories", []),
         )
         model_used = gen_result.routing.model_name if gen_result.routing else ""
         span.end(output=gen_result.answer[:200])
@@ -599,6 +620,22 @@ async def _run_full_pipeline(
             top_graph_cui = item.metadata.get("entity_cui")
             if top_graph_cui:
                 break
+
+    # ── Write this turn to QA memory + reinforce what was used ──────────────
+    linked_cuis = getattr(reranked, "linked_cuis", [])
+    if linked_cuis:
+        from medgraphia.graph.queries import reinforce_qa_memory, write_qa_memory
+
+        asyncio.create_task(
+            write_qa_memory(user_id=user_id, question=query, answer=gen_result.answer, cuis=linked_cuis)
+        )
+        used_qa_ids = getattr(reranked, "qa_memories", [])
+        if used_qa_ids:
+            asyncio.create_task(
+                reinforce_qa_memory(
+                    user_id=user_id, qa_ids=[m.qa_id for m in used_qa_ids], cuis=linked_cuis
+                )
+            )
 
     return {
         "answer": gen_result.answer,

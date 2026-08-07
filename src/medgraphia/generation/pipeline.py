@@ -28,6 +28,38 @@ from medgraphia.prompts import (
 logger = get_logger(__name__)
 
 
+def _build_memory_context(qa_memories: list[Any]) -> str:
+    """
+    Format retrieved QA memories with an explicit relative-time label so the
+    generator can reason about recency/supersession itself (e.g. "user said
+    no diabetes 3 months ago, has diabetes now") instead of treating two
+    contradictory past statements as equally current. No separate contradiction-
+    detection step at write time — the label hands that judgment to the LLM.
+    """
+    if not qa_memories:
+        return ""
+
+    from datetime import datetime
+
+    lines = []
+    now = datetime.now()
+    for m in qa_memories:
+        try:
+            created = datetime.fromisoformat(m.created_at)
+            days_ago = (now - created).days
+            if days_ago < 1:
+                when = "today"
+            elif days_ago < 30:
+                when = f"{days_ago}d ago"
+            else:
+                when = f"{days_ago // 30}mo ago"
+        except (ValueError, TypeError):
+            when = "previously"
+        lines.append(f"[{when}] User asked: {m.question}\n[{when}] You answered: {m.answer}")
+
+    return "\n\n[Relevant past conversation with this user]\n" + "\n\n".join(lines)
+
+
 class GenerationPipeline:
     """
     Final stage of GraphRAG: Context + History + Query -> Cited Answer.
@@ -53,6 +85,7 @@ class GenerationPipeline:
         complexity_tier: ModelTier | None = None,
         entity_labels: dict[str, str] | None = None,
         unlinked_mentions: list[str] | None = None,
+        qa_memories: list[Any] | None = None,
     ) -> GenerationResult:
         """
         Run the full generation flow:
@@ -97,13 +130,17 @@ class GenerationPipeline:
             context_str = build_numbered_context(retrieved_items)
         if evidence_lines:
             context_str += "\n\n[Additional evidence found for this query]\n" + "\n".join(evidence_lines)
+        context_str += _build_memory_context(qa_memories or [])
 
         target_lang = language.full_name if language else Language.EN.full_name
 
+        from medgraphia.config import get_settings
+
+        recent_turns = get_settings().qa_memory_recent_turns
         history_str = "No history."
         if history:
             history_str = ""
-            for m in history[-5:]:
+            for m in history[-recent_turns:]:
                 role = "User" if m.role == "user" else "Assistant"
                 history_str += f"{role}: {m.content}\n"
 
@@ -178,6 +215,7 @@ class GenerationPipeline:
         complexity_tier: ModelTier | None = None,
         entity_labels: dict[str, str] | None = None,
         unlinked_mentions: list[str] | None = None,
+        qa_memories: list[Any] | None = None,
     ) -> AsyncIterator[str]:
         """
         Streaming version of generate().
@@ -215,13 +253,17 @@ class GenerationPipeline:
             context_str = build_numbered_context(retrieved_items)
         if evidence_lines:
             context_str += "\n\n[Additional evidence found for this query]\n" + "\n".join(evidence_lines)
+        context_str += _build_memory_context(qa_memories or [])
 
         target_lang = language.full_name if language else Language.EN.full_name
 
+        from medgraphia.config import get_settings
+
+        recent_turns = get_settings().qa_memory_recent_turns
         history_str = "No history."
         if history:
             history_str = ""
-            for m in history[-5:]:
+            for m in history[-recent_turns:]:
                 role = "User" if m.role == "user" else "Assistant"
                 history_str += f"{role}: {m.content}\n"
 

@@ -94,10 +94,43 @@ A unified MeSH ontology + parallel multilingual retrieval achieve deep ZH/EN/DE 
 *   **Online Parallel Retrieval**: At query time, `QueryTranslator` asynchronously translates the user's input into all three corpus languages, and Qdrant runs per-language-quota parallel hybrid search (dense + sparse) before merging via RRF — this is what lets sparse vector matching, which depends on exact token overlap, still hit correctly across language boundaries.
 
 #### **4. Long-Short Term Memory System**
-A dual-layer memory architecture manages conversational context:
+Short-term handles context within a single session; long-term splits into two independently-maintained Neo4j edges — interest weights and conversation content each run their own decay and eviction, with no cascading between the two:
 
 *   **Short-Term**: `Rewriter` (DSPy-optimized) resolves coreference and ellipsis from a 5-message sliding window (~2.5 turns), condensing history into a standalone search query instead of letting the LLM drown in raw transcript.
-*   **Long-Term**: User-entity interactions persist to Neo4j's `INTERESTED_IN` relationship, with two stacked decay mechanisms — ① interaction-count reinforcement: each repeat mention does `weight = weight × 0.9 + 1.0`; ② read-time exponential time-decay: computed at query time as `weight × e^(-λΔt)` (30-day half-life, `Δt` from `last_accessed`, no cron job needed). Retrieval seeds PPR with the user's top-5 interest entities — live-verified: under equal starting weights, recently-accessed interests do rank ahead of long-stale ones. Anonymous sessions never write to this mechanism, so different visitors' retrieval results can't cross-contaminate.
+*   **Long-Term (interest weights)**: User-entity interactions persist to Neo4j's `INTERESTED_IN` relationship, with two stacked decay mechanisms — ① interaction-count reinforcement: each repeat mention does `weight = weight × 0.9 + 1.0`; ② read-time exponential time-decay: computed at query time as `weight × e^(-λΔt)` (30-day half-life, `Δt` from `last_accessed`, no cron job needed). Retrieval seeds PPR with the user's top-5 interest entities — live-verified: under equal starting weights, recently-accessed interests do rank ahead of long-stale ones. Anonymous sessions never write to this mechanism, so different visitors' retrieval results can't cross-contaminate.
+*   **Long-Term (conversation content)**: `(User)-[:ASKED]->(QAText)-[:MENTIONS]->(Entity)` brings full Q&A text into the graph as its own edge type, maintained independently of the interest-weight edges above with no cascading deletes between the two. Multi-tenancy isolation comes from the graph shape itself — each `QAText` node has exactly one exclusive ownership edge from its `User`, so retrieval always anchors on a specific `User` node while `Entity` nodes stay globally shared. Capacity is bounded per `(user, entity)` pair with a fixed cap; over-capacity evicts the memory with the lowest decayed weight. Eviction isn't FIFO: a memory that gets retrieved and actually used in a response is reinforced again at read time (LRU-style — evicted by last-proven-useful time, not creation time — so a memory that keeps proving relevant survives regardless of age). Memories injected into the generation context carry a relative-time label (e.g. "3 months ago"), leaving temporal disambiguation to the generator itself rather than running a separate contradiction-detection pass at write time.
+
+The two long-term edges have different write, read, and eviction timing — laid out as a diagram it's easier to follow:
+
+```mermaid
+flowchart TB
+    subgraph SHORT["Short-Term Memory (within one session)"]
+        H["Last 5 messages"] --> RW["Rewriter (DSPy)<br/>coreference resolution → standalone query"]
+    end
+
+    subgraph WRITE["Long-Term Memory · Write (after each turn, async)"]
+        direction LR
+        T["This turn's Q + A"] --> NER1["NER + entity linking"]
+        NER1 --> INT_W["Update INTERESTED_IN edge<br/>User → Entity<br/>weight = weight×0.9 + 1.0"]
+        NER1 --> QA_W["Write QAText node<br/>User -ASKED→ QAText -MENTIONS→ every linked entity"]
+        QA_W --> EVICT["Capacity eviction per (User, Entity)<br/>drop the lowest-decayed-weight memory over cap"]
+    end
+
+    subgraph READ["Long-Term Memory · Read (on the next question)"]
+        direction LR
+        Q["New question"] --> NER2["NER + entity linking"]
+        NER2 --> INT_R["Top-5 interest entities<br/>read-time decay weight·e^(-λΔt)"]
+        INT_R --> PPR["PPR seeds<br/>bias document retrieval ranking"]
+        NER2 --> QA_R["Look up QAText by entity<br/>same read-time decay ranking"]
+        QA_R --> CTX["Inject into generation context<br/>with relative-time label"]
+    end
+
+    RW -.standalone query.-> NER2
+    INT_W -.persisted.-> INT_R
+    EVICT -.persisted.-> QA_R
+    CTX -.used this turn.-> RF["Reinforce the matched QAText edge<br/>LRU-style: evicted by last-proven-useful time"]
+    RF -.writes weight back.-> QA_W
+```
 
 #### **5. DSPy-driven Prompt Self-Evolution**
 **DSPy programs** replace static prompts, evolving through automated data-driven compilation:
@@ -176,7 +209,7 @@ flowchart TD
 
     FUSION["RRF Fusion + bge-reranker-v2-m3<br/>multilingual cross-encoder reranking"]
     LLMROUTE["LLM Router<br/>SMALL(FAQ) / MEDIUM(Inter.) / LARGE(Decis.)<br/>LiteLLM + LangGraph"]
-    GAP["Agentic Gap Completion<br/>LLM judges whether evidence is missing a connection between key entities<br/>if so: targeted fetch + NER/link ingest of new chunks"]
+    GAP["Agentic Gap Completion<br/>Two-entity: LLM judges relation gap · Single-entity: reranker flags evidence as noise<br/>triggers targeted PubMed fetch + NER/link ingest of new chunks"]
     GEN["Generation Pipeline<br/>Pydantic-typed prompts · automated inline [N] citations<br/>medical disclaimer & evidence provenance"]
     PERSIST["Post-Processing & Persistence<br/>interaction saved to Neo4j · async user-interest update (long memory)"]
     UI["FastAPI / Streamlit UI<br/>Langfuse tracing & logs"]
@@ -704,9 +737,9 @@ Against commonly used production-quality reference thresholds (Faithfulness 0.75
 
 ## ⚡ Performance and Engineering Optimization
 
-### Query-Time Knowledge Completion Latency Optimization
+### Query-Time Knowledge Completion Latency Optimization (Two-Entity Relation Gaps)
 
-When retrieved evidence is insufficient, MedGraphia performs a targeted PubMed search, runs NER and entity linking, writes new text to Neo4j/Qdrant, and folds the resulting evidence back into the numbered answer context. End-to-end instrumentation identified and removed three bottlenecks in this high-cost path:
+When two entities in a question lack a known relationship, MedGraphia performs a targeted PubMed search, runs NER and entity linking, writes new text to Neo4j/Qdrant, and folds the resulting evidence back into the numbered answer context. End-to-end instrumentation identified and removed three bottlenecks in this high-cost path:
 
 | Metric | Before | After | Change |
 |---|---:|---:|---:|
@@ -719,6 +752,10 @@ When retrieved evidence is insufficient, MedGraphia performs a targeted PubMed s
 - **Adaptive GPU placement**: explicitly moves GLiNER to CUDA/MPS when available, fixing the default CPU-only execution path.
 
 > Measurements come from real two-round completion requests and cover the completion stage only, not final answer generation. Different out-of-corpus entities introduce some variation, so the figures demonstrate the scale of the end-to-end optimization rather than a strict same-input microbenchmark.
+
+### Single-Entity Evidence Gap Completion
+
+The path above only covers "two entities with no known relationship." It doesn't help with the more common case of a single entity the corpus simply has no content for (e.g. "what is acromegaly"). A lighter path handles this instead: rather than a multi-round LLM judgment via LangGraph, it reuses the reranker's own noise-floor verdict — when the fallback candidates score below the noise floor (default 0.05, meaning not even "marginally relevant"), it takes the highest-confidence linked entity from the current question, fires a single targeted PubMed fetch, ingests the results, and reranks the new content once. Compared to the two-entity path, the trigger condition is simpler and deliberately less frequent — it only fires once retrieval is confirmed to have found nothing, not on every thinly-covered single-entity question — so it doesn't add a network round trip to most requests.
 
 ### Llama-Guard Cold-Start Latency Optimization
 
@@ -772,7 +809,7 @@ cp .env.example .env
 | Observability | `TRACING_ENABLED`, `METRICS_ENABLED` | Configure Langfuse tracing and metrics |
 | vLLM (optional) | `VLLM_SMALL_BASE_URL`, `VLLM_MEDIUM_BASE_URL`, `VLLM_SLEEP_IDLE_SECONDS` | Per-tier vLLM engine endpoints (default ports 8010/8011) + idle-to-sleep threshold (default 120s) |
 | Safety guardrails | `GUARDRAILS_ENABLED`, `LLAMA_GUARD_*` | Configure Llama-Guard 3 input and output checks; enabling it requires additional VRAM |
-| Query-time completion | `GAP_COMPLETION_ENABLED`, `GAP_COMPLETION_MAX_TOOL_CALLS`, `GAP_COMPLETION_PUBMED_LIMIT` | Control targeted PubMed retrieval and graph completion |
+| Query-time completion | `GAP_COMPLETION_ENABLED`, `GAP_COMPLETION_MAX_TOOL_CALLS`, `GAP_COMPLETION_PUBMED_LIMIT`, `SINGLE_ENTITY_GAP_COMPLETION_ENABLED` | Control targeted PubMed retrieval and graph completion (two-entity relation gaps / single-entity evidence gaps) |
 | Multilingual retrieval | `MULTILINGUAL_RETRIEVAL_ENABLED`, `MULTILINGUAL_PER_LANG_QUOTA` | Control ZH/EN/DE query translation and per-language retrieval quotas |
 | Authentication and service | `AUTH_STRATEGY`, `ADMIN_BOOTSTRAP_KEY`, `API_HOST`, `API_PORT` | Configure API authentication, the admin bootstrap key, and the listening address |
 

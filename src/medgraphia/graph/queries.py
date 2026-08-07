@@ -649,6 +649,169 @@ async def get_user_top_interests(
 
 
 # ---------------------------------------------------------------------------
+# Per-user QA memory (conversational long-term memory)
+#
+# (User) -[:ASKED]-> (QAText) -[:MENTIONS]-> (Entity)
+#
+# QAText nodes are never shared between users: the only edge that reaches one
+# is the exclusive :ASKED edge from its owning User, so any query anchored at
+# MATCH (u:User {id: $user_id}) can never return another user's QAText —
+# Entity nodes stay shared (they're domain knowledge), QAText nodes don't.
+# ---------------------------------------------------------------------------
+
+
+async def write_qa_memory(
+    user_id: str,
+    question: str,
+    answer: str,
+    cuis: list[str],
+    max_per_entity: int = 20,
+) -> None:
+    """
+    Persist one conversational turn as a QAText node linked to every entity
+    mentioned in the question+answer (not just the "main" one) — multi-entity
+    linking is what gives PPR/graph traversal something to differentiate on
+    later; a QAText connected to only one entity is indistinguishable from
+    every other QAText under that same entity (a star graph has no structure
+    for ranking to exploit).
+
+    Capacity is bounded per (user, entity) pair, not per entity globally, so
+    one heavy user can't crowd out another user's memories under a popular
+    entity. Eviction removes the weakest :MENTIONS edge (by decayed weight),
+    not necessarily the whole node — a QAText can still be relevant via its
+    other entity mentions after losing one. A QAText with zero remaining
+    :MENTIONS edges is dead weight (unreachable from any entity-seeded
+    query) and is deleted outright.
+    """
+    if user_id == "anonymous":
+        return
+    valid_cuis = [c for c in cuis if not c.startswith("MENTION:")]
+    if not valid_cuis:
+        return
+
+    import uuid
+
+    qa_id = str(uuid.uuid4())
+    now = datetime.now().isoformat()
+
+    cypher = """
+    MERGE (u:User {id: $user_id})
+    CREATE (qa:QAText {qa_id: $qa_id, question: $question, answer: $answer, created_at: $now})
+    CREATE (u)-[:ASKED {created_at: $now}]->(qa)
+    WITH qa
+    UNWIND $cuis AS cui
+    MATCH (e) WHERE e.cui = cui
+    CREATE (qa)-[:MENTIONS {weight: 1.0, last_accessed: $now}]->(e)
+    """
+    async with get_session() as g_session:
+        await g_session.run(
+            cypher,
+            user_id=user_id,
+            qa_id=qa_id,
+            question=question,
+            answer=answer,
+            now=now,
+            cuis=valid_cuis,
+        )
+        for cui in valid_cuis:
+            await _evict_qa_memory_if_over_capacity(g_session, user_id, cui, max_per_entity)
+    logger.info("qa_memory_written", user_id=user_id, qa_id=qa_id, entities=len(valid_cuis))
+
+
+async def _evict_qa_memory_if_over_capacity(
+    g_session: Any, user_id: str, cui: str, max_per_entity: int, half_life_days: float = 30.0
+) -> None:
+    """Drop the weakest :MENTIONS edge for this (user, entity) pair if capacity is exceeded."""
+    import math
+
+    decay_lambda = math.log(2) / half_life_days
+    cypher = """
+    MATCH (u:User {id: $user_id})-[:ASKED]->(qa:QAText)-[r:MENTIONS]->(e {cui: $cui})
+    WITH qa, r, r.weight * exp(-$decay_lambda * duration.between(datetime(r.last_accessed), datetime()).days) AS effective_weight
+    ORDER BY effective_weight DESC
+    WITH collect({qa: qa, r: r}) AS ranked
+    WHERE size(ranked) > $max_per_entity
+    UNWIND ranked[$max_per_entity..] AS victim
+    DELETE victim.r
+    WITH victim.qa AS qa
+    WHERE NOT (qa)-[:MENTIONS]->()
+    DETACH DELETE qa
+    """
+    await g_session.run(
+        cypher,
+        user_id=user_id,
+        cui=cui,
+        decay_lambda=decay_lambda,
+        max_per_entity=max_per_entity,
+    )
+
+
+async def get_user_qa_memories(
+    user_id: str, cuis: list[str], limit: int = 5, half_life_days: float = 30.0
+) -> list[dict[str, str]]:
+    """
+    Return this user's own past QA turns relevant to the given (current
+    query) CUIs, ranked by decayed :MENTIONS weight — recency plus how often
+    this specific memory has actually been retrieved and used since
+    (reinforce_qa_memory bumps the weight on real usage, not just on
+    creation, so a memory that keeps proving relevant survives regardless of
+    how old it is — least-recently-*useful*, not least-recently-created).
+    """
+    if user_id == "anonymous" or not cuis:
+        return []
+
+    import math
+
+    decay_lambda = math.log(2) / half_life_days
+    cypher = """
+    MATCH (u:User {id: $user_id})-[:ASKED]->(qa:QAText)-[r:MENTIONS]->(e)
+    WHERE e.cui IN $cuis
+    WITH DISTINCT qa, max(r.weight * exp(-$decay_lambda * duration.between(datetime(r.last_accessed), datetime()).days)) AS effective_weight
+    RETURN qa.qa_id AS qa_id, qa.question AS question, qa.answer AS answer, qa.created_at AS created_at
+    ORDER BY effective_weight DESC
+    LIMIT $limit
+    """
+    async with get_session() as g_session:
+        result = await g_session.run(
+            cypher, user_id=user_id, cuis=cuis, limit=limit, decay_lambda=decay_lambda
+        )
+        return [
+            {
+                "qa_id": r["qa_id"],
+                "question": r["question"],
+                "answer": r["answer"],
+                "created_at": r["created_at"],
+            }
+            async for r in result
+        ]
+
+
+async def reinforce_qa_memory(user_id: str, qa_ids: list[str], cuis: list[str], decay_factor: float = 0.9) -> None:
+    """
+    Bump the :MENTIONS edges for QA memories that were actually retrieved and
+    used in a response — the read-time half of the LRU-style importance
+    signal (write-time half is the initial weight=1.0 in write_qa_memory).
+    """
+    if user_id == "anonymous" or not qa_ids or not cuis:
+        return
+
+    cypher = """
+    MATCH (u:User {id: $user_id})-[:ASKED]->(qa:QAText)-[r:MENTIONS]->(e)
+    WHERE qa.qa_id IN $qa_ids AND e.cui IN $cuis
+    SET r.weight = (r.weight * $decay) + 1.0, r.last_accessed = $now
+    """
+    async with get_session() as g_session:
+        await g_session.run(
+            cypher,
+            user_id=user_id,
+            qa_ids=qa_ids,
+            cuis=cuis,
+            decay=decay_factor,
+            now=datetime.now().isoformat(),
+        )
+
+
+# ---------------------------------------------------------------------------
 # Admin & Auth Persistence
 # ---------------------------------------------------------------------------
 
