@@ -391,42 +391,6 @@ async def chat_stream(
                 trace.update(output=chitchat_text)
                 return
 
-            # ── No-evidence short-circuit ────────────────────────────────────
-            # Skip the LLM call when the reranker found nothing usable. With 2+
-            # linked entities, fall through instead so the two-entity gap-completion in generate() can run.
-            if getattr(reranked, "no_evidence", False) and len(getattr(reranked, "linked_cuis", [])) < 2:
-                from medgraphia.prompts import get_disclaimer, get_no_info_message
-
-                no_info_text = get_no_info_message(language)
-                yield _sse({"type": "chunk", "content": no_info_text})
-
-                session.messages.append(
-                    Message(session_id=session.session_id, role="user", content=body.message)
-                )
-                session.messages.append(
-                    Message(
-                        session_id=session.session_id,
-                        role="assistant",
-                        content=no_info_text,
-                        citations=[],
-                        model_used="static",
-                        retrieval_paths_used=retrieval_paths,
-                    )
-                )
-                await save_session(session)
-
-                yield _sse({"type": "citations", "citations": []})
-                yield _sse(
-                    {
-                        "type": "done",
-                        "session_id": session.session_id,
-                        "model_used": "static",
-                        "query_type": query_type.value,
-                        "disclaimer": get_disclaimer(language),
-                    }
-                )
-                trace.update(output=no_info_text)
-                return
 
             # ── Step 2 & 3: Stream LLM tokens via Unified Generation Pipeline ──
             accumulated: list[str] = []
@@ -450,7 +414,7 @@ async def chat_stream(
                         unlinked_mentions=getattr(reranked, "unlinked_mentions", []),
                         qa_memories=getattr(reranked, "qa_memories", []),
                     ):
-                        if isinstance(item, dict) and item.get("type") == "progress":
+                        if isinstance(item, dict) and item.get("type") in ("progress", "thought"):
                             yield _sse(item)
                         else:
                             accumulated.append(item)

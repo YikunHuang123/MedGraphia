@@ -358,41 +358,6 @@ class RetrievalPipeline:
             top_k=top_k,
         )
 
-        # Step 4.5: single-entity live gap fill, only when local retrieval found
-        # nothing (no_evidence) and the query names exactly one distinct topic.
-        # Two+ distinct entities defer to the two-entity relationship-gap path in
-        # generation/agentic_completion.py instead.
-        from medgraphia.config import get_settings as _get_settings
-
-        distinct_entities = _dedupe_overlapping_entities(plan.query_entities.entities)
-
-        if (
-            final_result.no_evidence
-            and _get_settings().single_entity_gap_completion_enabled
-            and len(distinct_entities) == 1
-        ):
-            entity_label = distinct_entities[0].label
-            if entity_label:
-                from medgraphia.retrieval.fusion import FusionResult, chunk_to_fused_item
-                from medgraphia.retrieval.query_time_completion import complete_single_entity_gap
-
-                cfg = _get_settings()
-                _, new_chunks = await complete_single_entity_gap(
-                    entity_label, pubmed_limit=cfg.gap_completion_pubmed_limit
-                )
-                if new_chunks:
-                    retry_items = [chunk_to_fused_item(c) for c in new_chunks]
-                    final_result = await self.reranker.rerank(
-                        query=search_query,
-                        fusion_result=FusionResult(items=retry_items, query=search_query),
-                        top_k=top_k,
-                    )
-                    logger.info(
-                        "single_entity_gap_completion_applied",
-                        entity=entity_label,
-                        new_chunks=len(new_chunks),
-                        no_evidence_after_retry=final_result.no_evidence,
-                    )
 
         # Inject additional metadata into the result for downstream use
         final_result.query_type = plan.query_type

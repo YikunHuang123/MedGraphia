@@ -40,6 +40,8 @@ class CompletionState(TypedDict, total=False):
     needs_completion: bool
     entity_a: str
     entity_b: str
+    language: str
+    message_to_user: str
 
 
 # ---------------------------------------------------------------------------
@@ -52,17 +54,19 @@ def _assess_signature():
 
     class AssessKnowledgeGap(dspy.Signature):
         """Decide whether the retrieved context is missing a documented relationship
-        between two of the medical entities mentioned in the question, that would be
-        needed to answer it. Only propose a pair if their relationship is actually
+        between two of the medical entities mentioned in the question, or if vital information
+        is missing about a single medical entity. Only propose a search if the information is actually
         relevant to the question and is not already covered by the context. If the
-        context is sufficient, or no entity pair applies, set needs_completion to false."""
+        context is sufficient, or no entity applies, set needs_completion to false."""
 
         question: str = dspy.InputField()
         context: str = dspy.InputField(desc="Currently retrieved context, numbered")
         candidate_entities: str = dspy.InputField(desc="Comma-separated entity labels from the query")
+        language: str = dspy.InputField(desc="The target language (e.g. 'zh' for Chinese, 'en' for English) to use for message_to_user.")
         needs_completion: bool = dspy.OutputField()
         entity_a: str = dspy.OutputField(desc="First entity name; empty if needs_completion is false")
-        entity_b: str = dspy.OutputField(desc="Second entity name; empty if needs_completion is false")
+        entity_b: str = dspy.OutputField(desc="Second entity name; leave entirely empty if there is only one entity, or if needs_completion is false")
+        message_to_user: str = dspy.OutputField(desc="A brief message in the requested language explaining why you are searching (e.g. 'I am searching PubMed for X...'); empty if needs_completion is false.")
 
     return AssessKnowledgeGap
 
@@ -91,24 +95,32 @@ async def _assess_gap_node(state: CompletionState) -> CompletionState:
                 question=state["question"],
                 context=current_context,
                 candidate_entities=entities,
+                language=state.get("language", "en"),
             )
-
-    if len(state.get("entity_labels", [])) < 2:
-        return {**state, "needs_completion": False}
 
     try:
         pred = await asyncio.to_thread(_run)
+        
+        # Clean up string artifacts that open-source models sometimes emit
+        ea = str(pred.entity_a).strip() if pred.entity_a else ""
+        eb = str(pred.entity_b).strip() if pred.entity_b else ""
+        if eb.lower() in ("none", "n/a", "null", "empty", "[]", "''", '""'):
+            eb = ""
+            
+        needs = bool(pred.needs_completion) and bool(ea)
+        
+        logger.info("gap_assessment_result", needs=needs, raw_needs=pred.needs_completion, entity_a=ea, entity_b=eb, message=getattr(pred, "message_to_user", ""))
+        
+        return {
+            **state,
+            "needs_completion": needs,
+            "entity_a": ea if needs else "",
+            "entity_b": eb if needs else "",
+            "message_to_user": getattr(pred, "message_to_user", "") if needs else "",
+        }
     except Exception as exc:
         logger.warning("assess_gap_failed", error=str(exc))
         return {**state, "needs_completion": False}
-
-    needs = bool(pred.needs_completion) and bool(pred.entity_a) and bool(pred.entity_b)
-    return {
-        **state,
-        "needs_completion": needs,
-        "entity_a": pred.entity_a,
-        "entity_b": pred.entity_b,
-    }
 
 
 async def _execute_tool_node(state: CompletionState) -> CompletionState:
@@ -130,10 +142,14 @@ async def _execute_tool_node(state: CompletionState) -> CompletionState:
             gap_evidence = state.get("gap_evidence", []) + [evidence]
             return {**state, "gap_evidence": gap_evidence, "tool_calls_made": tool_calls_made, "needs_completion": False}
 
-    from medgraphia.retrieval.query_time_completion import complete_gap
+    from medgraphia.retrieval.query_time_completion import complete_gap, complete_single_entity_gap
 
     cfg = get_settings()
-    evidence_str, new_chunks = await complete_gap(entity_a, entity_b, pubmed_limit=cfg.gap_completion_pubmed_limit)
+    if not entity_b:
+        evidence_str, new_chunks = await complete_single_entity_gap(entity_a, pubmed_limit=cfg.gap_completion_pubmed_limit)
+    else:
+        evidence_str, new_chunks = await complete_gap(entity_a, entity_b, pubmed_limit=cfg.gap_completion_pubmed_limit)
+        
     gap_evidence = state.get("gap_evidence", []) + [evidence_str]
     gap_chunks = state.get("gap_chunks", []) + new_chunks
     return {**state, "gap_evidence": gap_evidence, "gap_chunks": gap_chunks, "tool_calls_made": tool_calls_made, "needs_completion": False}
@@ -194,17 +210,21 @@ async def run_gap_completion(
     entity_labels: list[str],
     entity_cui_map: dict[str, str],
     lm: Any,
+    language_name: str = "en",
     max_tool_calls: int = 2,
-) -> tuple[list[str], list[Any]]:
+) -> AsyncIterator[dict]:
     """
-    Entry point used by the generation pipeline. Returns a list of evidence
-    strings and a list of new Chunk objects.
+    Entry point used by the generation pipeline. Yields events and eventually a 'gap_result' dict
+    containing evidence strings and new Chunk objects.
     """
+    from typing import AsyncIterator
+
     global _compiled_graph
     if _compiled_graph is None:
         _compiled_graph = _build_completion_graph()
     if _compiled_graph is None:
-        return [], []
+        yield {"type": "gap_result", "evidence": [], "chunks": []}
+        return
 
     initial_state: CompletionState = {
         "question": question,
@@ -212,16 +232,27 @@ async def run_gap_completion(
         "entity_labels": entity_labels,
         "entity_cui_map": entity_cui_map,
         "lm": lm,
+        "language": language_name,
         "max_tool_calls": max_tool_calls,
         "tool_calls_made": 0,
         "gap_evidence": [],
         "gap_chunks": [],
     }
 
+    final_state = dict(initial_state)
     try:
-        final_state = await _compiled_graph.ainvoke(initial_state)
+        async for event in _compiled_graph.astream(initial_state, stream_mode="updates"):
+            for node_name, state_update in event.items():
+                final_state.update(state_update)
+                if node_name == "assess" and state_update.get("needs_completion"):
+                    msg = state_update.get("message_to_user")
+                    if msg:
+                        yield {"type": "gap_message", "content": msg}
     except Exception as exc:
         logger.warning("gap_completion_graph_failed", error=str(exc))
-        return [], []
 
-    return final_state.get("gap_evidence", []), final_state.get("gap_chunks", [])
+    yield {
+        "type": "gap_result",
+        "evidence": final_state.get("gap_evidence", []),
+        "chunks": final_state.get("gap_chunks", []),
+    }

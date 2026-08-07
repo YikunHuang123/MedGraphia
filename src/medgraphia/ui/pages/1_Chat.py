@@ -216,13 +216,36 @@ for i, msg in enumerate(active["messages"]):
 
 def _stream_tokens(events: Iterator[dict], meta_sink: dict, status_placeholder=None) -> Iterator[str]:
     first_chunk = True
+    thoughts_html = ""
+    current_progress = "Processing..."
+
     for ev in events:
         kind = ev.get("type")
         if kind == "progress":
             if status_placeholder and first_chunk:
-                content = ev.get("content", "").rstrip(".")
-                html = f'<div class="mg-progress"><span class="mg-progress-icon">⏳</span><span class="mg-progress-text">{content}</span></div>'
+                current_progress = ev.get("content", "").rstrip(".")
+                if thoughts_html:
+                    html = f'''<div class="mg-status-block">
+<div class="mg-progress" style="margin-bottom:8px;"><span class="mg-progress-icon">⏳</span><span class="mg-progress-text">{current_progress}</span></div>
+<div style="border-left: 2px solid #e2e8f0; padding-left: 12px; margin-left: 6px; display: flex; flex-direction: column; gap: 6px;">
+{thoughts_html}
+</div>
+</div>'''
+                else:
+                    html = f'<div class="mg-progress"><span class="mg-progress-icon">⏳</span><span class="mg-progress-text">{current_progress}</span></div>'
                 status_placeholder.markdown(html, unsafe_allow_html=True)
+        elif kind == "thought":
+            if status_placeholder and first_chunk:
+                content = ev.get("content", "").strip()
+                if content:
+                    thoughts_html += f'<div style="font-size: 0.85rem; color: #71717a; line-height: 1.4;">&gt; {content}</div>\n'
+                    html = f'''<div class="mg-status-block">
+<div class="mg-progress" style="margin-bottom:8px;"><span class="mg-progress-icon">⏳</span><span class="mg-progress-text">{current_progress}</span></div>
+<div style="border-left: 2px solid #e2e8f0; padding-left: 12px; margin-left: 6px; display: flex; flex-direction: column; gap: 6px;">
+{thoughts_html}
+</div>
+</div>'''
+                    status_placeholder.markdown(html, unsafe_allow_html=True)
         elif kind == "chunk":
             if first_chunk and status_placeholder:
                 status_placeholder.empty()

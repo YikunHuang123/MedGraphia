@@ -111,9 +111,17 @@ class GenerationPipeline:
         )
 
         # 2.5. Agentic gap completion — same lm as final generation, runs before it
-        evidence_lines, new_chunks = await self._maybe_complete_gaps(
-            question, context_str, entity_labels or {}, unlinked_mentions or [], lm
-        )
+        target_lang = language.full_name if language else Language.EN.full_name
+
+        evidence_lines = []
+        new_chunks = []
+        async for gap_ev in self._maybe_complete_gaps(
+            question, context_str, entity_labels or {}, unlinked_mentions or [], lm, target_lang
+        ):
+            if gap_ev["type"] == "gap_result":
+                evidence_lines = gap_ev.get("evidence", [])
+                new_chunks = gap_ev.get("chunks", [])
+
         if new_chunks:
             # Rebuild the numbered context so newly-fetched passages get a
             # real [N] citation number the model can reference, instead of
@@ -237,10 +245,21 @@ class GenerationPipeline:
             model_override=routing.model_name,
         )
 
-        yield {"type": "progress", "content": "正在检测并补充知识盲区 (Gap Completion)..."}
-        evidence_lines, new_chunks = await self._maybe_complete_gaps(
-            question, context_str, entity_labels or {}, unlinked_mentions or [], lm
-        )
+        target_lang = language.full_name if language else Language.EN.full_name
+        yield {"type": "progress", "content": "Assessing knowledge gaps..."}
+        
+        evidence_lines = []
+        new_chunks = []
+        async for gap_ev in self._maybe_complete_gaps(
+            question, context_str, entity_labels or {}, unlinked_mentions or [], lm, target_lang
+        ):
+            if gap_ev["type"] == "gap_message":
+                yield {"type": "thought", "content": gap_ev['content']}
+                yield {"type": "progress", "content": "Retrieving latest literature from external databases..."}
+            elif gap_ev["type"] == "gap_result":
+                evidence_lines = gap_ev.get("evidence", [])
+                new_chunks = gap_ev.get("chunks", [])
+
         if new_chunks:
             from medgraphia.retrieval.fusion import chunk_to_fused_item
 
@@ -248,9 +267,9 @@ class GenerationPipeline:
             context_str = build_numbered_context(retrieved_items)
         if evidence_lines:
             context_str += "\n\n[Additional evidence found for this query]\n" + "\n".join(evidence_lines)
-            yield {"type": "progress", "content": f"已补充 {len(evidence_lines)} 条外部知识，准备生成最终答案..."}
+            yield {"type": "progress", "content": f"Added {len(new_chunks)} new knowledge pieces, preparing final answer..."}
         else:
-            yield {"type": "progress", "content": "知识准备完毕，正在生成答案..."}
+            yield {"type": "progress", "content": "Knowledge base ready, generating answer..."}
         context_str += _build_memory_context(qa_memories or [])
 
         target_lang = language.full_name if language else Language.EN.full_name
@@ -313,14 +332,15 @@ class GenerationPipeline:
         entity_labels: dict[str, str],
         unlinked_mentions: list[str],
         lm: Any,
-    ) -> tuple[list[str], list[Any]]:
+        language_name: str,
+    ) -> AsyncIterator[dict]:
         """
         Let an agent decide whether the context is missing a relation
         between two entities mentioned in the question, and if so fetch new
         evidence before the final answer is generated.
 
-        Returns (evidence_status_lines, new_chunks). The caller is
-        responsible for merging new_chunks into retrieved_items and
+        Yields progress/chunk events, and finally a 'gap_result' dictionary.
+        The caller is responsible for merging new_chunks into retrieved_items and
         rebuilding the numbered context so newly-fetched passages get a
         real [N] citation number instead of being appended as raw text.
         """
@@ -328,7 +348,8 @@ class GenerationPipeline:
 
         cfg = get_settings()
         if not cfg.gap_completion_enabled:
-            return [], []
+            yield {"type": "gap_result", "evidence": [], "chunks": []}
+            return
 
         unique_labels = []
         seen_lower = set()
@@ -337,23 +358,25 @@ class GenerationPipeline:
                 seen_lower.add(label.lower())
                 unique_labels.append(label)
         candidate_labels = unique_labels
-        if len(candidate_labels) < 2:
-            return [], []
+        if len(candidate_labels) < 1:
+            yield {"type": "gap_result", "evidence": [], "chunks": []}
+            return
 
         from medgraphia.generation.agentic_completion import run_gap_completion
 
         cui_map = {label: cui for cui, label in entity_labels.items()}
-        evidence, new_chunks = await run_gap_completion(
+        async for event in run_gap_completion(
             question=question,
             context=context_str,
             entity_labels=candidate_labels,
             entity_cui_map=cui_map,
             lm=lm,
+            language_name=language_name,
             max_tool_calls=cfg.gap_completion_max_tool_calls,
-        )
-        if evidence:
-            logger.info("gap_completion_applied", count=len(evidence))
-        return evidence, new_chunks
+        ):
+            if event["type"] == "gap_result" and event.get("evidence"):
+                logger.info("gap_completion_applied", count=len(event["evidence"]))
+            yield event
 
     def get_streaming_components(self, query_type: QueryType, language: Language) -> dict[str, str]:
         """Return the system prompt and disclaimer for streaming."""
