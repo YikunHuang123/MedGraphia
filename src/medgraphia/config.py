@@ -253,7 +253,7 @@ class Settings(BaseSettings):
     # Query-time knowledge graph completion
     # ------------------------------------------------------------------
     gap_completion_enabled: bool = True
-    gap_completion_max_tool_calls: int = 2  # per generation request
+    gap_completion_max_tool_calls: int = 4  # per generation request
     gap_completion_pubmed_limit: int = 5  # abstracts fetched per tool call
     single_entity_gap_completion_enabled: bool = True  # live fetch when retrieval finds genuinely nothing (no_evidence)
 

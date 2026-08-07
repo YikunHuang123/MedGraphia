@@ -85,7 +85,8 @@ async def _warm_up_models() -> None:
         logger.info("warmup_generation_done")
 
         # 4. Perform a dummy 'synthetic' request to compile GPU kernels
-        await retrieval.execute(query="Metformin", top_k=1)
+        async for _ in retrieval.execute(query="Metformin", top_k=1):
+            pass
 
         logger.info("warmup_synthetic_inference_done")
 

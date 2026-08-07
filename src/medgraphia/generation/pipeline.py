@@ -210,7 +210,7 @@ class GenerationPipeline:
         entity_labels: dict[str, str] | None = None,
         unlinked_mentions: list[str] | None = None,
         qa_memories: list[Any] | None = None,
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[str | dict]:
         """
         Streaming version of generate().
         NOTE: Since DSPy's compiled programs don't natively stream individual tokens
@@ -237,6 +237,7 @@ class GenerationPipeline:
             model_override=routing.model_name,
         )
 
+        yield {"type": "progress", "content": "正在检测并补充知识盲区 (Gap Completion)..."}
         evidence_lines, new_chunks = await self._maybe_complete_gaps(
             question, context_str, entity_labels or {}, unlinked_mentions or [], lm
         )
@@ -247,6 +248,9 @@ class GenerationPipeline:
             context_str = build_numbered_context(retrieved_items)
         if evidence_lines:
             context_str += "\n\n[Additional evidence found for this query]\n" + "\n".join(evidence_lines)
+            yield {"type": "progress", "content": f"已补充 {len(evidence_lines)} 条外部知识，准备生成最终答案..."}
+        else:
+            yield {"type": "progress", "content": "知识准备完毕，正在生成答案..."}
         context_str += _build_memory_context(qa_memories or [])
 
         target_lang = language.full_name if language else Language.EN.full_name
@@ -326,7 +330,13 @@ class GenerationPipeline:
         if not cfg.gap_completion_enabled:
             return [], []
 
-        candidate_labels = list(entity_labels.values()) + unlinked_mentions
+        unique_labels = []
+        seen_lower = set()
+        for label in (list(entity_labels.values()) + unlinked_mentions):
+            if label.lower() not in seen_lower:
+                seen_lower.add(label.lower())
+                unique_labels.append(label)
+        candidate_labels = unique_labels
         if len(candidate_labels) < 2:
             return [], []
 

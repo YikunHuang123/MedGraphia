@@ -303,12 +303,17 @@ async def chat_stream(
 
             with trace.span("retrieval", input=body.message) as span:
                 try:
-                    reranked = await retrieval.execute(
+                    reranked = None
+                    async for item in retrieval.execute(
                         query=body.message,
                         history=session.messages,
                         language=language,
                         user_id=principal.get("id", "anonymous"),
-                    )
+                    ):
+                        if isinstance(item, str):
+                            yield _sse({"type": "progress", "content": item})
+                        else:
+                            reranked = item
                 except Exception as exc:
                     logger.error("stream_retrieval_failed", error=str(exc))
                     yield _sse({"type": "error", "detail": "Retrieval failed."})
@@ -434,7 +439,7 @@ async def chat_stream(
 
             with trace.span("generation_stream", input=body.message):
                 try:
-                    async for token in generation.generate_stream(
+                    async for item in generation.generate_stream(
                         question=body.message,
                         query_type=query_type,
                         retrieved_items=items,
@@ -445,8 +450,11 @@ async def chat_stream(
                         unlinked_mentions=getattr(reranked, "unlinked_mentions", []),
                         qa_memories=getattr(reranked, "qa_memories", []),
                     ):
-                        accumulated.append(token)
-                        yield _sse({"type": "chunk", "content": token})
+                        if isinstance(item, dict) and item.get("type") == "progress":
+                            yield _sse(item)
+                        else:
+                            accumulated.append(item)
+                            yield _sse({"type": "chunk", "content": item})
                 except Exception as exc:
                     logger.error("stream_generation_failed", error=str(exc))
                     yield _sse({"type": "error", "detail": "Generation failed."})

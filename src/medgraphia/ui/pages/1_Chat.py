@@ -214,10 +214,19 @@ for i, msg in enumerate(active["messages"]):
 # ---------------------------------------------------------------------------
 
 
-def _stream_tokens(events: Iterator[dict], meta_sink: dict) -> Iterator[str]:
+def _stream_tokens(events: Iterator[dict], meta_sink: dict, status_placeholder=None) -> Iterator[str]:
+    first_chunk = True
     for ev in events:
         kind = ev.get("type")
-        if kind == "chunk":
+        if kind == "progress":
+            if status_placeholder and first_chunk:
+                content = ev.get("content", "").rstrip(".")
+                html = f'<div class="mg-progress"><span class="mg-progress-icon">⏳</span><span class="mg-progress-text">{content}</span></div>'
+                status_placeholder.markdown(html, unsafe_allow_html=True)
+        elif kind == "chunk":
+            if first_chunk and status_placeholder:
+                status_placeholder.empty()
+                first_chunk = False
             yield ev.get("content", "")
         elif kind == "error":
             yield f"\n\n_[error] {ev.get('detail', 'stream interrupted')}_"
@@ -252,6 +261,7 @@ if prompt:
 
     client = _client()
     with st.chat_message("assistant"):
+        status_placeholder = st.empty()
         try:
             meta: dict = {}
             events = client.chat_stream(
@@ -259,7 +269,8 @@ if prompt:
                 session_id=active.get("backend_session_id"),
                 language="unknown",  # Force auto-detection on backend
             )
-            full_text = st.write_stream(_stream_tokens(events, meta))
+            full_text = st.write_stream(_stream_tokens(events, meta, status_placeholder=status_placeholder))
+            status_placeholder.empty()
 
             # Check for moderation
             if meta.get("moderated"):

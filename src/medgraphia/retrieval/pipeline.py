@@ -11,7 +11,7 @@ This module connects all retrieval components into a single, cohesive workflow:
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, AsyncIterator
 
 from medgraphia.domain import Language
 from medgraphia.domain.chat import Message
@@ -92,7 +92,7 @@ class RetrievalPipeline:
         language: Language | None = None,
         user_id: str | None = None,
         top_k: int = 10,
-    ) -> RerankedResult:
+    ) -> AsyncIterator[str | RerankedResult]:
         """
         Execute the full GraphRAG retrieval pipeline.
 
@@ -120,6 +120,7 @@ class RetrievalPipeline:
         # ---------------------------------------------------------
         from medgraphia.generation.llm_router import ModelTier
 
+        yield "正在评估问题复杂度并进行重写 (Rewriting)..."
         complexity_tier: ModelTier | None = None
         search_query, complexity_tier = await self.rewriter.rewrite(
             query=query, history=history or [], language=language or Language.EN
@@ -148,6 +149,7 @@ class RetrievalPipeline:
 
                 cfg = get_settings()
                 if cfg.multilingual_retrieval_enabled:
+                    yield "正在进行多语言扩展翻译 (Translating)..."
                     translated: TranslatedQuery = await self.query_translator.translate(
                         query=search_query,
                         source_language=src_lang,
@@ -172,6 +174,7 @@ class RetrievalPipeline:
             routing_query = queries_by_language[Language.EN]
             routing_lang = Language.EN
 
+        yield "正在解析医学实体和意图分析 (Routing)..."
         plan: RetrievalPlan = await self.router.route_async(routing_query, language=routing_lang)
 
         # No medical keyword matched and no entity was linked (e.g. a greeting) —
@@ -180,16 +183,18 @@ class RetrievalPipeline:
         # GEPA-tuned clinical generator, which expects grounded context.
         if plan.is_chitchat:
             logger.info("retrieval_pipeline_skipped_chitchat", query_type=plan.query_type.value)
-            return RerankedResult(
+            yield RerankedResult(
                 query=search_query,
                 query_type=plan.query_type,
                 complexity_tier=complexity_tier,
                 is_chitchat=True,
             )
+            return
 
         # ---------------------------------------------------------
         # Step 2: Concurrent Retrieval
         # ---------------------------------------------------------
+        yield "正在从知识图谱与向量库中并发检索 (Retrieving)..."
         tasks: list[asyncio.Task[Any]] = []
         task_names: list[str] = []
 
@@ -292,11 +297,13 @@ class RetrievalPipeline:
             elif name == "community":
                 community_result = res
             elif name == "memory":
+                logger.info("rrf_done", merged=0, sources=0)
                 memory_result = res
 
         # ---------------------------------------------------------
         # Step 3: Reciprocal Rank Fusion (RRF)
         # ---------------------------------------------------------
+        yield "正在进行融合处理 (Fusion)..."
         fusion_result = self.fusion.fuse(
             query=search_query,
             graph_result=graph_result,
@@ -403,4 +410,4 @@ class RetrievalPipeline:
             final_items=len(final_result.items),
             qa_memories=len(final_result.qa_memories),
         )
-        return final_result
+        yield final_result

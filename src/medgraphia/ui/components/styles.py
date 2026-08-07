@@ -233,6 +233,33 @@ header {{ background: transparent !important; }}
 .mg-tile-title {{ font-size: 1.05rem; font-weight: 700; color: {TEXT_DARK}; margin: 0; }}
 .mg-tile-desc  {{ font-size: 0.85rem; color: {TEXT_MUTED}; margin: 0.4rem 0 0; line-height: 1.5; }}
 
+/* ── Progress Indicator ── */
+.mg-progress {{
+    display: flex; align-items: center; gap: 10px;
+    color: {ACCENT}; font-weight: 600; font-size: 0.95rem;
+    padding: 0.5rem 0;
+}}
+.mg-progress-icon {{
+    display: inline-block;
+    animation: flipHourglass 1.5s infinite ease-in-out;
+}}
+@keyframes flipHourglass {{
+    0% {{ transform: rotate(0deg); }}
+    50% {{ transform: rotate(180deg); }}
+    100% {{ transform: rotate(180deg); }}
+}}
+.mg-progress-text::after {{
+    content: '';
+    animation: loadingDots 1.5s infinite steps(4, end);
+}}
+@keyframes loadingDots {{
+    0% {{ content: ''; }}
+    25% {{ content: '.'; }}
+    50% {{ content: '..'; }}
+    75% {{ content: '...'; }}
+    100% {{ content: ''; }}
+}}
+
 /* ── Citations ── */
 .mg-cite {{
     display: flex; gap: 12px; align-items: flex-start;
