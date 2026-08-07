@@ -18,7 +18,7 @@ _LM_CACHE: dict[str, dspy.LM] = {}
 
 
 def get_lm(
-    task: Literal["default", "rewriter", "summarizer", "judge"] = "default",
+    task: Literal["default", "rewriter", "summarizer", "judge", "translator"] = "default",
     provider_override: str | None = None,
     model_override: str | None = None,
     temperature: float | None = None,
@@ -43,6 +43,9 @@ def get_lm(
         elif task == "judge" and cfg.judge_llm_provider:
             provider = cfg.judge_llm_provider
             model = cfg.judge_llm_model
+        elif task == "translator" and cfg.translator_llm_provider:
+            provider = cfg.translator_llm_provider
+            model = cfg.translator_llm_model
 
     if provider == "vllm":
         # LM objects are cached below, so this is the only per-call hook we
@@ -82,6 +85,9 @@ def get_lm(
     elif task == "judge" and (cfg.judge_llm_api_key.get_secret_value() or cfg.judge_llm_base_url):
         api_key = cfg.judge_llm_api_key.get_secret_value()
         api_base = cfg.judge_llm_base_url or None
+    elif task == "translator" and (cfg.translator_llm_api_key.get_secret_value() or cfg.translator_llm_base_url):
+        api_key = cfg.translator_llm_api_key.get_secret_value()
+        api_base = cfg.translator_llm_base_url or None
     else:
         # Fallback to standard provider credentials
         if provider == "openai":

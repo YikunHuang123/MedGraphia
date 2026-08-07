@@ -124,6 +124,11 @@ class Settings(BaseSettings):
     summarizer_llm_api_key: SecretStr = SecretStr("")
     summarizer_llm_base_url: str = ""
 
+    translator_llm_provider: str = "groq"
+    translator_llm_model: str = "llama-3.1-8b-instant"
+    translator_llm_api_key: SecretStr = SecretStr("")
+    translator_llm_base_url: str = ""
+
     # Synthetic data generation (Teacher model)
     synthetic_data_llm_provider: str = "deepseek"
     synthetic_data_llm_model: str = "deepseek-v4-pro"
@@ -221,7 +226,6 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     multilingual_retrieval_enabled: bool = True
     multilingual_per_lang_quota: int = 12
-    query_translator_model: str = "facebook/nllb-200-distilled-600M"
 
     # ------------------------------------------------------------------
     # Per-user QA memory (long-term conversational memory)

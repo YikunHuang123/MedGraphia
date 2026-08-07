@@ -31,10 +31,11 @@ async def get_driver() -> AsyncDriver:
                     cfg.neo4j_uri,
                     auth=(cfg.neo4j_user, cfg.neo4j_password.get_secret_value()),
                     database=cfg.neo4j_database,
-                    # Connection pool: keep connections warm, fail fast on startup
-                    max_connection_lifetime=3600,
+                    # Connection pool: fail fast, recycle idle connections before WSL/Docker drops them
+                    max_connection_lifetime=200,
                     max_connection_pool_size=50,
                     connection_timeout=10,
+                    keep_alive=True,
                 )
                 logger.info("neo4j_driver_created", uri=cfg.neo4j_uri)
     return _driver

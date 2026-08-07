@@ -15,11 +15,6 @@ Before the vector retrieval step, translate the query into every other supported
 language.  The retrieval pipeline then runs one language-filtered Qdrant search per
 language using the per-language translation, guaranteeing fair representation in the
 candidate pool regardless of the source language.
-
-Translation backend
---------------------
-Uses a local NLLB-200 model (facebook/nllb-200-distilled-600M) instead of a cloud
-LLM — tens of milliseconds on GPU versus seconds per cloud round trip.
 """
 
 from __future__ import annotations
@@ -35,11 +30,10 @@ logger = get_logger(__name__)
 
 _SUPPORTED: list[Language] = [Language.EN, Language.ZH, Language.DE]
 
-# NLLB-200 uses FLORES-200 language codes, not ISO 639-1.
-_NLLB_LANG_CODES: dict[Language, str] = {
-    Language.EN: "eng_Latn",
-    Language.ZH: "zho_Hans",
-    Language.DE: "deu_Latn",
+_LANG_NAMES: dict[Language, str] = {
+    Language.EN: "English",
+    Language.ZH: "Chinese (Simplified)",
+    Language.DE: "German",
 }
 
 
@@ -58,27 +52,18 @@ class TranslatedQuery:
 
 class QueryTranslator:
     """
-    Translates a medical query into all supported languages via a local NLLB-200
-    model. Translations for different target languages run concurrently via
-    asyncio.to_thread so the event loop is not blocked during GPU inference.
+    Translates a medical query into all supported languages via DSPy + LLM.
+
+    Reuses the 'rewriter' LM task (Qwen2.5 or equivalent) so no additional
+    provider configuration is needed.  Translations run in parallel via
+    asyncio.to_thread so the event loop is not blocked during LLM network IO.
 
     Falls back to the original query for any language where translation fails,
     ensuring the retrieval pipeline always produces a usable candidate pool.
     """
 
-    def __init__(self, model_name: str | None = None) -> None:
-        from medgraphia.config import get_settings
-
-        self._model_name = model_name or get_settings().query_translator_model
-        self._model: Any = None  # lazy-loaded
-        self._tokenizer: Any = None
-        self._device: str = "cpu"
-        self._load_lock = asyncio.Lock()
-        # Fast tokenizer panics ("Already borrowed") under concurrent to_thread calls without this.
-        self._inference_lock = asyncio.Lock()
-
     @classmethod
-    def from_settings(cls) -> QueryTranslator:
+    def from_settings(cls) -> "QueryTranslator":
         return cls()
 
     async def translate(
@@ -105,7 +90,10 @@ class QueryTranslator:
         if not target_languages:
             return TranslatedQuery(original=query, source_language=source_language)
 
-        coros = [self._translate_one(query, source_language, tgt) for tgt in target_languages]
+        coros = [
+            self._translate_one(query, source_language, tgt)
+            for tgt in target_languages
+        ]
         results = await asyncio.gather(*coros, return_exceptions=True)
 
         translations: dict[Language, str] = {}
@@ -130,60 +118,43 @@ class QueryTranslator:
     # Internal
     # ------------------------------------------------------------------
 
-    async def _ensure_loaded(self) -> None:
-        if self._model is not None:
-            return
-        async with self._load_lock:
-            if self._model is not None:
-                return
-            await asyncio.to_thread(self._load_model_sync)
-
-    def _load_model_sync(self) -> None:
-        import torch
-        from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-
-        device = "cpu"
-        if torch.backends.mps.is_available():
-            device = "mps"
-        elif torch.cuda.is_available():
-            device = "cuda"
-        self._device = device
-
-        logger.info("query_translator_loading", model=self._model_name, device=device)
-        self._tokenizer = AutoTokenizer.from_pretrained(self._model_name)
-        dtype = torch.float16 if device != "cpu" else torch.float32
-        self._model = AutoModelForSeq2SeqLM.from_pretrained(self._model_name, torch_dtype=dtype).to(device)
-        self._model.eval()
-        logger.info("query_translator_loaded", model=self._model_name, device=device)
-
-    def _translate_sync(self, query: str, source_language: Language, target_language: Language) -> str:
-        import torch
-
-        src_code = _NLLB_LANG_CODES[source_language]
-        tgt_code = _NLLB_LANG_CODES[target_language]
-
-        self._tokenizer.src_lang = src_code
-        inputs = self._tokenizer(query, return_tensors="pt").to(self._device)
-
-        with torch.no_grad():
-            generated = self._model.generate(
-                **inputs,
-                forced_bos_token_id=self._tokenizer.convert_tokens_to_ids(tgt_code),
-                max_new_tokens=256,
-            )
-        return self._tokenizer.batch_decode(generated, skip_special_tokens=True)[0].strip()
-
     async def _translate_one(
         self,
         query: str,
         source_language: Language,
         target_language: Language,
     ) -> str:
-        await self._ensure_loaded()
-        async with self._inference_lock:
-            translated = await asyncio.to_thread(
-                self._translate_sync, query, source_language, target_language
-            )
+        src_name = _LANG_NAMES[source_language]
+        tgt_name = _LANG_NAMES[target_language]
+
+        def _sync() -> str:
+            import dspy
+            from medgraphia.llm.dspy_setup import get_lm
+
+            lm = get_lm("translator")
+
+            class TranslateMedicalQuery(dspy.Signature):
+                """Translate a medical query from source_lang to target_lang.
+                Preserve all clinical and pharmacological terminology precisely.
+                Output ONLY the translated text — no explanation, no prefix."""
+
+                source_text: str = dspy.InputField(desc="Medical query to translate")
+                source_lang: str = dspy.InputField(desc="Language of source_text")
+                target_lang: str = dspy.InputField(desc="Language to translate into")
+                translated_text: str = dspy.OutputField(
+                    desc="Translation only, no additional text"
+                )
+
+            with dspy.context(lm=lm):
+                pred = dspy.Predict(TranslateMedicalQuery)(
+                    source_text=query,
+                    source_lang=src_name,
+                    target_lang=tgt_name,
+                )
+            return pred.translated_text.strip()
+
+        # Run synchronous DSPy/LLM call in a thread so the event loop stays free
+        translated = await asyncio.to_thread(_sync)
         logger.info(
             "query_translated",
             src=source_language.value,

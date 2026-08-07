@@ -161,9 +161,18 @@ class RetrievalPipeline:
                 logger.warning("multilingual_expansion_skipped", error=str(exc))
 
         # ---------------------------------------------------------
-        # Step 1: Route & Plan (using the rewritten query)
+        # Step 1: Route & Plan (using the rewritten query or its English translation)
+        # We prefer English for NER/Routing because SapBERT has 99% accuracy on 
+        # English entities but can hallucinate on Chinese phonetic transliterations (e.g. Ibuprofen -> Baclofen).
         # ---------------------------------------------------------
-        plan: RetrievalPlan = await self.router.route_async(search_query, language=language)
+        routing_query = search_query
+        routing_lang = language or Language.EN
+
+        if queries_by_language and Language.EN in queries_by_language:
+            routing_query = queries_by_language[Language.EN]
+            routing_lang = Language.EN
+
+        plan: RetrievalPlan = await self.router.route_async(routing_query, language=routing_lang)
 
         # No medical keyword matched and no entity was linked (e.g. a greeting) —
         # there is nothing to retrieve. Skip graph/vector/community/reranking
