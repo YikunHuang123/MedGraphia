@@ -358,9 +358,9 @@ async def chat_stream(
                 return
 
             # ── No-evidence short-circuit ────────────────────────────────────
-            # Reranker fallback content scored below the noise floor — skip the
-            # LLM call, the context is already known to be useless.
-            if getattr(reranked, "no_evidence", False):
+            # Skip the LLM call when the reranker found nothing usable. With 2+
+            # linked entities, fall through instead so the two-entity gap-completion in generate() can run.
+            if getattr(reranked, "no_evidence", False) and len(getattr(reranked, "linked_cuis", [])) < 2:
                 from medgraphia.prompts import get_disclaimer, get_no_info_message
 
                 no_info_text = get_no_info_message(language)
@@ -577,10 +577,9 @@ async def _run_full_pipeline(
         }
 
     # ── No-evidence short-circuit ────────────────────────────────────────────
-    # Reranker fallback content scored below the noise floor — the retrieved
-    # context is known-useless, so skip the LLM call instead of burning one on
-    # a context the reranker already knows won't produce a grounded answer.
-    if getattr(reranked, "no_evidence", False):
+    # Skip the LLM call when the reranker found nothing usable. With 2+ linked
+    # entities, fall through instead so the two-entity gap-completion in generate() can run.
+    if getattr(reranked, "no_evidence", False) and len(getattr(reranked, "linked_cuis", [])) < 2:
         from medgraphia.prompts import get_disclaimer, get_no_info_message
 
         return {

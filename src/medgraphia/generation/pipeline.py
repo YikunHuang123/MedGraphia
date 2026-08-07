@@ -29,13 +29,7 @@ logger = get_logger(__name__)
 
 
 def _build_memory_context(qa_memories: list[Any]) -> str:
-    """
-    Format retrieved QA memories with an explicit relative-time label so the
-    generator can reason about recency/supersession itself (e.g. "user said
-    no diabetes 3 months ago, has diabetes now") instead of treating two
-    contradictory past statements as equally current. No separate contradiction-
-    detection step at write time — the label hands that judgment to the LLM.
-    """
+    """Format QA memories with a relative-time label so the generator can reason about recency itself."""
     if not qa_memories:
         return ""
 

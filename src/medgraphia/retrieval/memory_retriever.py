@@ -1,11 +1,4 @@
-"""
-Per-user conversational memory retriever.
-
-Wraps the (User)-[:ASKED]->(QAText)-[:MENTIONS]->(Entity) graph in
-graph/queries.py — separate from GraphRetriever (which does PPR over the
-shared document corpus) because this reads a per-user private subgraph with
-its own ranking signal (decayed :MENTIONS weight), not corpus PPR.
-"""
+"""Per-user conversational memory retriever, wrapping the QAText graph in graph/queries.py."""
 
 from __future__ import annotations
 

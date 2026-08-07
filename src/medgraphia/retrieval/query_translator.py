@@ -19,9 +19,7 @@ candidate pool regardless of the source language.
 Translation backend
 --------------------
 Uses a local NLLB-200 model (facebook/nllb-200-distilled-600M) instead of a cloud
-LLM: translation is a narrow, mechanical task that a purpose-built seq2seq model
-handles in tens of milliseconds on GPU, versus seconds for a chat-LLM round trip
-over the network — same reasoning as using BERT/GLiNER for NER instead of an LLM.
+LLM — tens of milliseconds on GPU versus seconds per cloud round trip.
 """
 
 from __future__ import annotations
@@ -76,9 +74,7 @@ class QueryTranslator:
         self._tokenizer: Any = None
         self._device: str = "cpu"
         self._load_lock = asyncio.Lock()
-        # The fast (Rust) tokenizer and the shared model instance are not safe for
-        # concurrent use from multiple threads — "Already borrowed" panics under
-        # asyncio.gather's parallel to_thread calls without this.
+        # Fast tokenizer panics ("Already borrowed") under concurrent to_thread calls without this.
         self._inference_lock = asyncio.Lock()
 
     @classmethod

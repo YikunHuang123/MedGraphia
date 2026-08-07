@@ -73,10 +73,8 @@ class RetrievalPlan:
 # Rule-based keyword classifier
 # ---------------------------------------------------------------------------
 
-# Substring-matched against the raw query text — deliberately a short,
-# specific list (unlike query_ner.py's exact-match NER-label filter, a
-# substring check on something generic like "hi" would false-positive on
-# any word containing it, e.g. "history").
+# Substring-matched against raw query text; kept short since a generic word
+# like "hi" would false-positive on unrelated matches (e.g. "history").
 _SELF_REFERENCE_TERMS = ("medgraphia",)
 
 # Each entry: (QueryType, list-of-regex-patterns, minimum-matches-required)
@@ -211,13 +209,8 @@ def _classify_by_rules(query: str, entities: QueryEntities) -> tuple[QueryType, 
     """
     query_lower = query.lower()
 
-    # A query about the product itself is never a real medical/FAQ query,
-    # even if it happens to match a generic keyword rule like "what is X"
-    # (rewriter often turns "what is this?" into "What is MedGraphia?").
-    # query_ner.py already filters "medgraphia" out of NER entities, but that
-    # only blocks the entity-based signal — the keyword-rule match below is
-    # independent of entities and fires regardless, so it needs its own check
-    # here, before the rule loop, not after.
+    # Self-reference check runs before keyword rules — "what is MedGraphia?"
+    # would otherwise match the generic "what is X" rule regardless of entities.
     if any(term in query_lower for term in _SELF_REFERENCE_TERMS):
         return QueryType.PATIENT_FAQ, False
 

@@ -29,6 +29,23 @@ from medgraphia.retrieval.vector_retriever import VectorRetriever
 logger = get_logger(__name__)
 
 
+def _dedupe_overlapping_entities(entities: list[Any]) -> list[Any]:
+    """Collapse overlapping-span entities into the highest-confidence one per cluster."""
+    ranked = sorted(entities, key=lambda e: -e.confidence)
+    kept: list[Any] = []
+    for e in ranked:
+        if e.start_char is None or e.end_char is None:
+            kept.append(e)
+            continue
+        overlaps = any(
+            k.start_char is not None and not (e.end_char <= k.start_char or e.start_char >= k.end_char)
+            for k in kept
+        )
+        if not overlaps:
+            kept.append(e)
+    return kept
+
+
 class RetrievalPipeline:
     """
     End-to-end orchestrator for the GraphRAG retrieval phase.
@@ -325,31 +342,20 @@ class RetrievalPipeline:
             top_k=top_k,
         )
 
-        # ---------------------------------------------------------
-        # Step 4.5: Single-entity live gap fill — only when local retrieval
-        # found genuinely nothing (no_evidence), not merely "results are
-        # mediocre". This is deliberately gated on the reranker's own
-        # noise-floor verdict rather than "any entity lacks coverage", so it
-        # fires rarely instead of on every thin single-entity query, and
-        # doesn't mask retrieval bugs (e.g. a real answer existing under a
-        # different CUI) by quietly fetching duplicate content instead.
-        # ---------------------------------------------------------
+        # Step 4.5: single-entity live gap fill, only when local retrieval found
+        # nothing (no_evidence) and the query names exactly one distinct topic.
+        # Two+ distinct entities defer to the two-entity relationship-gap path in
+        # generation/agentic_completion.py instead.
         from medgraphia.config import get_settings as _get_settings
 
-        if final_result.no_evidence and _get_settings().single_entity_gap_completion_enabled:
-            # Prefer the highest-confidence *linked* entity (already vetted by
-            # SapBERT against real CUIs) over entities[0] — GLiNER and BERT-NER
-            # both run and can each emit a span for the same mention; a raw
-            # NER fragment (e.g. "romegaly" from "acromegaly") can end up
-            # first in the list ahead of the correct, linked extraction.
-            entity_label = None
-            linked_entities = [
-                e for e in plan.query_entities.entities if not e.cui.startswith("MENTION:")
-            ]
-            if linked_entities:
-                entity_label = max(linked_entities, key=lambda e: e.confidence).label
-            elif plan.query_entities.entities:
-                entity_label = plan.query_entities.entities[0].label
+        distinct_entities = _dedupe_overlapping_entities(plan.query_entities.entities)
+
+        if (
+            final_result.no_evidence
+            and _get_settings().single_entity_gap_completion_enabled
+            and len(distinct_entities) == 1
+        ):
+            entity_label = distinct_entities[0].label
             if entity_label:
                 from medgraphia.retrieval.fusion import FusionResult, chunk_to_fused_item
                 from medgraphia.retrieval.query_time_completion import complete_single_entity_gap

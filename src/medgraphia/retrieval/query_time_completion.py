@@ -18,14 +18,7 @@ logger = get_logger(__name__)
 
 
 async def complete_single_entity_gap(entity: str, pubmed_limit: int = 5) -> tuple[str, list[Any]]:
-    """
-    Fetch evidence about a single entity and ingest it — the single-entity
-    counterpart to complete_gap(). Triggered only when the reranker's own
-    no_evidence signal says local retrieval came up genuinely empty (not
-    merely "results are mediocre"), so this fires far less often than a
-    naive "any uncovered entity" gate would, and doesn't paper over
-    corpus-quality bugs the same way a low-relevance-score trigger would.
-    """
+    """Fetch and ingest evidence about a single entity — the single-entity counterpart to complete_gap()."""
     from medgraphia.data.pubmed import PubMedConnector, PubMedFetchConfig
     from medgraphia.ingestion.lightweight_extract import docs_to_chunks, write_chunks_to_graph
 

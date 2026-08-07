@@ -649,14 +649,9 @@ async def get_user_top_interests(
 
 
 # ---------------------------------------------------------------------------
-# Per-user QA memory (conversational long-term memory)
-#
-# (User) -[:ASKED]-> (QAText) -[:MENTIONS]-> (Entity)
-#
-# QAText nodes are never shared between users: the only edge that reaches one
-# is the exclusive :ASKED edge from its owning User, so any query anchored at
-# MATCH (u:User {id: $user_id}) can never return another user's QAText —
-# Entity nodes stay shared (they're domain knowledge), QAText nodes don't.
+# Per-user QA memory: (User) -[:ASKED]-> (QAText) -[:MENTIONS]-> (Entity)
+# QAText's only inbound edge is the exclusive :ASKED from its owning User, so
+# queries anchored at MATCH (u:User {id: $user_id}) never leak other users' QAText.
 # ---------------------------------------------------------------------------
 
 
@@ -669,19 +664,8 @@ async def write_qa_memory(
 ) -> None:
     """
     Persist one conversational turn as a QAText node linked to every entity
-    mentioned in the question+answer (not just the "main" one) — multi-entity
-    linking is what gives PPR/graph traversal something to differentiate on
-    later; a QAText connected to only one entity is indistinguishable from
-    every other QAText under that same entity (a star graph has no structure
-    for ranking to exploit).
-
-    Capacity is bounded per (user, entity) pair, not per entity globally, so
-    one heavy user can't crowd out another user's memories under a popular
-    entity. Eviction removes the weakest :MENTIONS edge (by decayed weight),
-    not necessarily the whole node — a QAText can still be relevant via its
-    other entity mentions after losing one. A QAText with zero remaining
-    :MENTIONS edges is dead weight (unreachable from any entity-seeded
-    query) and is deleted outright.
+    mentioned in it. Capacity is bounded per (user, entity) pair; eviction drops
+    the weakest :MENTIONS edge and deletes the QAText once it has none left.
     """
     if user_id == "anonymous":
         return
@@ -749,14 +733,7 @@ async def _evict_qa_memory_if_over_capacity(
 async def get_user_qa_memories(
     user_id: str, cuis: list[str], limit: int = 5, half_life_days: float = 30.0
 ) -> list[dict[str, str]]:
-    """
-    Return this user's own past QA turns relevant to the given (current
-    query) CUIs, ranked by decayed :MENTIONS weight — recency plus how often
-    this specific memory has actually been retrieved and used since
-    (reinforce_qa_memory bumps the weight on real usage, not just on
-    creation, so a memory that keeps proving relevant survives regardless of
-    how old it is — least-recently-*useful*, not least-recently-created).
-    """
+    """Return this user's past QA turns for the given CUIs, ranked by decayed :MENTIONS weight."""
     if user_id == "anonymous" or not cuis:
         return []
 
@@ -787,11 +764,7 @@ async def get_user_qa_memories(
 
 
 async def reinforce_qa_memory(user_id: str, qa_ids: list[str], cuis: list[str], decay_factor: float = 0.9) -> None:
-    """
-    Bump the :MENTIONS edges for QA memories that were actually retrieved and
-    used in a response — the read-time half of the LRU-style importance
-    signal (write-time half is the initial weight=1.0 in write_qa_memory).
-    """
+    """Bump :MENTIONS edges for QA memories actually used in a response (read-time reinforcement)."""
     if user_id == "anonymous" or not qa_ids or not cuis:
         return
 

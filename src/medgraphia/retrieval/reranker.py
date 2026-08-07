@@ -183,9 +183,7 @@ class Reranker:
             item.metadata["reranker_score"] = float(score)
             reranked_items.append(item)
 
-        # Fallback content scoring below the noise floor isn't "weak evidence" the
-        # LLM can hedge on — it's noise. Skip generation entirely rather than
-        # burning an LLM call on a context the reranker already knows is useless.
+        # Below the noise floor, fallback content is noise, not weak evidence — skip generation.
         no_evidence = used_fallback and bool(ranked) and ranked[0][0] < self._noise_floor
 
         logger.info(

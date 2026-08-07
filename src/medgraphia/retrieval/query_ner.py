@@ -19,14 +19,8 @@ _QUERY_SOURCE = SourceMeta(
     source_version="",
 )
 
-# Known GLiNER zero-shot false positives on short/ambiguous non-medical
-# tokens (e.g. "hi" and "bye" get tagged as EntityType.PROCEDURE at ~0.5-0.7
-# confidence, well above ner_gliner_threshold) plus the product's own name
-# ("MedGraphia" — its "Med..." prefix sits close to real biomedical terms in
-# embedding space, SapBERT confidently mislinks it to unrelated MeSH concepts
-# like "Medical Writing"). Not every possible false positive is enumerable —
-# this list only covers cases actually observed in production logs — but each
-# one otherwise defeats the chitchat/no-signal routing gate in router.py.
+# Known NER/EL false positives (e.g. GLiNER tags "hi"/"bye" as a Procedure;
+# SapBERT mislinks "MedGraphia" to "Medical Writing"). Not exhaustive, just observed cases.
 _KNOWN_NER_FALSE_POSITIVES = {
     "medgraphia",
     "hi",
