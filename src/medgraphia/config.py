@@ -196,6 +196,12 @@ class Settings(BaseSettings):
     rate_limit_ip_daily: int = 4
     rate_limit_global_daily: int = 80
 
+    # Global concurrency cap on /chat and /chat/stream (Redis-backed; no-op if
+    # Redis is unreachable). Requests over the cap queue instead of being
+    # rejected — see api/concurrency.py.
+    concurrency_limit_enabled: bool = True
+    concurrency_max_active: int = 2
+
     # Comma-separated allowed CORS origins, e.g. "https://your-domain.com".
     # "*" (default) allows any origin — fine for local dev, tighten for public deployments.
     cors_allowed_origins: str = "*"

@@ -811,7 +811,7 @@ cp .env.example .env
 | Query-time completion | `GAP_COMPLETION_ENABLED`, `GAP_COMPLETION_MAX_TOOL_CALLS`, `GAP_COMPLETION_PUBMED_LIMIT`, `SINGLE_ENTITY_GAP_COMPLETION_ENABLED` | Control targeted PubMed retrieval and graph completion (two-entity relation gaps / single-entity evidence gaps) |
 | Multilingual retrieval | `MULTILINGUAL_RETRIEVAL_ENABLED`, `MULTILINGUAL_PER_LANG_QUOTA` | Control ZH/EN/DE query translation and per-language retrieval quotas |
 | Authentication and service | `AUTH_STRATEGY`, `ADMIN_BOOTSTRAP_KEY`, `API_HOST`, `API_PORT` | Configure API authentication, the admin bootstrap key, and the listening address |
-| Access control | `RATE_LIMIT_ENABLED`, `RATE_LIMIT_IP_DAILY`, `RATE_LIMIT_GLOBAL_DAILY`, `CORS_ALLOWED_ORIGINS` | Daily request quota for public deployments (per-IP + global), admin keys exempt; each anonymous visitor gets an isolated session via a browser cookie; `CORS_ALLOWED_ORIGINS` defaults to `*`, set it to your real domain(s) for a public deployment |
+| Access control | `RATE_LIMIT_ENABLED`, `RATE_LIMIT_IP_DAILY`, `RATE_LIMIT_GLOBAL_DAILY`, `CONCURRENCY_LIMIT_ENABLED`, `CONCURRENCY_MAX_ACTIVE`, `CORS_ALLOWED_ORIGINS` | Daily request quota (per-IP + global) and a global concurrency cap for public deployments — requests over the cap queue instead of being rejected, with a status message pushed on `/chat/stream`; admin keys exempt. Each anonymous visitor gets an isolated session via a browser cookie; `CORS_ALLOWED_ORIGINS` defaults to `*`, set it to your real domain(s) for a public deployment |
 
 The current default cloud LLM routing is:
 
@@ -975,7 +975,8 @@ MedGraphia/
     │   ├── admin.py                # Pipeline trigger, model config, user management
     │   ├── health.py               # GET /health/live  &  GET /health/ready
     │   ├── auth.py                 # API key auth (lite) / Keycloak OIDC (enterprise)
-    │   └── rate_limit.py           # Daily request throttling (per-IP + global, Redis fixed window)
+    │   ├── rate_limit.py           # Daily request throttling (per-IP + global, Redis fixed window)
+    │   └── concurrency.py          # Global concurrency cap — queues requests over the limit instead of rejecting them
     │
     ├── cache/                      # Redis-backed caching layer
     │   ├── redis_client.py         # Async Redis singleton with graceful no-op fallback

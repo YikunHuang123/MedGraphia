@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from medgraphia.api.auth import require_api_key
+from medgraphia.api.concurrency import ConcurrencyQueueTimeout, release_slot, wait_for_slot
 from medgraphia.api.rate_limit import enforce_daily_rate_limit
 from medgraphia.api.deps import create_or_get_session, save_session
 from medgraphia.api.schemas import ChatRequest, ChatResponse
@@ -149,7 +150,31 @@ async def chat(
     """
     Execute the full retrieval-augmented generation pipeline and return a
     complete, citation-annotated answer.
+
+    Queues behind the global concurrency cap first — this endpoint can't
+    stream interim "you're in queue" feedback like /chat/stream does, so it
+    just waits (or times out with a 503) before running the real pipeline.
     """
+    try:
+        async for _ in wait_for_slot():
+            pass
+    except ConcurrencyQueueTimeout as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="This demo is too busy right now. Please try again in a minute.",
+        ) from exc
+
+    try:
+        return await _chat_impl(body, request, principal)
+    finally:
+        await release_slot()
+
+
+async def _chat_impl(
+    body: ChatRequest,
+    request: Request,
+    principal: dict,
+) -> ChatResponse:
     t0 = time.monotonic()
     session = await create_or_get_session(body.session_id)
     request_id: str = request.state.request_id if hasattr(request.state, "request_id") else ""
@@ -542,8 +567,28 @@ async def chat_stream(
 
             trace.update(output=full_text[:500])
 
+    async def _gated_event_stream() -> AsyncIterator[str]:
+        """Queues behind the global concurrency cap before running _event_stream()."""
+        try:
+            async for msg in wait_for_slot():
+                yield _sse({"type": "progress", "content": msg})
+        except ConcurrencyQueueTimeout:
+            yield _sse(
+                {
+                    "type": "error",
+                    "detail": "This demo is too busy right now. Please try again in a minute.",
+                }
+            )
+            return
+
+        try:
+            async for event in _event_stream():
+                yield event
+        finally:
+            await release_slot()
+
     return StreamingResponse(
-        _event_stream(),
+        _gated_event_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
