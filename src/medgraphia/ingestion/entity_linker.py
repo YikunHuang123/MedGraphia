@@ -213,8 +213,11 @@ class EntityLinker:
         if self._sapbert is not None or not _SAPBERT_AVAILABLE:
             return
         try:
-            logger.info("el_sapbert_loading", model=self._sapbert_model_name)
-            self._sapbert = _ST(self._sapbert_model_name)
+            from medgraphia.ingestion.embedder import _detect_device
+
+            device = _detect_device()
+            logger.info("el_sapbert_loading", model=self._sapbert_model_name, device=device)
+            self._sapbert = _ST(self._sapbert_model_name, device=device)
             logger.info("el_sapbert_loaded")
         except Exception as exc:
             logger.warning("el_sapbert_load_failed", error=str(exc))

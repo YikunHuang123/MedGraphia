@@ -119,10 +119,12 @@ def create_app() -> FastAPI:
     )
 
     # ── CORS ─────────────────────────────────────────────────────────────────
-    # In production, replace allow_origins=["*"] with an explicit domain list.
+    # Origins come from CORS_ALLOWED_ORIGINS (comma-separated); defaults to "*"
+    # for local dev. Set it to your actual domain(s) for a public deployment.
+    origins = [o.strip() for o in cfg.cors_allowed_origins.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

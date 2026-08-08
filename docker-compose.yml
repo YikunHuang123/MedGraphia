@@ -15,9 +15,11 @@ services:
     image: neo4j:2026.05.0
     container_name: medgraphia_neo4j
     restart: unless-stopped
+    # Bound to localhost only — api/worker reach it via the internal Docker
+    # network; SSH-tunnel in for Neo4j Browser access, never expose publicly.
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
     environment:
       NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:-neo4j}"
       NEO4J_server_memory_pagecache_size: "${NEO4J_PAGE_CACHE:-2G}"
@@ -41,9 +43,11 @@ services:
     image: qdrant/qdrant:v1.18.2
     container_name: medgraphia_qdrant
     restart: unless-stopped
+    # Bound to localhost only — has no auth by default (QDRANT__SERVICE__API_KEY
+    # below is unset), so it must never be reachable from outside this host.
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
     # environment:
     #   QDRANT__SERVICE__API_KEY: "${QDRANT_API_KEY:-}"
     volumes:
@@ -62,8 +66,10 @@ services:
     image: redis:7-alpine
     container_name: medgraphia_redis
     restart: unless-stopped
+    # Bound to localhost only — no password is configured, so it must never
+    # be reachable from outside this host.
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru

@@ -61,6 +61,20 @@ _BGE_M3_DIM: int = 1024  # BGE-M3 dense output dimension
 _SAPBERT_DIM: int = 768  # SapBERT dense output dimension
 
 
+def _detect_device() -> str:
+    """cuda > mps > cpu — explicit so we don't depend on a given library's own default."""
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return "cuda"
+        if torch.backends.mps.is_available():
+            return "mps"
+    except ImportError:
+        pass
+    return "cpu"
+
+
 # ---------------------------------------------------------------------------
 # BGE-M3 chunk embedder
 # ---------------------------------------------------------------------------
@@ -90,7 +104,7 @@ class MedicalEmbedder:
         self._model_name = model_name
         self._batch_size = batch_size
         self._use_colbert = use_colbert
-        self._device = device  # None → FlagEmbedding auto-detects (CUDA if available)
+        self._device = device or _detect_device()
         self._model: Any = None  # lazy-loaded on first encode call
 
     @classmethod
@@ -196,9 +210,11 @@ class EntityEmbedder:
         self,
         model_name: str = "cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR",
         batch_size: int = 64,
+        device: str | None = None,
     ) -> None:
         self._model_name = model_name
         self._batch_size = batch_size
+        self._device = device or _detect_device()
         self._model: Any = None
 
     @classmethod
@@ -223,8 +239,8 @@ class EntityEmbedder:
             raise RuntimeError(
                 "sentence-transformers is not installed. Run: pip install sentence-transformers"
             )
-        logger.info("entity_embedder_loading", model=self._model_name)
-        self._model = _ST(self._model_name)
+        logger.info("entity_embedder_loading", model=self._model_name, device=self._device)
+        self._model = _ST(self._model_name, device=self._device)
         logger.info("entity_embedder_loaded")
 
     async def embed_and_store(

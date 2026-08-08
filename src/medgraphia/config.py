@@ -190,10 +190,15 @@ class Settings(BaseSettings):
 
     # Daily request caps on /chat and /chat/stream (Redis-backed; no-op if Redis
     # is unreachable). Admin-role keys are exempt. Protects LLM spend on public demos.
+    # rate_limit_ip_daily keys on the UI's X-Client-ID guest cookie when present
+    # (falls back to raw IP for direct API callers) — see api/rate_limit.py.
     rate_limit_enabled: bool = True
     rate_limit_ip_daily: int = 4
-    # rate_limit_ip_daily: int = 1
     rate_limit_global_daily: int = 80
+
+    # Comma-separated allowed CORS origins, e.g. "https://your-domain.com".
+    # "*" (default) allows any origin — fine for local dev, tighten for public deployments.
+    cors_allowed_origins: str = "*"
 
     keycloak_server_url: str = ""
     keycloak_realm: str = "medgraphia"

@@ -811,7 +811,7 @@ cp .env.example .env
 | Query-time completion | `GAP_COMPLETION_ENABLED`, `GAP_COMPLETION_MAX_TOOL_CALLS`, `GAP_COMPLETION_PUBMED_LIMIT`, `SINGLE_ENTITY_GAP_COMPLETION_ENABLED` | Control targeted PubMed retrieval and graph completion (two-entity relation gaps / single-entity evidence gaps) |
 | Multilingual retrieval | `MULTILINGUAL_RETRIEVAL_ENABLED`, `MULTILINGUAL_PER_LANG_QUOTA` | Control ZH/EN/DE query translation and per-language retrieval quotas |
 | Authentication and service | `AUTH_STRATEGY`, `ADMIN_BOOTSTRAP_KEY`, `API_HOST`, `API_PORT` | Configure API authentication, the admin bootstrap key, and the listening address |
-| Access control | `RATE_LIMIT_ENABLED`, `RATE_LIMIT_IP_DAILY`, `RATE_LIMIT_GLOBAL_DAILY` | Daily request quota for public deployments (per-IP + global), admin keys exempt; each anonymous visitor gets an isolated session via a browser cookie |
+| Access control | `RATE_LIMIT_ENABLED`, `RATE_LIMIT_IP_DAILY`, `RATE_LIMIT_GLOBAL_DAILY`, `CORS_ALLOWED_ORIGINS` | Daily request quota for public deployments (per-IP + global), admin keys exempt; each anonymous visitor gets an isolated session via a browser cookie; `CORS_ALLOWED_ORIGINS` defaults to `*`, set it to your real domain(s) for a public deployment |
 
 The current default cloud LLM routing is:
 
