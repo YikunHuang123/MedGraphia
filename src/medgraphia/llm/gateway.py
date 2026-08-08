@@ -95,132 +95,47 @@ class CompletionResponse:
 
 
 def _build_litellm_model_id(provider: LLMProvider, model_name: str) -> str:
-    """
-    Map (provider, model_name) → the model string litellm expects.
+    """Map (provider, model_name) to the model string litellm expects. See llm/providers.py."""
+    from medgraphia.llm.providers import build_litellm_model_id
 
-    LiteLLM routing table reference:
-      https://docs.litellm.ai/docs/providers
-    """
-    if not model_name:
-        return ""
-
-    prefix = provider.value
-    if provider == LLMProvider.VLLM:
-        prefix = "hosted_vllm"
-    elif provider == LLMProvider.OPENAI:
-        # OpenAI doesn't strictly need a prefix in litellm, but if we want to be safe:
-        # Actually litellm supports 'openai/...' or just '...'.
-        # We'll just return model_name if it's OPENAI and doesn't start with a known litellm provider.
-        return model_name
-
-    if model_name.startswith(f"{prefix}/"):
-        return model_name
-        
-    return f"{prefix}/{model_name}"
+    return build_litellm_model_id(provider.value, model_name)
 
 
 def _build_extra_kwargs(provider: LLMProvider, cfg: Any, model_name: str = "") -> dict[str, Any]:
-    """Build litellm keyword arguments (api_key, api_base) for each provider."""
+    """Build litellm keyword arguments (api_key, api_base) for a provider via the shared registry."""
+    from medgraphia.llm.providers import resolve_credentials
+
     kwargs: dict[str, Any] = {}
 
-    def get_secret(attr_name: str) -> str | None:
-        secret_obj = getattr(cfg, attr_name, None)
-        if secret_obj and hasattr(secret_obj, "get_secret_value"):
-            return secret_obj.get_secret_value()
-        return None
+    if provider == LLMProvider.OLLAMA:
+        creds = resolve_credentials(provider.value, cfg)
+        kwargs["api_base"] = creds.base_url
+        kwargs["api_key"] = "ollama"
+        # Ollama's default keep_alive is 5 minutes — any gap longer than that
+        # (very common between chat turns) unloads the model, forcing a full
+        # reload on the next call. extra_body is required: litellm silently
+        # drops a top-level keep_alive kwarg instead of forwarding it.
+        kwargs["extra_body"] = {"keep_alive": "30m"}
+        return kwargs
 
-    match provider:
-        case LLMProvider.OPENAI:
-            key = get_secret("openai_api_key")
-            if key:
-                kwargs["api_key"] = key
-            base = getattr(cfg, "openai_base_url", "")
-            if base:
-                kwargs["api_base"] = base
+    if provider == LLMProvider.VLLM:
+        # Each vLLM-backed tier is its own engine/process — route by the exact
+        # model_name being called, not by tier, falling back to vllm_base_url.
+        if model_name == getattr(cfg, "llm_small_model", None):
+            base = getattr(cfg, "vllm_small_base_url", "")
+        elif model_name == getattr(cfg, "llm_medium_model", None):
+            base = getattr(cfg, "vllm_medium_base_url", "")
+        else:
+            base = getattr(cfg, "vllm_base_url", "")
+        kwargs["api_base"] = base or "http://localhost:8000/v1"
+        kwargs["api_key"] = "vllm"  # vLLM's OpenAI-compatible server ignores this unless --api-key is set
+        return kwargs
 
-        case LLMProvider.ANTHROPIC:
-            key = get_secret("anthropic_api_key")
-            if key:
-                kwargs["api_key"] = key
-
-        case LLMProvider.DEEPSEEK:
-            key = get_secret("deepseek_api_key")
-            if key:
-                kwargs["api_key"] = key
-            # Allow override via llm_base_url if provided, otherwise use official
-            base = getattr(cfg, "llm_base_url", "")
-            kwargs["api_base"] = base or "https://api.deepseek.com"
-
-        case LLMProvider.GEMINI:
-            key = get_secret("gemini_api_key")
-            if key:
-                kwargs["api_key"] = key
-
-        case LLMProvider.GROQ:
-            key = get_secret("groq_api_key")
-            if key:
-                kwargs["api_key"] = key
-
-        case LLMProvider.OPENROUTER:
-            key = get_secret("openrouter_api_key")
-            if key:
-                kwargs["api_key"] = key
-
-        case LLMProvider.FIREWORKS_AI:
-            key = get_secret("fireworks_api_key")
-            if key:
-                kwargs["api_key"] = key
-                import os
-                os.environ.setdefault("FIREWORKS_API_KEY", key)
-
-        case LLMProvider.TOGETHER_AI:
-            key = get_secret("together_api_key")
-            if key:
-                kwargs["api_key"] = key
-
-        case LLMProvider.CEREBRAS:
-            key = get_secret("cerebras_api_key")
-            if key:
-                kwargs["api_key"] = key
-                import os
-                os.environ.setdefault("CEREBRAS_API_KEY", key)
-            kwargs["api_base"] = "https://api.cerebras.ai/v1"
-
-        case LLMProvider.SILICONFLOW:
-            key = get_secret("siliconflow_api_key")
-            if key:
-                kwargs["api_key"] = key
-                import os
-                os.environ.setdefault("OPENAI_API_KEY", key) # LiteLLM uses openai base for siliconflow
-            kwargs["api_base"] = "https://api.siliconflow.com/v1"
-
-        case LLMProvider.OLLAMA:
-            base = getattr(cfg, "llm_base_url", "") or "http://localhost:11434"
-            kwargs["api_base"] = base
-            kwargs["api_key"] = "ollama"
-            # Ollama's default keep_alive is 5 minutes — any gap longer than that
-            # (very common between chat turns) unloads the model from VRAM, so the
-            # next call pays a full reload (~5-7s measured for llama-guard3:1b,
-            # vs ~0.5-0.7s when still resident). Keep it loaded for 30 minutes.
-            # Must go through extra_body — litellm silently drops a top-level
-            # keep_alive kwarg instead of forwarding it to Ollama (verified live:
-            # passing it directly left the 5-minute default in place; extra_body
-            # is the same escape hatch already used for Qwen3's `think` flag).
-            kwargs["extra_body"] = {"keep_alive": "30m"}
-
-        case LLMProvider.VLLM:
-            # Each vLLM-backed tier is its own engine/process — route by the
-            # exact model_name being called, not by tier (this layer doesn't
-            # know about tiers), falling back to the generic vllm_base_url.
-            if model_name == getattr(cfg, "llm_small_model", None):
-                base = getattr(cfg, "vllm_small_base_url", "")
-            elif model_name == getattr(cfg, "llm_medium_model", None):
-                base = getattr(cfg, "vllm_medium_base_url", "")
-            else:
-                base = getattr(cfg, "vllm_base_url", "")
-            kwargs["api_base"] = base or "http://localhost:8000/v1"
-            kwargs["api_key"] = "vllm"  # vLLM's OpenAI-compatible server ignores this unless --api-key is set
-
+    creds = resolve_credentials(provider.value, cfg)
+    if creds.api_key:
+        kwargs["api_key"] = creds.api_key
+    if creds.base_url:
+        kwargs["api_base"] = creds.base_url
     return kwargs
 
 

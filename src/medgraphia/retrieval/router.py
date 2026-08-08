@@ -414,6 +414,11 @@ class QueryRouter:
     def from_settings(cls) -> QueryRouter:
         return cls()
 
+    @property
+    def ner_linker(self) -> QueryNERLinker:
+        """Public accessor — e.g. for the admin/UI entity search feature."""
+        return self._ner_linker
+
     def route(self, query: str, language: Language | None = None) -> RetrievalPlan:
         """
         Classify a query and return a RetrievalPlan.

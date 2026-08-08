@@ -60,7 +60,7 @@ to roughly 10 seconds of added latency), so the graph keeps getting stronger the
 | ⚡ vLLM Sleep Mode Tier Switching | Whichever tier the LLM router picks gets its vLLM engine woken in real time; every other tier stays asleep and off the GPU:<br>• **Wake-on-demand**: when the router selects a tier, it calls vLLM's `/wake_up` endpoint to wake that engine if it's asleep, and lets it re-sleep automatically after a period of inactivity.<br>• **VRAM reuse**: a sleeping engine frees 90%+ of its weight and KV-cache memory, letting a single 16GB GPU rotate through multiple tiers (e.g. 3B/9B/14B) instead of keeping them all resident at once.<br>• **Measured numbers**: a 3B model takes ~7s to sleep and frees ~13GB of VRAM, then ~3s to wake and resume inference — an order of magnitude faster than a cold start.                                                                                               |
 | 👁️ Multilingual PDF files support (Multi-Engine Parsing & OCR) | Hybrid pipeline using Docling (EN/DE) and MinerU (ZH) for structural layout analysis (tables/formulas). Integrated Tesseract 5 + PaddleOCR fallback for scanned medical records.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 🔗 Mandatory Evidence Citations                                 | Every answer is traceable to a specific chunk, section path, and versioned source — unanswerable questions are refused rather than fabricated                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| 🛡️ Safety Guardrails                                           | Two-stage proactive defense: Llama-Guard 3 input filtering (pre-retrieval) + output moderation (post-generation); aligned with S1-S14 safety categories; mandatory medical disclaimers and automatic model provisioning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 🛡️ Safety Guardrails                                           | Two-stage proactive defense: Llama Guard input filtering (pre-retrieval) + output moderation (post-generation); aligned with S1-S14 safety categories; mandatory medical disclaimers and automatic model provisioning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 📊 RAGAS Evaluation                                             | Standardized evaluation framework using RAGAS; support for automated synthetic medical testset generation with reasoning evolution; offline evaluation of RAG pipeline metrics (Faithfulness, Relevance, Precision, Recall)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ⚡ Redis-Backed NER Result Cache                                | Query-side NER + Entity Linking results (GLiNER → SapBERT-XLMR → MeSH CUI) are persisted in Redis. Repeated or concurrently-identical queries skip BERT inference entirely, cutting routing latency from **2000 ms → 5 ms**.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 🔄 Arq Pipeline Task Queue                                      | The offline build pipeline is dispatched as a durable **Arq** task (Redis-backed) executed by a dedicated worker process.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -207,7 +207,7 @@ flowchart TD
         COMMUNITY["Community Summary Retrieval<br/>global search over Leiden communities<br/>(multi-hop/overview)"]
     end
 
-    FUSION["RRF Fusion + bge-reranker-v2-m3<br/>multilingual cross-encoder reranking"]
+    FUSION["RRF Fusion + cloud cross-encoder reranking (Fireworks)<br/>multilingual reranking"]
     LLMROUTE["LLM Router<br/>SMALL(FAQ) / MEDIUM(Inter.) / LARGE(Decis.)<br/>LiteLLM + LangGraph"]
     GAP["Agentic Gap Completion<br/>Two-entity: LLM judges relation gap · Single-entity: reranker flags evidence as noise<br/>triggers targeted PubMed fetch + NER/link ingest of new chunks"]
     GEN["Generation Pipeline<br/>Pydantic-typed prompts · automated inline [N] citations<br/>medical disclaimer & evidence provenance"]
@@ -288,12 +288,12 @@ The `/graph/entity` API (Graph Explorer) derives a synthetic `CO_OCCURS_WITH` ed
 | **GraphRAG Framework** | Custom Implementation                                                                                                                         | Fuses **Leiden community summarization** (Global), **PPR-based bipartite graph retrieval** (Local), and **MeSH-anchored semantic alignment** for complex cross-corpus reasoning. |
 | **Graph Algorithms** | Neo4j GDS (Personalized PageRank)                                                                                                                       | Transient in-memory bipartite entity-chunk projection                                                                          |
 | **Community Detection** | Leiden algorithm                                                                                                                              | Graph clustering for global QA                                                                                                                                       |
-| **Reranker** | bge-reranker-v2-m3                                                                                                                            | Cross-encoder, multilingual                                                                                                                                          |
-| **Query Translation** | NLLB-200-distilled-600M (Meta)                                                                                                                | Local inference in place of a cloud LLM call; translation is a mechanical task, so a dedicated model beats a general-purpose LLM — roughly 10x faster                |
-| **LLM Inference** | LiteLLM Gateway                                                                                                                               | Unified API layer. Supports **DeepSeek**, **OpenAI**, **Anthropic**, **Groq**, **Ollama**, and **vLLM**.                                                                       |
+| **Reranker** | Cloud cross-encoder (Fireworks, configurable to SiliconFlow/Jina/Cohere)                                                                      | Multilingual reranking; provider URL/credential resolution is centralized in `llm/providers.py`                                                                     |
+| **Query Translation** | DSPy + cloud LLM (Cerebras by default)                                                                                                       | Tried local NLLB-200 first, but translation quality on drug names and other domain terms wasn't good enough for a medical setting — reverted to a cloud LLM          |
+| **LLM Inference** | LiteLLM Gateway                                                                                                                               | Unified API layer. Supports **Fireworks**, **Cerebras**, **DeepSeek**, **OpenAI**, **Anthropic**, **OpenRouter**, **SiliconFlow**, **Groq**, **Ollama**, and **vLLM**.          |
 | **Prompt Optimization** | DSPy (**GEPA**)                                                                                                                                          | Reflective prompt evolution; the reflection model and the model being optimized are deliberately on different providers to avoid self-reflection blind spots; pre-compiled reasoning traces enforce clinical rigor                                                  |
 | **Agent Orchestration** | LangGraph (LangChain)                                                                                                                         | Stateful, branching, retriable query agent                                                                                                                           |
-| **Safety** | Llama-Guard-3-1B                                                                                                                              | Input + output filtering; S1-S14 policy                                                                                                                              |
+| **Safety** | Llama Guard 4 12B (cloud, OpenRouter; switchable to local Ollama + Llama-Guard-3-1B)                                                          | Input + output filtering; S1-S14 policy                                                                                                                              |
 | **Evaluation** | RAGAS                                                                                                                                         | Faithfulness · Answer Relevance · Context Precision/Recall · **Synthetic Testset Generation**                                                                        |
 | **Observability** | Langfuse (self-hosted)                                                                                                                        | prompt/token/latency/cost tracing                                                                                                                                    |
 | **Auth** | API Key                                                                                                                                       | Simple and secure key-based access control                                                                                                                           |
@@ -318,7 +318,7 @@ Run `scripts/pipeline/build_graph.py` (or trigger the Prefect DAG) to kick off a
 
 The full flow is covered above in the architecture diagram and "Technical Deep Dives". A few details worth calling out:
 
-- **Safety check scope**: Llama-Guard 3 blocks categories spanning S1-S14, including self-harm and illegal acts — a hit triggers an immediate refusal before retrieval ever runs.
+- **Safety check scope**: Llama Guard blocks categories spanning S1-S14, including self-harm and illegal acts — a hit triggers an immediate refusal before retrieval ever runs.
 - **Query rewrite example**: `QueryRewriter` resolves pronouns like "What are its side effects?" against conversation history into a standalone query, e.g. "What are the side effects of Metformin?".
 - **The 5 intent classes**: `CLINICAL_DECISION`, `DRUG_INTERACTION`, `LITERATURE_MULTIHOP`, `CROSS_CORPUS`, `PATIENT_FAQ`.
 - **Routing cache**: query-side NER + entity-linking results are cached in Redis (TTL 1h); a cache hit skips BERT/SapBERT inference and cuts routing latency from **2000 ms down to 5 ms**.
@@ -327,19 +327,17 @@ The full flow is covered above in the architecture diagram and "Technical Deep D
 
 ## 🚀 Deployment
 
-MedGraphia defaults to cloud LLM APIs (DeepSeek/OpenAI/Anthropic, etc.) — the only real local GPU consumers are the small models in the retrieval pipeline. Measured on a 4060 Ti 16G:
+MedGraphia defaults to cloud APIs across the board — LLM inference (Fireworks/DeepSeek/Cerebras/OpenAI/Anthropic, etc.), reranking (Fireworks), multilingual query translation (Fireworks/Cerebras), and Llama-Guard (OpenRouter). The only real local GPU consumers are the NER/entity-linking/embedding models in the retrieval pipeline — guardrails, generation, reranking, and translation are no longer part of the local footprint. Measured on a 4060 Ti 16G:
 
 | Local Model | Purpose | Measured VRAM |
 |---|---|---|
-| bge-reranker-v2-m3 | Retrieval reranking | ~1.3 GB |
 | BAAI/bge-m3 | Vector embedding (dense+sparse) | ~1.3 GB |
 | SapBERT-XLMR | Entity linking | ~1.7 GB |
 | GLiNER-biomed-large | NER coarse pass | ~1.4 GB |
 | biomedical-ner-all et al. (BERT) | NER precision pass | ~0.2 GB |
-| NLLB-200-distilled-600M | Multilingual query translation | ~1.2 GB |
-| **Total** | | **~7.5 GB** |
+| **Total** | | **~4.6 GB** |
 
-If you also enable Llama-Guard (running locally via Ollama), add ~1.5 GB; if you switch the generator to local inference too (Ollama/vLLM), reserve additional VRAM sized to that model. **Minimum recommended: 8GB+ VRAM** (retrieval pipeline only); **12GB+ if running local generation + guardrails as well**.
+**Minimum recommended: 6GB+ VRAM.** If you switch Llama-Guard, the generator, etc. to local inference (Ollama/vLLM), reserve additional VRAM sized to that model — e.g. running Llama-Guard locally (`llama_guard_provider=ollama`) adds roughly another 1.5 GB.
 
 ---
 
@@ -419,9 +417,9 @@ Navigate to `http://localhost:8501`. The interactive API docs are at `http://loc
 
 ### Option B — Local Development 
 
-#### 0. Start Ollama
+#### 0. Start Ollama (optional — only needed if you switch to local inference)
 
-Ollama is required for local LLM inference. 
+By default, LLM inference and Llama Guard both run against cloud APIs (see the `.env` settings below), so Ollama isn't required. You only need this step if you want to run the default model or the safety guard locally instead.
 
 Install Ollama from [ollama.com](https://ollama.com), then pull the models and start the service:
 
@@ -429,7 +427,7 @@ Install Ollama from [ollama.com](https://ollama.com), then pull the models and s
 # Pull the inference model (used by extractor / rewriter / generator / summarizer)
 ollama pull qwen2.5:7b
 
-# Pull the safety guard model
+# Pull the safety guard model (only needed if running Llama Guard locally)
 ollama pull llama-guard3:1b
 
 # Ollama starts automatically on install; if not running, start it manually:
@@ -443,11 +441,12 @@ DEFAULT_LLM_PROVIDER=ollama
 DEFAULT_LLM_MODEL=qwen2.5:7b
 LLM_BASE_URL=http://localhost:11434
 
+# Optional: switch Llama Guard from the cloud default (OpenRouter) back to local Ollama
 LLAMA_GUARD_PROVIDER=ollama
 LLAMA_GUARD_MODEL=llama-guard3:1b
 ```
 
-> **Note:** The first API startup will automatically pull `llama-guard3:1b` if it is not already present locally.
+> **Note:** The first API startup will automatically pull `llama-guard3:1b` if it is not already present locally (only applies when `LLAMA_GUARD_PROVIDER=ollama`).
 
 #### 0.5 Optional: Run Local Inference with vLLM + Sleep Mode
 
@@ -584,7 +583,7 @@ curl -X POST http://localhost:8058/chat \
     }
   ],
   "retrieval_paths_used": ["graph_traversal", "hybrid_vector"],
-  "model_used": "deepseek/deepseek-v4-pro"
+  "model_used": "fireworks_ai/accounts/fireworks/models/qwen3p7-plus"
 }
 ```
 
@@ -757,9 +756,9 @@ When two entities in a question lack a known relationship, MedGraphia performs a
 
 The path above only covers "two entities with no known relationship." It doesn't help with the more common case of a single entity the corpus simply has no content for (e.g. "what is acromegaly"). A lighter path handles this instead: rather than a multi-round LLM judgment via LangGraph, it reuses the reranker's own noise-floor verdict — when the fallback candidates score below the noise floor (default 0.05, meaning not even "marginally relevant"), it takes the highest-confidence linked entity from the current question, fires a single targeted PubMed fetch, ingests the results, and reranks the new content once. Compared to the two-entity path, the trigger condition is simpler and deliberately less frequent — it only fires once retrieval is confirmed to have found nothing, not on every thinly-covered single-entity question — so it doesn't add a network round trip to most requests.
 
-### Llama-Guard Cold-Start Latency Optimization
+### Llama-Guard Cold-Start Latency Optimization (Local Ollama Deployment)
 
-Llama-Guard runs locally via Ollama, which by default evicts an idle model from VRAM after 5 minutes. In real conversations, the time users spend reading a response and composing the next question routinely exceeds this window, causing frequent evictions and forcing a full reload on the next call.
+Llama Guard now defaults to the cloud (OpenRouter), which has no cold-start problem — the optimization below only applies if you explicitly switch `LLAMA_GUARD_PROVIDER` back to a local Ollama deployment. Ollama by default evicts an idle model from VRAM after 5 minutes; in real conversations, the time users spend reading a response and composing the next question routinely exceeds this window, causing frequent evictions and forcing a full reload on the next call.
 
 | Scenario | Latency | Change |
 |---|---:|---:|
@@ -804,27 +803,27 @@ cp .env.example .env
 |---|---|---|
 | Data services | `NEO4J_*`, `QDRANT_*`, `REDIS_URL` | Configure the graph database, vector store, optional NER cache, and Arq task queue |
 | Default LLM | `DEFAULT_LLM_PROVIDER`, `DEFAULT_LLM_MODEL`, `LLM_BASE_URL` | Fallback LLM when no task-specific model is selected; supports Ollama, vLLM, DeepSeek, OpenAI, Anthropic, Gemini, and Groq |
-| Tiered routing | `LLM_SMALL_*`, `LLM_MEDIUM_*`, `LLM_LARGE_*` | Configure the SMALL, MEDIUM, and LARGE tiers; all three default to DeepSeek cloud models, with SMALL/MEDIUM optionally switchable to local vLLM (see below) |
+| Tiered routing | `LLM_SMALL_*`, `LLM_MEDIUM_*`, `LLM_LARGE_*` | Configure the SMALL, MEDIUM, and LARGE tiers; all three default to Fireworks cloud models, with SMALL/MEDIUM optionally switchable to local vLLM (see below) |
 | Embeddings | `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_BASE_URL` | Configure BGE-M3 or an Ollama embedding service |
 | Observability | `TRACING_ENABLED`, `METRICS_ENABLED` | Configure Langfuse tracing and metrics |
 | vLLM (optional) | `VLLM_SMALL_BASE_URL`, `VLLM_MEDIUM_BASE_URL`, `VLLM_SLEEP_IDLE_SECONDS` | Per-tier vLLM engine endpoints (default ports 8010/8011) + idle-to-sleep threshold (default 120s) |
-| Safety guardrails | `GUARDRAILS_ENABLED`, `LLAMA_GUARD_*` | Configure Llama-Guard 3 input and output checks; enabling it requires additional VRAM |
+| Safety guardrails | `GUARDRAILS_ENABLED`, `LLAMA_GUARD_*` | Configure Llama Guard input and output checks; defaults to the cloud (OpenRouter), no local VRAM cost — switching to local Ollama requires additional VRAM |
 | Query-time completion | `GAP_COMPLETION_ENABLED`, `GAP_COMPLETION_MAX_TOOL_CALLS`, `GAP_COMPLETION_PUBMED_LIMIT`, `SINGLE_ENTITY_GAP_COMPLETION_ENABLED` | Control targeted PubMed retrieval and graph completion (two-entity relation gaps / single-entity evidence gaps) |
 | Multilingual retrieval | `MULTILINGUAL_RETRIEVAL_ENABLED`, `MULTILINGUAL_PER_LANG_QUOTA` | Control ZH/EN/DE query translation and per-language retrieval quotas |
 | Authentication and service | `AUTH_STRATEGY`, `ADMIN_BOOTSTRAP_KEY`, `API_HOST`, `API_PORT` | Configure API authentication, the admin bootstrap key, and the listening address |
 
-The current default local/cloud LLM routing is:
+The current default cloud LLM routing is:
 
 ```dotenv
-LLM_SMALL_PROVIDER=vllm
-LLM_SMALL_MODEL=Qwen/Qwen2.5-3B-Instruct
-LLM_MEDIUM_PROVIDER=deepseek
-LLM_MEDIUM_MODEL=deepseek-v4-flash
-LLM_LARGE_PROVIDER=deepseek
-LLM_LARGE_MODEL=deepseek-v4-pro
+LLM_SMALL_PROVIDER=fireworks
+LLM_SMALL_MODEL=accounts/fireworks/models/gpt-oss-20b
+LLM_MEDIUM_PROVIDER=fireworks
+LLM_MEDIUM_MODEL=accounts/fireworks/models/deepseek-v4-flash
+LLM_LARGE_PROVIDER=fireworks
+LLM_LARGE_MODEL=accounts/fireworks/models/qwen3p7-plus
 ```
 
-For local deployment, NER, entity linking, embeddings, reranking, and optional Llama-Guard models consume GPU memory. See [Deployment](#-deployment) for the model list and measured VRAM requirements. When using vLLM, start the corresponding OpenAI-compatible service first, then set the selected tier's provider to `vllm`.
+For local deployment, NER, entity linking, embeddings, and optional Llama-Guard models consume GPU memory. See [Deployment](#-deployment) for the model list and measured VRAM requirements. SMALL/MEDIUM can also be switched to local vLLM as needed — start the corresponding OpenAI-compatible service first, then set the selected tier's provider to `vllm`. All cloud provider credential/URL resolution is centralized in `llm/providers.py` — adding a new provider only requires registering it there.
 
 Code-level defaults are defined in `src/medgraphia/config.py`, while `.env.example` is the copyable environment template. At runtime, the active `.env` values take precedence.
 
@@ -928,6 +927,7 @@ MedGraphia/
     │   └── qdrant_store.py         # Qdrant: dense + sparse hybrid (enterprise & lite)
     │
     ├── llm/                        # LLM client layer
+    │   ├── providers.py            # Provider registry: single place for credentials/URLs/litellm prefixes
     │   ├── gateway.py              # LiteLLMGateway: unified multi-provider interface
     │   ├── client.py               # pydantic-ai model factory for structured LLM output
     │   └── dspy_setup.py           # DSPy infrastructure: LM configuration & task routing
@@ -941,20 +941,20 @@ MedGraphia/
     │   ├── pipeline.py             # RetrievalPipeline: orchestrates all retrieval steps
     │   ├── router.py               # Query classification → retrieval strategy selection
     │   ├── rewriter.py             # QueryRewriter: condense history into standalone query
-    │   ├── query_translator.py     # QueryTranslator: translate query into ZH/EN/DE (local NLLB-200)
+    │   ├── query_translator.py     # QueryTranslator: translate query into ZH/EN/DE (DSPy + cloud LLM)
     │   ├── query_ner.py            # NER on incoming query for entity-based graph lookup
     │   ├── query_time_completion.py # Query-time gap completion and targeted PubMed fetch
     │   ├── graph_retriever.py      # Neo4j GDS Personalized PageRank over bipartite entity-chunk graph
     │   ├── vector_retriever.py     # BGE-M3 dense + sparse hybrid search on Qdrant
     │   ├── community_retriever.py  # Leiden community summary search (global QA)
-    │   ├── reranker.py             # bge-reranker-v2-m3 cross-encoder
+    │   ├── reranker.py             # Cloud cross-encoder reranking API (provider in llm/providers.py)
     │   └── fusion.py               # Reciprocal Rank Fusion (RRF) across all three paths
     │
     ├── generation/                 # LLM generation layer
     │   ├── pipeline.py             # GenerationPipeline: context prep → routing → LLM → citations
     │   ├── llm_router.py           # Route by query type / language → SMALL / MEDIUM / LARGE tier
     │   ├── citation.py             # Inline citation injection → provenance
-    │   ├── guard.py                # Llama-Guard 3 safety filtering logic
+    │   ├── guard.py                # Llama Guard safety filtering logic
     │   └── agentic_completion.py   # Tool-driven query-time knowledge completion loop
     │
     ├── prompts/                    # Pydantic-typed prompt modules (DSPy signatures)

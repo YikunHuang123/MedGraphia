@@ -547,12 +547,15 @@ async def _run_full_pipeline(
 
     # ── Retrieval ─────────────────────────────────────────────────────────────
     with trace.span("retrieval", input=query) as span:
-        reranked = await retrieval.execute(
+        reranked = None
+        async for item in retrieval.execute(
             query=query,
             history=history,
             language=language,
             user_id=user_id,
-        )
+        ):
+            if not isinstance(item, str):
+                reranked = item
         items = getattr(reranked, "items", [])
         query_type: QueryType = getattr(reranked, "query_type", QueryType.PATIENT_FAQ)
         complexity_tier = getattr(reranked, "complexity_tier", None)

@@ -80,7 +80,6 @@ class Settings(BaseSettings):
     together_api_key: SecretStr = SecretStr("")
     siliconflow_api_key: SecretStr = SecretStr("")
     cerebras_api_key: SecretStr = SecretStr("")
-    fireworks_api_key: SecretStr = SecretStr("")
 
     # Global default LLM.
     # Directly used (no per-task override available):

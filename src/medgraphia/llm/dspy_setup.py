@@ -61,80 +61,37 @@ def get_lm(
     if cache_key in _LM_CACHE:
         return _LM_CACHE[cache_key]
 
-    # Providers that expose an OpenAI-compatible API: route through "openai/" prefix
-    # so LiteLLM respects the api_key kwarg instead of calling their native SDK
-    # (which only reads from environment variables and ignores kwarg).
-    _OPENAI_COMPAT_PROVIDERS = {"cerebras", "siliconflow", "vllm"}
-    if provider in _OPENAI_COMPAT_PROVIDERS:
-        litellm_prefix = "hosted_vllm" if provider == "vllm" else "openai"
-    else:
-        litellm_prefix = provider
-    if model.startswith(f"{litellm_prefix}/") or model.startswith("openai/"):
-        model_id = model
-    else:
-        model_id = f"{litellm_prefix}/{model}"
+    from medgraphia.llm.providers import build_litellm_model_id, resolve_credentials
 
-    # 2. Determine API key and Base URL
+    model_id = build_litellm_model_id(provider, model)
+
+    # 2. Determine API key and Base URL — task-specific credentials take
+    # priority over the provider's registry defaults (llm/providers.py).
     api_key = None
     api_base = None
-
-    # Check for specialized task credentials first
-    if task == "rewriter" and (cfg.rewriter_llm_api_key.get_secret_value() or cfg.rewriter_llm_base_url):
-        api_key = cfg.rewriter_llm_api_key.get_secret_value()
-        api_base = cfg.rewriter_llm_base_url or None
-    elif task == "summarizer" and (cfg.summarizer_llm_api_key.get_secret_value() or cfg.summarizer_llm_base_url):
-        api_key = cfg.summarizer_llm_api_key.get_secret_value()
-        api_base = cfg.summarizer_llm_base_url or None
-    elif task == "judge" and (cfg.judge_llm_api_key.get_secret_value() or cfg.judge_llm_base_url):
-        api_key = cfg.judge_llm_api_key.get_secret_value()
-        api_base = cfg.judge_llm_base_url or None
-    elif task == "translator" and (cfg.translator_llm_api_key.get_secret_value() or cfg.translator_llm_base_url):
-        api_key = cfg.translator_llm_api_key.get_secret_value()
-        api_base = cfg.translator_llm_base_url or None
-    else:
-        # Dynamically resolve credentials by convention: `{provider}_api_key` and `{provider}_base_url`
-        # Map fireworks_ai provider to fireworks_api_key config attribute
-        attr_prefix = "fireworks" if provider == "fireworks_ai" else provider
-        key_attr = f"{attr_prefix}_api_key"
-        base_attr = f"{attr_prefix}_base_url"
-
-        secret_obj = getattr(cfg, key_attr, None)
-        if secret_obj and hasattr(secret_obj, "get_secret_value"):
-            api_key = secret_obj.get_secret_value() or None
-
-        if not api_base:
-            api_base = getattr(cfg, base_attr, None) or None
-
-        # Provider-specific base URL fallbacks for providers without a config field
-        if not api_base:
-            _BASE_URLS = {
-                "cerebras": "https://api.cerebras.ai/v1",
-                "siliconflow": "https://api.siliconflow.com/v1",
-                "ollama": cfg.llm_base_url or "http://localhost:11434",
-                "vllm": cfg.vllm_base_url or "http://localhost:8000/v1",
-            }
-            api_base = _BASE_URLS.get(provider)
-
-        # vLLM needs a dummy key and per-model routing
-        if provider == "vllm":
-            api_key = api_key or "vllm"
-            if model == cfg.llm_small_model:
-                api_base = cfg.vllm_small_base_url
-            elif model == cfg.llm_medium_model:
-                api_base = cfg.vllm_medium_base_url
-
-    # Providers that expose an OpenAI-compatible API but whose native SDK ignores
-    # the api_key kwarg and only reads env vars — inject the key into the env before
-    # creating the LM so LiteLLM's native provider code can find it.
-    _PROVIDER_ENV_VARS: dict[str, str] = {
-        "cerebras": "CEREBRAS_API_KEY",
-        "siliconflow": "OPENAI_API_KEY",  # used when routed through openai/ prefix
-        "groq": "GROQ_API_KEY",
-        "fireworks_ai": "FIREWORKS_API_KEY",
+    task_creds = {
+        "rewriter": (cfg.rewriter_llm_api_key, cfg.rewriter_llm_base_url),
+        "summarizer": (cfg.summarizer_llm_api_key, cfg.summarizer_llm_base_url),
+        "judge": (cfg.judge_llm_api_key, cfg.judge_llm_base_url),
+        "translator": (cfg.translator_llm_api_key, cfg.translator_llm_base_url),
     }
-    if api_key and provider in _PROVIDER_ENV_VARS:
-        import os
-        os.environ.setdefault(_PROVIDER_ENV_VARS[provider], api_key)
+    if task in task_creds:
+        secret, base = task_creds[task]
+        if secret.get_secret_value() or base:
+            api_key = secret.get_secret_value() or None
+            api_base = base or None
+
+    if api_key is None and api_base is None:
+        creds = resolve_credentials(provider, cfg)
+        api_key, api_base = creds.api_key, creds.base_url
+
+    # vLLM per-tier routing overrides the registry's generic base_url.
+    if provider == "vllm":
+        api_key = api_key or "vllm"
+        if model == cfg.llm_small_model:
+            api_base = cfg.vllm_small_base_url
+        elif model == cfg.llm_medium_model:
+            api_base = cfg.vllm_medium_base_url
 
     try:
         kwargs = {}

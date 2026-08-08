@@ -207,34 +207,24 @@ async def _fuzzy_search_entities(
 ) -> list[dict[str, Any]]:
     """Substring or semantic search on entity labels."""
     from medgraphia.api.chat import _get_retrieval
-    import asyncio
 
     # 1. Try In-Memory Semantic Search
     try:
         pipeline = await _get_retrieval()
-        query_ner = pipeline.router._ner_linker
-        # Ensure it is initialized
-        query_ner._ensure_initialized()
-        linker = query_ner._entity_linker
-        if linker and linker._concept_embs is not None:
-            raw_results = await asyncio.to_thread(
-                linker.search_concepts, q, limit, entity_type
-            )
-            if raw_results:
-                formatted_results = []
-                for r in raw_results:
-                    ll = r.get("lang_labels") or {}
-                    formatted_results.append({
-                        "cui": r["cui"],
-                        "label": r["label"],
-                        "entity_type": r["entity_type"],
-                        "lang_zh": ll.get("zh", ""),
-                        "lang_de": ll.get("de", ""),
-                    })
-                return formatted_results
+        raw_results = await pipeline.router.ner_linker.search_concepts(q, limit, entity_type)
+        if raw_results:
+            formatted_results = []
+            for r in raw_results:
+                ll = r.get("lang_labels") or {}
+                formatted_results.append({
+                    "cui": r["cui"],
+                    "label": r["label"],
+                    "entity_type": r["entity_type"],
+                    "lang_zh": ll.get("zh", ""),
+                    "lang_de": ll.get("de", ""),
+                })
+            return formatted_results
     except Exception as exc:
-        from medgraphia.logger import get_logger
-        logger = get_logger(__name__)
         logger.warning("semantic_entity_search_failed", q=q, error=str(exc))
 
     # 2. Fallback to Neo4j String Match

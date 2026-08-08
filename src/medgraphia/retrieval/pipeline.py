@@ -120,7 +120,7 @@ class RetrievalPipeline:
         # ---------------------------------------------------------
         from medgraphia.generation.llm_router import ModelTier
 
-        yield "正在评估问题复杂度并进行重写 (Rewriting)..."
+        yield "Assessing complexity and rewriting query (Rewriting)..."
         complexity_tier: ModelTier | None = None
         search_query, complexity_tier = await self.rewriter.rewrite(
             query=query, history=history or [], language=language or Language.EN
@@ -149,7 +149,7 @@ class RetrievalPipeline:
 
                 cfg = get_settings()
                 if cfg.multilingual_retrieval_enabled:
-                    yield "正在进行多语言扩展翻译 (Translating)..."
+                    yield "Expanding query to other languages (Translating)..."
                     translated: TranslatedQuery = await self.query_translator.translate(
                         query=search_query,
                         source_language=src_lang,
@@ -174,7 +174,7 @@ class RetrievalPipeline:
             routing_query = queries_by_language[Language.EN]
             routing_lang = Language.EN
 
-        yield "正在解析医学实体和意图分析 (Routing)..."
+        yield "Parsing medical entities and query intent (Routing)..."
         plan: RetrievalPlan = await self.router.route_async(routing_query, language=routing_lang)
 
         # No medical keyword matched and no entity was linked (e.g. a greeting) —
@@ -194,7 +194,7 @@ class RetrievalPipeline:
         # ---------------------------------------------------------
         # Step 2: Concurrent Retrieval
         # ---------------------------------------------------------
-        yield "正在从知识图谱与向量库中并发检索 (Retrieving)..."
+        yield "Searching knowledge graph and vector store (Retrieving)..."
         tasks: list[asyncio.Task[Any]] = []
         task_names: list[str] = []
 
@@ -303,7 +303,7 @@ class RetrievalPipeline:
         # ---------------------------------------------------------
         # Step 3: Reciprocal Rank Fusion (RRF)
         # ---------------------------------------------------------
-        yield "正在进行融合处理 (Fusion)..."
+        yield "Fusing retrieval results (Fusion)..."
         fusion_result = self.fusion.fuse(
             query=search_query,
             graph_result=graph_result,

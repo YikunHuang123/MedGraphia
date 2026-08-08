@@ -130,6 +130,17 @@ class QueryNERLinker:
 
         return result
 
+    async def search_concepts(
+        self, query: str, limit: int = 10, entity_type: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Semantic concept search (for UI typeahead), handling init and the blocking GPU call itself."""
+        import asyncio
+
+        self._ensure_initialized()
+        if self._entity_linker is None:
+            return []
+        return await asyncio.to_thread(self._entity_linker.search_concepts, query, limit, entity_type)
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------

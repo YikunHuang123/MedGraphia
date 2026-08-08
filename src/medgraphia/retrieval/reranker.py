@@ -87,20 +87,16 @@ class Reranker:
     def __init__(
         self,
         model_name: str = _DEFAULT_MODEL,
-        use_fp16: bool = True,
         threshold: float | None = None,
         fallback_top_n: int | None = None,
         noise_floor: float | None = None,
     ) -> None:
         self._model_name = model_name
-        self._use_fp16 = use_fp16
         self._threshold = threshold if threshold is not None else settings.reranker_threshold
         self._fallback_top_n = (
             fallback_top_n if fallback_top_n is not None else settings.reranker_fallback_top_n
         )
         self._noise_floor = noise_floor if noise_floor is not None else settings.reranker_noise_floor
-        self._model: Any = None  # lazy-loaded
-        self._backend: str | None = None  # "flag" | "sentence_transformers"
 
     @classmethod
     def from_settings(cls) -> Reranker:
@@ -136,71 +132,36 @@ class Reranker:
         if not items:
             return RerankedResult(query=query)
 
-        # Try to load the cross-encoder model
-        try:
-            self._load_model()
-        except Exception as exc:
-            logger.warning("reranker_load_failed", error=str(exc))
-            return RerankedResult(
-                items=items[:top_k],
-                query=query,
-                reranked=False,
-            )
-
         # Build texts list
         documents = [it.text for it in items]
 
         try:
             from medgraphia.config import get_settings
+            from medgraphia.llm.providers import resolve_credentials
             import httpx
             cfg = get_settings()
-            
-            # 1. Base URL override and fallback
-            api_url = cfg.reranker_api_url
-            if not api_url:
-                if cfg.reranker_provider == "siliconflow":
-                    api_url = "https://api.siliconflow.com/v1/rerank"
-                elif cfg.reranker_provider == "jina":
-                    api_url = "https://api.jina.ai/v1/rerank"
-                elif cfg.reranker_provider == "cohere":
-                    api_url = "https://api.cohere.v1/rerank"
-                elif cfg.reranker_provider in ["fireworks", "fireworks_ai"]:
-                    api_url = "https://api.fireworks.ai/inference/v1/rerank"
-                else:
-                    raise ValueError(f"Unknown reranker_provider '{cfg.reranker_provider}'. Please set reranker_api_url explicitly.")
 
-            # 2. API Key override and fallback
-            api_key = cfg.reranker_api_key.get_secret_value()
-            if not api_key:
-                # Dynamically fetch the global key for this provider
-                p_name = cfg.reranker_provider.lower()
-                if p_name == "fireworks":
-                    p_name = "fireworks_ai"
-                # For fireworks_ai, the config attribute is fireworks_api_key
-                if p_name == "fireworks_ai":
-                    global_key_attr = "fireworks_api_key"
-                else:
-                    global_key_attr = f"{p_name}_api_key"
-                secret_obj = getattr(cfg, global_key_attr, None)
-                if secret_obj and hasattr(secret_obj, "get_secret_value"):
-                    api_key = secret_obj.get_secret_value()
-            
+            provider = "fireworks_ai" if cfg.reranker_provider == "fireworks" else cfg.reranker_provider
+            creds = resolve_credentials(provider, cfg)
+
+            # reranker_api_key/reranker_api_url override the provider registry defaults.
+            api_key = cfg.reranker_api_key.get_secret_value() or creds.api_key
+            api_url = cfg.reranker_api_url or (f"{creds.base_url}/rerank" if creds.base_url else None)
+            if not api_url:
+                raise ValueError(f"No base URL for reranker provider '{cfg.reranker_provider}'. Set reranker_api_url explicitly.")
             if not api_key:
                 raise ValueError(
                     f"No API key configured for reranker provider '{cfg.reranker_provider}'. "
-                    "Set either reranker_api_key or the global provider key in config."
+                    "Set either reranker_api_key or the provider's key in config."
                 )
 
             payload = {
                 "model": self._model_name,
                 "query": query,
                 "return_documents": False,
-                "top_n": len(documents)
+                "top_n": len(documents),
+                "documents": documents,
             }
-            if cfg.reranker_provider in ["siliconflow", "jina", "cohere", "fireworks", "fireworks_ai"]:
-                payload["documents"] = documents
-            else:
-                payload["texts"] = documents
 
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -273,10 +234,3 @@ class Reranker:
             reranked=True,
             no_evidence=no_evidence,
         )
-
-    # ------------------------------------------------------------------
-    # Internal: model loading and scoring
-    # ------------------------------------------------------------------
-
-    def _load_model(self) -> None:
-        pass

@@ -8,6 +8,7 @@ Talks to:
 
 from __future__ import annotations
 
+import html as html_lib
 import sys
 import time
 from collections.abc import Iterator
@@ -223,7 +224,8 @@ def _stream_tokens(events: Iterator[dict], meta_sink: dict, status_placeholder=N
         kind = ev.get("type")
         if kind == "progress":
             if status_placeholder and first_chunk:
-                current_progress = ev.get("content", "").rstrip(".")
+                # ev.content ultimately comes from LLM output — escape before interpolating into HTML.
+                current_progress = html_lib.escape(ev.get("content", "").rstrip("."))
                 if thoughts_html:
                     html = f'''<div class="mg-status-block">
 <div class="mg-progress" style="margin-bottom:8px;"><span class="mg-progress-icon">⏳</span><span class="mg-progress-text">{current_progress}</span></div>
@@ -236,7 +238,8 @@ def _stream_tokens(events: Iterator[dict], meta_sink: dict, status_placeholder=N
                 status_placeholder.markdown(html, unsafe_allow_html=True)
         elif kind == "thought":
             if status_placeholder and first_chunk:
-                content = ev.get("content", "").strip()
+                # ev.content is the LLM's own message_to_user — escape before interpolating into HTML.
+                content = html_lib.escape(ev.get("content", "").strip())
                 if content:
                     thoughts_html += f'<div style="font-size: 0.85rem; color: #71717a; line-height: 1.4;">&gt; {content}</div>\n'
                     html = f'''<div class="mg-status-block">
