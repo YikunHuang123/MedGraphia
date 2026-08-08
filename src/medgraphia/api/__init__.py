@@ -110,11 +110,14 @@ def create_app() -> FastAPI:
         title="MedGraphia API",
         description=(
             "GraphRAG-powered multilingual medical knowledge Q&A.\n\n"
-            "Supports English, Chinese (Simplified), and German."
+            "Supports English, Chinese (Simplified), and German.\n\n"
+            "Educational/portfolio project — not for clinical or commercial use."
         ),
         version="0.1.0",
         docs_url="/docs",
         redoc_url="/redoc",
+        contact={"name": "Yikun Huang", "url": "https://github.com/YikunHuang123/MedGraphia"},
+        license_info={"name": "MIT", "url": "https://github.com/YikunHuang123/MedGraphia/blob/main/LICENSE"},
         lifespan=lifespan,
     )
 

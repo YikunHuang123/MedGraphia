@@ -100,6 +100,11 @@ banner(
     "Multilingual medical knowledge-graph & GraphRAG console — clinical "
     "Q&A, drug-interaction lookups and graph exploration in one place.",
 )
+st.markdown(
+    '<div class="mg-disclaimer">⭐ <a href="https://github.com/YikunHuang123/MedGraphia" '
+    'target="_blank">Source on GitHub</a></div>',
+    unsafe_allow_html=True,
+)
 
 
 # ── Quick stats row ────────────────────────────────────────────────────────
@@ -227,6 +232,10 @@ st.markdown(
     "MedGraphia is a decision-support tool, not a substitute for professional "
     "medical advice. Always verify generated answers against the cited "
     "sources before acting on them."
+    "</div>"
+    '<div class="mg-disclaimer">'
+    "Educational/portfolio demo, not for clinical or commercial use — "
+    "public access is rate-limited and may queue at busy times."
     "</div>",
     unsafe_allow_html=True,
 )

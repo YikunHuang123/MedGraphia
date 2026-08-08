@@ -30,6 +30,11 @@ banner(
     "Graph Explorer",
     "Search a disease, drug or gene, then walk its 1–3 hop neighbourhood.",
 )
+st.markdown(
+    '<div class="mg-disclaimer">⭐ <a href="https://github.com/YikunHuang123/MedGraphia" '
+    'target="_blank">Source on GitHub</a></div>',
+    unsafe_allow_html=True,
+)
 
 
 from components.sidebar import get_current_client

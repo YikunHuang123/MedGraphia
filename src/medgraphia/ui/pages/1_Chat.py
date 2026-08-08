@@ -148,7 +148,15 @@ def render_chat_sidebar() -> None:
 
 
 render_chat_sidebar()
-banner("Clinical Chat", "Ask a clinical question — answers cite their source chunks.")
+banner(
+    "Clinical Chat",
+    "Ask a clinical question — answers cite their source chunks.",
+)
+st.markdown(
+    '<div class="mg-disclaimer">⭐ <a href="https://github.com/YikunHuang123/MedGraphia" '
+    'target="_blank">Source on GitHub</a></div>',
+    unsafe_allow_html=True,
+)
 
 # ---------------------------------------------------------------------------
 # Top control bar — active conv summary

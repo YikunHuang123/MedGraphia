@@ -35,7 +35,7 @@ st.set_page_config(page_title="Admin — MedGraphia", layout="wide")
 inject_theme()
 with st.sidebar:
     render_common_sidebar()
-banner("Admin", "Ingestion pipelines and API-key lifecycle.")
+banner("Admin", "Ingestion pipelines and API-key lifecycle. Source: https://github.com/YikunHuang123/MedGraphia")
 
 
 def _client() -> MedGraphiaClient:

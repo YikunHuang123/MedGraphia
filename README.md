@@ -813,6 +813,8 @@ cp .env.example .env
 | Authentication and service | `AUTH_STRATEGY`, `ADMIN_BOOTSTRAP_KEY`, `API_HOST`, `API_PORT` | Configure API authentication, the admin bootstrap key, and the listening address |
 | Access control | `RATE_LIMIT_ENABLED`, `RATE_LIMIT_IP_DAILY`, `RATE_LIMIT_GLOBAL_DAILY`, `CONCURRENCY_LIMIT_ENABLED`, `CONCURRENCY_MAX_ACTIVE`, `CORS_ALLOWED_ORIGINS` | Daily request quota (per-IP + global) and a global concurrency cap for public deployments — requests over the cap queue instead of being rejected, with a status message pushed on `/chat/stream`; admin keys exempt. Each anonymous visitor gets an isolated session via a browser cookie; `CORS_ALLOWED_ORIGINS` defaults to `*`, set it to your real domain(s) for a public deployment |
 
+Public deployments enable two Redis-backed safeguards by default: a **daily request quota** (per-visitor and global, to keep cloud LLM bills bounded) and a **global concurrency cap** (2 by default — requests over the cap queue instead of being rejected outright, with `/chat/stream` pushing a queued-status update); admin keys are exempt from both. Since the UI proxies every request server-side, the "visitor" dimension is keyed on a browser cookie rather than request IP, so the quota still works correctly when multiple visitors share the same API key. Both fail open (no limiting) if Redis is unreachable, so a Redis outage never takes the service itself down.
+
 The current default cloud LLM routing is:
 
 ```dotenv
@@ -1012,3 +1014,5 @@ MedGraphia/
 ## 📄 License & Contact
 
 This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+
+Author: **Yikun Huang** ([GitHub](https://github.com/YikunHuang123)) — questions or collaboration: q1945948369@gmail.com
