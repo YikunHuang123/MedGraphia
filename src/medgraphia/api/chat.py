@@ -609,25 +609,9 @@ async def _run_full_pipeline(
             "top_graph_cui": None,
         }
 
-    # ── No-evidence short-circuit ────────────────────────────────────────────
-    # Skip the LLM call when the reranker found nothing usable. With 2+ linked
-    # entities, fall through instead so the two-entity gap-completion in generate() can run.
-    if getattr(reranked, "no_evidence", False) and len(getattr(reranked, "linked_cuis", [])) < 2:
-        from medgraphia.prompts import get_disclaimer, get_no_info_message
-
-        return {
-            "answer": get_no_info_message(language),
-            "citations": [],
-            "retrieval_paths": [],
-            "model_used": "static",
-            "query_type": query_type,
-            "disclaimer": get_disclaimer(language),
-            "linked_cuis": [],
-            "unlinked_mentions": [],
-            "top_graph_cui": None,
-        }
-
     # ── Generation ────────────────────────────────────────────────────────────
+    # No-evidence cases (incl. <2 linked entities) fall through to generate() too,
+    # so the DSPy prompt can reply warmly to non-medical input instead of a static string.
     with trace.span("generation", input=query) as span:
         gen_result = await generation.generate(
             question=query,

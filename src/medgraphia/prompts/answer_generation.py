@@ -56,9 +56,14 @@ class GenerateClinicalAnswer(dspy.Signature):
     case reports, pharmacological data, or pathological descriptions — even without a formal
     encyclopedic definition — synthesize whatever IS available and cite sources; do not refuse.
     Use no_info_message ONLY when ALL context paragraphs are entirely off-topic (e.g., purely
-    administrative records, or medical conditions completely unrelated to the question).
-    Never refuse simply because context is clinical rather than definitional, or because it is
-    written in a different language than the question."""
+    administrative records, or medical conditions completely unrelated to the question) AND
+    the question itself is a genuine medical question. Never refuse simply because context is
+    clinical rather than definitional, or because it is written in a different language than
+    the question.
+    If the question is casual conversation instead (a greeting, small talk, thanks, etc.) and
+    the context is irrelevant, ignore no_info_message and reply warmly and briefly to the
+    greeting/small talk in target_language, then note in one short sentence that you're a
+    medical assistant and can help with health questions."""
 
     system_instruction: str = dspy.InputField(desc="Core role and persona for the assistant")
     context: str = dspy.InputField(desc="Numbered medical context paragraphs")
