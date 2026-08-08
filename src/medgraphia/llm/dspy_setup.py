@@ -94,7 +94,7 @@ def get_lm(
             api_base = cfg.vllm_medium_base_url
 
     try:
-        kwargs = {}
+        kwargs = {"max_tokens": cfg.llm_max_tokens}
         if api_key:
             kwargs["api_key"] = api_key
         if api_base:
