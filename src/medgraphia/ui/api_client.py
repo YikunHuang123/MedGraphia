@@ -152,6 +152,9 @@ class MedGraphiaClient:
     def get_session(self, session_id: str) -> dict[str, Any]:
         return self._request("GET", f"/chat/sessions/{session_id}")
 
+    def delete_session(self, session_id: str) -> dict[str, Any]:
+        return self._request("DELETE", f"/chat/sessions/{session_id}")
+
     # ------------------------------------------------------------------
     # Chat (synchronous)
     # ------------------------------------------------------------------
@@ -200,10 +203,11 @@ class MedGraphiaClient:
             ) as resp:
                 if resp.status_code >= 400:
                     resp.read()
-                    raise APIError(
-                        status_code=resp.status_code,
-                        detail=resp.text or "Stream rejected",
-                    )
+                    try:
+                        detail = resp.json().get("detail", resp.text)
+                    except Exception:
+                        detail = resp.text
+                    raise APIError(status_code=resp.status_code, detail=str(detail) or "Stream rejected")
 
                 # Buffer for multi-line data concatenation
                 for raw_line in resp.iter_lines():
