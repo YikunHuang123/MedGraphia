@@ -142,13 +142,15 @@ class QdrantStore(VectorStoreBase):
         collection_name: str,
         query_vector: list[float],
         limit: int = 10,
-        score_threshold: float = 0.0,
         filter_payload: dict[str, Any] | None = None,
+        score_threshold: float = 0.0,
     ) -> list[dict[str, Any]]:
+        """Dense-only vector search using COSINE."""
         qdrant_filter = _build_filter(filter_payload)
-        results = await self._client.search(
+        results = await self._client.query_points(
             collection_name=collection_name,
-            query_vector=qmodels.NamedVector(name="dense", vector=query_vector),
+            query=query_vector,
+            using="dense",
             limit=limit,
             score_threshold=score_threshold if score_threshold > 0 else None,
             query_filter=qdrant_filter,
@@ -156,7 +158,7 @@ class QdrantStore(VectorStoreBase):
         )
         return [
             {"chunk_id": r.payload.get("chunk_id", ""), "score": r.score, "payload": r.payload}
-            for r in results
+            for r in results.points
         ]
 
     async def hybrid_search(

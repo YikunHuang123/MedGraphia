@@ -29,14 +29,18 @@ _DEFAULT_NODE_COLOUR = "#374151"
 _SEED_NODE_COLOUR = "#0B3D91"  # match the app primary
 
 
-def _node_label(node: dict[str, Any]) -> str:
+def _node_label(node: dict[str, Any], lang: str = "en") -> str:
     """Pick the most informative single-line label for a node."""
+    if lang == "zh" and node.get("lang_zh"):
+        return node["lang_zh"]
+    if lang == "de" and node.get("lang_de"):
+        return node["lang_de"]
     return node.get("label") or node.get("name") or node.get("cui") or "?"
 
 
-def _node_tooltip(node: dict[str, Any]) -> str:
+def _node_tooltip(node: dict[str, Any], lang: str = "en") -> str:
     """Build an HTML tooltip shown on hover."""
-    lines = [f"<b>{_node_label(node)}</b>"]
+    lines = [f"<b>{_node_label(node, lang)}</b>"]
     if cui := node.get("cui"):
         lines.append(f"CUI: {cui}")
     if etype := node.get("entity_type"):
@@ -52,6 +56,7 @@ def render_subgraph(
     subgraph: dict[str, Any],
     seed_cui: str | None = None,
     height: int = 560,
+    lang: str = "en",
 ) -> None:
     """Render a Neo4j subgraph payload as an interactive pyvis network.
 
@@ -92,7 +97,7 @@ def render_subgraph(
 
     seen_nodes: set[str] = set()
     for n in nodes:
-        node_id = str(n.get("cui") or n.get("id") or _node_label(n))
+        node_id = str(n.get("cui") or n.get("id") or _node_label(n, lang))
         if node_id in seen_nodes:
             continue
         seen_nodes.add(node_id)
@@ -105,8 +110,8 @@ def render_subgraph(
         size = 26 if (seed_cui and node_id == seed_cui) else 16
         net.add_node(
             node_id,
-            label=_node_label(n),
-            title=_node_tooltip(n),
+            label=_node_label(n, lang),
+            title=_node_tooltip(n, lang),
             color=colour,
             size=size,
             borderWidth=2,

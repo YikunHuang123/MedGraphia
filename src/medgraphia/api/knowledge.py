@@ -166,10 +166,10 @@ async def _find_entity_by_name(name: str) -> dict[str, Any] | None:
     MATCH (e)
     WHERE ({_ENTITY_LABEL_DISJUNCTION})
       AND (
-        e.label_lower   = $q  // Optimized path: if we had a lower_label property
-        OR e.label      = $name
-        OR e.lang_zh    = $name
-        OR e.lang_de    = $name
+        toLower(e.label) = $q
+        OR e.label       = $name
+        OR e.lang_zh     = $name
+        OR e.lang_de     = $name
       )
     RETURN e.cui        AS cui,
            e.label      AS label,
@@ -205,7 +205,39 @@ async def _fuzzy_search_entities(
     limit: int,
     entity_type: str | None,
 ) -> list[dict[str, Any]]:
-    """Substring search on entity labels."""
+    """Substring or semantic search on entity labels."""
+    from medgraphia.api.chat import _get_retrieval
+    import asyncio
+
+    # 1. Try In-Memory Semantic Search
+    try:
+        pipeline = await _get_retrieval()
+        query_ner = pipeline.router._ner_linker
+        # Ensure it is initialized
+        query_ner._ensure_initialized()
+        linker = query_ner._entity_linker
+        if linker and linker._concept_embs is not None:
+            raw_results = await asyncio.to_thread(
+                linker.search_concepts, q, limit, entity_type
+            )
+            if raw_results:
+                formatted_results = []
+                for r in raw_results:
+                    ll = r.get("lang_labels") or {}
+                    formatted_results.append({
+                        "cui": r["cui"],
+                        "label": r["label"],
+                        "entity_type": r["entity_type"],
+                        "lang_zh": ll.get("zh", ""),
+                        "lang_de": ll.get("de", ""),
+                    })
+                return formatted_results
+    except Exception as exc:
+        from medgraphia.logger import get_logger
+        logger = get_logger(__name__)
+        logger.warning("semantic_entity_search_failed", q=q, error=str(exc))
+
+    # 2. Fallback to Neo4j String Match
     if entity_type:
         if entity_type not in _VALID_TYPES:
             return []

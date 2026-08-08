@@ -84,7 +84,7 @@ with st.container(border=True):
     with c2:
         etype = st.selectbox("Type", _ENTITY_TYPES, index=0, label_visibility="collapsed")
     with c3:
-        hops = st.slider("Hops", 1, 3, value=1)
+        hops = st.slider("Hops", 1, 2, value=1, help="Maximum 2 hops to prevent browser lag.")
     with c4:
         lang = st.selectbox(
             "Lang",
@@ -126,7 +126,12 @@ if query and len(query.strip()) >= 2:
             cols = st.columns(min(len(results), 4) or 1)
             for i, item in enumerate(results[:12]):
                 col = cols[i % len(cols)]
-                label = item.get("label") or "?"
+                if lang == "zh" and item.get("lang_zh"):
+                    label = item["lang_zh"]
+                elif lang == "de" and item.get("lang_de"):
+                    label = item["lang_de"]
+                else:
+                    label = item.get("label") or "?"
                 cui = item.get("cui") or ""
                 et = item.get("entity_type") or ""
                 with col:
@@ -136,7 +141,8 @@ if query and len(query.strip()) >= 2:
                         use_container_width=True,
                     ):
                         st.session_state["explorer_picked"] = label
-
+else:
+    st.session_state.pop("explorer_picked", None)
 
 target_name = st.session_state.get("explorer_picked")
 
@@ -168,7 +174,7 @@ if target_name:
 
     tab_viz, tab_raw = st.tabs(["Interactive graph", "Raw JSON"])
     with tab_viz:
-        render_subgraph(subgraph, seed_cui=entity.get("cui"))
+        render_subgraph(subgraph, seed_cui=entity.get("cui"), lang=lang)
     with tab_raw:
         st.json(payload, expanded=False)
 else:

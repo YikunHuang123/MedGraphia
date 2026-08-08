@@ -436,6 +436,56 @@ class EntityLinker:
     # Candidate retrieval + scoring
     # ------------------------------------------------------------------
 
+    def search_concepts(
+        self, query: str, limit: int = 10, entity_type: str | None = None
+    ) -> list[dict[str, Any]]:
+        """
+        Perform an in-memory vector search for concepts matching the query.
+        Returns a list of dicts with cui, label, entity_type, and score.
+        """
+        if not self._entries or self._concept_embs is None:
+            return []
+
+        import torch
+        emb = self._sapbert.encode([query], normalize_embeddings=True, convert_to_tensor=True)
+        scores = torch.matmul(emb, self._concept_embs.T)[0]
+
+        if entity_type:
+            # Need to search more broadly to filter by type
+            topk_scores, topk_idxs = torch.topk(scores, k=min(200, len(self._entries)))
+            topk_scores = topk_scores.cpu().tolist()
+            topk_idxs = topk_idxs.cpu().tolist()
+
+            results = []
+            for idx, score in zip(topk_idxs, topk_scores):
+                entry = self._entries[idx]
+                if entry.entity_type == entity_type:
+                    results.append({
+                        "cui": entry.cui,
+                        "label": entry.label,
+                        "entity_type": entry.entity_type,
+                        "score": score,
+                        "lang_labels": entry.lang_labels
+                    })
+                    if len(results) >= limit:
+                        break
+            return results
+        else:
+            topk_scores, topk_idxs = torch.topk(scores, k=min(limit, len(self._entries)))
+            topk_scores = topk_scores.cpu().tolist()
+            topk_idxs = topk_idxs.cpu().tolist()
+
+            return [
+                {
+                    "cui": self._entries[idx].cui,
+                    "label": self._entries[idx].label,
+                    "entity_type": self._entries[idx].entity_type,
+                    "score": score,
+                    "lang_labels": self._entries[idx].lang_labels
+                }
+                for idx, score in zip(topk_idxs, topk_scores)
+            ]
+
     def _find_best_match(
         self,
         mention: str,
