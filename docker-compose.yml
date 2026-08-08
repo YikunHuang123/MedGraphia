@@ -100,6 +100,9 @@ services:
     volumes:
       # DSPy compiled programs (data/dspy/) and MeSH data are read at runtime
       - ./data:/app/data:ro
+      # Persists downloaded HF model weights (bge-m3, GLiNER, SapBERT, BERT-NER)
+      # across container recreates — without this every rebuild re-downloads them.
+      - hf_cache:/root/.cache/huggingface
     depends_on:
       neo4j:
         condition: service_healthy
@@ -133,6 +136,7 @@ services:
     volumes:
       # Pipeline writes raw/processed docs and DSPy programs here
       - ./data:/app/data
+      - hf_cache:/root/.cache/huggingface
     depends_on:
       neo4j:
         condition: service_healthy
@@ -172,3 +176,8 @@ volumes:
     external: true
     name: qdrant_data
   redis_data:
+  # Pre-populate with the migrated HF cache folders before first `docker
+  # compose up` (see deployment notes) so models aren't re-downloaded.
+  hf_cache:
+    external: true
+    name: hf_cache
