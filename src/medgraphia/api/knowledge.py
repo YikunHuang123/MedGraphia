@@ -246,7 +246,9 @@ async def _fuzzy_search_entities(
     )
     RETURN e.cui        AS cui,
            e.label      AS label,
-           labels(e)[0] AS entity_type
+           labels(e)[0] AS entity_type,
+           coalesce(e.lang_zh, '') AS lang_zh,
+           coalesce(e.lang_de, '') AS lang_de
     ORDER BY size(e.label)
     LIMIT $limit
     """
@@ -260,6 +262,8 @@ async def _fuzzy_search_entities(
                         "cui": record["cui"],
                         "label": record["label"],
                         "entity_type": record["entity_type"],
+                        "lang_zh": record["lang_zh"],
+                        "lang_de": record["lang_de"],
                     }
                 )
     except Exception as exc:

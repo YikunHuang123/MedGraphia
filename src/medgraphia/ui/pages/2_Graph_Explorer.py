@@ -72,7 +72,7 @@ _LANG_CHOICES = {"en": "English", "zh": "中文", "de": "Deutsch"}
 # ---------------------------------------------------------------------------
 
 with st.container(border=True):
-    c1, c2, c3, c4 = st.columns([4, 1, 1, 1])
+    c1, c2, c3, c4, c5 = st.columns([4, 1, 1, 1, 1])
     with c1:
         query = st.text_input(
             "Entity name",
@@ -93,6 +93,10 @@ with st.container(border=True):
             index=0,
             label_visibility="collapsed",
         )
+    with c5:
+        # Redundant with Enter, but text_input only reruns on Enter/blur — some
+        # users expect an explicit button.
+        st.button("🔍 Search", use_container_width=True)
 
 
 # ---------------------------------------------------------------------------

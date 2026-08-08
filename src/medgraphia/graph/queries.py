@@ -375,7 +375,8 @@ async def get_subgraph(cui: str, hops: int = 2) -> dict[str, Any]:
     edges: list[dict] = []
 
     def _add_node(node: Any) -> str:
-        nid = str(node.element_id)
+        # Must match the UI's node-id preference (cui first) or edges won't line up.
+        nid = str(node.get("cui") or node.element_id)
         if nid not in nodes:
             # Only return UI-essential fields (no raw text)
             nodes[nid] = {
