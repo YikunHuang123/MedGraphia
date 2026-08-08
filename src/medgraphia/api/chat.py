@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from medgraphia.api.auth import require_api_key
+from medgraphia.api.rate_limit import enforce_daily_rate_limit
 from medgraphia.api.deps import create_or_get_session, save_session
 from medgraphia.api.schemas import ChatRequest, ChatResponse
 from medgraphia.domain.base import Language, QueryType
@@ -116,6 +117,24 @@ async def get_session_history(
     return session
 
 
+@router.delete("/sessions/{session_id}", summary="Delete a chat session")
+async def delete_session_endpoint(
+    session_id: str,
+    principal: dict = Depends(require_api_key),
+) -> dict[str, str]:
+    """Permanently delete a session and its messages, scoped to the caller."""
+    from medgraphia.graph.queries import delete_chat_session
+
+    user_id = principal.get("id", "anonymous")
+    deleted = await delete_chat_session(session_id, user_id=user_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session {session_id} not found.",
+        )
+    return {"status": "deleted", "session_id": session_id}
+
+
 # ---------------------------------------------------------------------------
 # POST /chat — synchronous
 # ---------------------------------------------------------------------------
@@ -125,7 +144,7 @@ async def get_session_history(
 async def chat(
     body: ChatRequest,
     request: Request,
-    principal: dict = Depends(require_api_key),
+    principal: dict = Depends(enforce_daily_rate_limit),
 ) -> ChatResponse:
     """
     Execute the full retrieval-augmented generation pipeline and return a
@@ -261,7 +280,7 @@ async def chat(
 async def chat_stream(
     body: ChatRequest,
     request: Request,
-    principal: dict = Depends(require_api_key),
+    principal: dict = Depends(enforce_daily_rate_limit),
 ) -> StreamingResponse:
     """
     Stream the answer token-by-token as Server-Sent Events."""

@@ -55,12 +55,27 @@ def new_conversation(language: str = "en") -> dict[str, Any]:
     return conv
 
 
-def delete_conversation(conv_id: str) -> None:
+def delete_conversation(conv_id: str, client: Any | None = None) -> None:
+    """Delete locally, and on the backend too if this conversation was ever synced there."""
     store = _store()
+    conv = store.get(conv_id)
+    backend_id = conv.get("backend_session_id") if conv else None
+
+    if client is not None and backend_id:
+        try:
+            client.delete_session(backend_id)
+        except Exception as e:
+            # Don't drop it locally if the backend delete failed — it would just
+            # reappear on the next sync_from_backend() and look like a ghost.
+            st.session_state["api_error"] = str(e)
+            return
+
     if conv_id in store:
         del store[conv_id]
     if st.session_state.get(_ACTIVE_KEY) == conv_id:
         set_active(None)
+    if st.session_state.get("_editing_conv") == conv_id:
+        st.session_state["_editing_conv"] = None
 
 
 def rename_conversation(conv_id: str, title: str) -> None:

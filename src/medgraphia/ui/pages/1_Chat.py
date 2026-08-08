@@ -113,7 +113,7 @@ def render_chat_sidebar() -> None:
                                 st.session_state["_editing_conv"] = c["id"]
                                 st.rerun()
                             if st.button("🗑️ Delete", key=f"del_{c['id']}", use_container_width=True, type="tertiary"):
-                                chat_history.delete_conversation(c["id"])
+                                chat_history.delete_conversation(c["id"], get_current_client())
                                 st.rerun()
 
             # Pagination Controls
@@ -338,7 +338,20 @@ if prompt:
             )
 
         except APIError as exc:
-            st.error(f"Chat failed: {exc.detail}")
+            status_placeholder.empty()
+            error_text = f"⚠️ Sorry, I couldn't answer that: {exc.detail}"
+            st.markdown(error_text)
+            chat_history.append_message(
+                active["id"],
+                {
+                    "role": "assistant",
+                    "content": error_text,
+                    "citations": [],
+                    "disclaimer": "",
+                    "model_used": "error",
+                    "ts": time.time(),
+                },
+            )
 
     # Re-render so the inline citation modal anchors register properly.
     st.rerun()

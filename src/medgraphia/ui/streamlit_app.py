@@ -215,7 +215,7 @@ else:
                     st.switch_page("pages/1_Chat.py")
             with cc3:
                 if st.button("Delete", key=f"del_home_{c['id']}", use_container_width=True):
-                    chat_history.delete_conversation(c["id"])
+                    chat_history.delete_conversation(c["id"], get_current_client())
                     st.rerun()
     else:
         st.info("No conversations yet. Open **Chat** in the sidebar to start your first one.")

@@ -550,6 +550,23 @@ async def get_chat_session(session_id: str) -> Session | None:
         )
 
 
+async def delete_chat_session(session_id: str, user_id: str) -> bool:
+    """Delete a ChatSession and its messages, scoped to the owning user."""
+    cypher = """
+    MATCH (s:ChatSession {session_id: $session_id, user_id: $user_id})
+    WITH s
+    OPTIONAL MATCH (s)-[:HAS_MESSAGE]->(m:ChatMessage)
+    WITH s, collect(m) AS msgs, count(s) AS found
+    FOREACH (msg IN msgs | DETACH DELETE msg)
+    DETACH DELETE s
+    RETURN found
+    """
+    async with get_session() as g_session:
+        result = await g_session.run(cypher, session_id=session_id, user_id=user_id)
+        record = await result.single()
+        return bool(record and record["found"] > 0)
+
+
 async def list_chat_sessions(user_id: str = "anonymous") -> list[dict[str, Any]]:
     """Return a summary of all chat sessions for a user."""
     cypher = """
