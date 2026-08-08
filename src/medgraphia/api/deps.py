@@ -1,5 +1,5 @@
 """
-FastAPI dependency injectors: session store, vector store factory, rate limiting.
+FastAPI dependency injectors: session store, vector store factory.
 """
 
 from __future__ import annotations

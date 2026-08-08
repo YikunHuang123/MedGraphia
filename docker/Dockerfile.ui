@@ -21,7 +21,8 @@ RUN pip install --no-cache-dir \
     python-dotenv>=1.0.0 \
     pyvis>=0.3.2 \
     pandas>=2.2.0 \
-    plotly>=5.22.0
+    plotly>=5.22.0 \
+    streamlit-cookies-controller>=0.0.4
 
 # Copy the full source tree so all medgraphia.* imports resolve correctly
 COPY src/ /app/src/

@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 
 from medgraphia.config import get_settings
@@ -58,6 +58,7 @@ async def register_key(key: str, role: str = "user") -> None:
 
 
 async def require_api_key(
+    request: Request,
     api_key: str | None = Security(_api_key_header),
 ) -> dict:
     """
@@ -65,10 +66,17 @@ async def require_api_key(
     Returns metadata about the authenticated principal.
     """
     cfg = get_settings()
+    # Per-browser guest ID (set by the UI, see ui/components/guest_id.py) so
+    # multiple visitors sharing one API key still get isolated chat sessions.
+    client_id = request.headers.get("X-Client-ID", "")
 
     # Strategy: none (Permissive)
     if cfg.auth_strategy == "none":
-        return {"role": "admin", "id": "anonymous", "strategy": "none"}
+        return {
+            "role": "admin",
+            "id": f"anonymous:{client_id}" if client_id else "anonymous",
+            "strategy": "none",
+        }
 
     # Strategy: oidc (Keycloak/SSO)
     if cfg.auth_strategy == "oidc":
@@ -94,6 +102,11 @@ async def require_api_key(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid or revoked API key",
         )
+
+    # Isolate by key first, then by guest ID — so distinct keys never share
+    # data, and distinct visitors sharing one key don't see each other's either.
+    prefix = meta.get("prefix", "")
+    meta["id"] = f"{prefix}:{client_id}" if client_id else prefix
 
     return meta
 

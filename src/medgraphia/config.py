@@ -188,6 +188,13 @@ class Settings(BaseSettings):
     auth_strategy: Literal["none", "apikey", "oidc"] = "apikey"
     admin_bootstrap_key: SecretStr = SecretStr("change-me")
 
+    # Daily request caps on /chat and /chat/stream (Redis-backed; no-op if Redis
+    # is unreachable). Admin-role keys are exempt. Protects LLM spend on public demos.
+    rate_limit_enabled: bool = True
+    rate_limit_ip_daily: int = 4
+    # rate_limit_ip_daily: int = 1
+    rate_limit_global_daily: int = 80
+
     keycloak_server_url: str = ""
     keycloak_realm: str = "medgraphia"
     keycloak_client_id: str = "medgraphia-api"

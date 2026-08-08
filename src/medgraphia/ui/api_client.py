@@ -38,10 +38,12 @@ class MedGraphiaClient:
         base_url: str | None = None,
         api_key: str | None = None,
         admin_key: str | None = None,
+        client_id: str | None = None,
     ):
         self.base_url = (base_url or os.getenv("API_BASE_URL", "http://localhost:8058")).rstrip("/")
         self.api_key = api_key or os.getenv("MEDGRAPHIA_API_KEY", "")
         self.admin_key = admin_key or os.getenv("MEDGRAPHIA_ADMIN_KEY", "")
+        self.client_id = client_id or ""
 
         # Persistent client for connection pooling
         self.client = httpx.Client(timeout=DEFAULT_TIMEOUT, follow_redirects=True)
@@ -75,6 +77,8 @@ class MedGraphiaClient:
         headers = {"Accept": "application/json"}
         if key:
             headers["X-API-Key"] = key
+        if self.client_id:
+            headers["X-Client-ID"] = self.client_id
         return headers
 
     # ------------------------------------------------------------------

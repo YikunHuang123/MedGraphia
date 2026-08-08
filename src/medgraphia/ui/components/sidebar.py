@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 import streamlit as st
 from api_client import MedGraphiaClient
+from components.guest_id import get_guest_id
 from components.styles import (
     connection_pill,
     render_brand,
@@ -135,8 +136,8 @@ def has_any_valid_key() -> bool:
     return api_valid or admin_valid
 
 @st.cache_resource
-def _client_cached(base_url: str, api_key: str, admin_key: str) -> MedGraphiaClient:
-    return MedGraphiaClient(base_url=base_url, api_key=api_key, admin_key=admin_key)
+def _client_cached(base_url: str, api_key: str, admin_key: str, client_id: str) -> MedGraphiaClient:
+    return MedGraphiaClient(base_url=base_url, api_key=api_key, admin_key=admin_key, client_id=client_id)
 
 
 def get_current_client() -> MedGraphiaClient:
@@ -145,8 +146,8 @@ def get_current_client() -> MedGraphiaClient:
     If a key is marked as error in the UI, it is stripped out so the
     backend client does not attempt to use it (and thus fail 403).
 
-    Cached by credentials triplet so repeated calls across reruns reuse the
-    same httpx connection pool instead of leaking a new one each time.
+    Cached by credentials (+ guest ID) so repeated calls across reruns reuse
+    the same httpx connection pool instead of leaking a new one each time.
     """
     _, _, api_valid, admin_valid = get_auth_state()
 
@@ -154,7 +155,7 @@ def get_current_client() -> MedGraphiaClient:
     api_key = st.session_state.get("api_key", "") if api_valid else ""
     admin_key = st.session_state.get("admin_key", "") if admin_valid else ""
 
-    return _client_cached(base_url, api_key, admin_key)
+    return _client_cached(base_url, api_key, admin_key, get_guest_id())
 
 def render_api_settings() -> None:
     """Render the API keys expander at the bottom of the sidebar."""
