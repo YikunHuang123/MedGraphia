@@ -37,3 +37,6 @@ AGENTS.md
 *.log
 .mcp.json
 .playwright-mcp/
+
+.migration/
+.migration;C/
