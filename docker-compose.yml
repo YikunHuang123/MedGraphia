@@ -1,5 +1,3 @@
-version: "3.9"
-
 # ============================================================================
 # MedGraphia — Full Stack
 # Usage:  cp .env.example .env  &&  docker compose up --build
@@ -53,7 +51,8 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:6333/healthz || exit 1"]
+      # qdrant's image ships neither curl nor wget; use bash's /dev/tcp instead.
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/6333' || exit 1"]
       interval: 20s
       timeout: 5s
       retries: 5
@@ -147,6 +146,8 @@ services:
 
   # --------------------------------------------------------------------------
   # Streamlit UI — chat · graph explorer · pipeline monitor · admin
+  # api/worker run natively on the host (see README), so the UI reaches the
+  # API via host.docker.internal instead of a Docker-network service name.
   # --------------------------------------------------------------------------
   ui:
     build:

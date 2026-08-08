@@ -21,6 +21,14 @@ COPY src/ src/
 
 RUN pip install --no-cache-dir --prefix=/install ".[ingestion]"
 
+# For mac / no cpu devices
+# CPU wheel by default (Mac/CPU-only servers); pass --build-arg TORCH_INDEX_URL=
+# https://download.pytorch.org/whl/cu121 (or similar) on a CUDA-capable host.
+# ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+# RUN pip install --no-cache-dir --prefix=/install \
+#    --index-url ${TORCH_INDEX_URL} --extra-index-url https://pypi.org/simple \
+#    torch ".[ingestion]"
+
 # ---- Stage 2: runtime ------------------------------------------------------
 FROM python:3.12-slim AS runtime
 

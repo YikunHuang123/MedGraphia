@@ -31,11 +31,12 @@ dependencies = [
     "langgraph>=0.1.0",
 
     # Embedding & reranking (BGE-M3, bge-reranker)
-    "FlagEmbedding>=1.2.0",
+    # Pinned exactly: FlagEmbedding 1.3.2 requires transformers==4.44.2
+    "FlagEmbedding==1.3.2",
     "sentence-transformers>=3.0.0",
 
     # NER models (transformers ecosystem)
-    "transformers==4.41.2",
+    "transformers==4.44.2",
     "torch>=2.3.0",
     "gliner>=0.2.0",
     "sentencepiece>=0.2.0",  # NLLB-200 tokenizer (query_translator.py)
