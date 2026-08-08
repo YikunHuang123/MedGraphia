@@ -24,7 +24,7 @@ if str(_UI_ROOT) not in sys.path:
     sys.path.insert(0, str(_UI_ROOT))
 
 from api_client import APIError, MedGraphiaClient  # noqa: E402
-from components.sidebar import render_common_sidebar  # noqa: E402
+from components.sidebar import get_current_client, render_common_sidebar  # noqa: E402
 from components.styles import (  # noqa: E402
     banner,
     inject_theme,
@@ -38,24 +38,22 @@ with st.sidebar:
 banner("Admin", "Ingestion pipelines and API-key lifecycle.")
 
 
-@st.cache_resource
-def _client_cached(base_url: str, admin_key: str) -> MedGraphiaClient:
-    return MedGraphiaClient(base_url=base_url, admin_key=admin_key)
-
-
 def _client() -> MedGraphiaClient:
-    return _client_cached(
-        st.session_state.get("api_base_url", "http://localhost:8058"),
-        st.session_state.get("admin_key", ""),
-    )
+    return get_current_client()
 
 
-# Gate page until an admin key is present.
+# Gate page until an admin key is present and validated.
+# render_common_sidebar() above already ran key validation, so admin_error /
+# _admin_key_validated are up to date by this point.
 if not st.session_state.get("admin_key"):
     st.warning(
         "Set an **Admin API key** in the sidebar to access this page. "
         "All endpoints below require admin role."
     )
+    st.stop()
+
+if st.session_state.get("admin_error"):
+    st.error(f"❌ **Admin Access Denied**: {st.session_state['admin_error']}")
     st.stop()
 
 

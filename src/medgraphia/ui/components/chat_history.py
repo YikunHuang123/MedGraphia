@@ -125,8 +125,9 @@ def sync_from_backend(client: Any) -> None:
                     "is_lazy": True,  # Flag indicating messages need fetching
                 }
         st.session_state["_history_synced"] = True
+        st.session_state.pop("api_error", None)
     except Exception as e:
-        st.warning(f"Could not sync history from backend: {e}")
+        st.session_state["api_error"] = str(e)
 
 
 def load_full_session(client: Any, conv_id: str) -> None:
@@ -166,5 +167,12 @@ def ensure_active(language: str = "en") -> dict[str, Any]:
     """Return the active conversation, creating one if none exists."""
     active = get_active()
     if active is None:
-        active = new_conversation(language=language)
+        store = _store()
+        if store:
+            # Pick the most recently updated conversation
+            latest = max(store.values(), key=lambda c: c.get("updated_at", 0))
+            set_active(latest["id"])
+            active = latest
+        else:
+            active = new_conversation(language=language)
     return active

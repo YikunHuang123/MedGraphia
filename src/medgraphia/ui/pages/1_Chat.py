@@ -35,40 +35,27 @@ st.set_page_config(page_title="Chat — MedGraphia", layout="wide")
 inject_theme()
 
 
-# ---------------------------------------------------------------------------
-# Cached client (mirrors streamlit_app.py)
-# ---------------------------------------------------------------------------
+from components.sidebar import render_api_settings, render_common_sidebar, has_any_valid_key, get_current_client  # noqa: E402
 
-
-@st.cache_resource
-def _client_cached(base_url: str, api_key: str, admin_key: str) -> MedGraphiaClient:
-    return MedGraphiaClient(base_url=base_url, api_key=api_key, admin_key=admin_key)
-
-
-def _client() -> MedGraphiaClient:
-    return _client_cached(
-        st.session_state.get("api_base_url", "http://localhost:8058"),
-        st.session_state.get("api_key", ""),
-        st.session_state.get("admin_key", ""),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Sidebar — brand, navigation, conversation list
-# ---------------------------------------------------------------------------
-
-from components.sidebar import render_common_sidebar  # noqa: E402
-
+# ── Sync history from backend on first load / API key input ────────────────
+if st.session_state.get("api_key") or st.session_state.get("admin_key"):
+    chat_history.sync_from_backend(get_current_client())
 
 def render_chat_sidebar() -> None:
     with st.sidebar:
-        # 1. Standard Sidebar Sections
-        render_common_sidebar()
+        # 1. Standard Sidebar Sections (No Settings Yet)
+        render_common_sidebar(include_settings=False)
 
         # 2. Conversations Section
-        st.markdown('<div class="mg-section">Conversations</div>', unsafe_allow_html=True)
-
-        if st.button("+ New Chat", use_container_width=True, type="primary"):
+        has_valid_key = has_any_valid_key()
+        
+        if st.button(
+            "➕ New Chat",
+            use_container_width=True,
+            type="primary",
+            disabled=not has_valid_key,
+            help="Please configure your API key below to start chatting." if not has_valid_key else None
+        ):
             chat_history.new_conversation(language="unknown")
             st.rerun()
 
@@ -107,7 +94,7 @@ def render_chat_sidebar() -> None:
                             st.session_state["_editing_conv"] = None
                             st.rerun()
                 else:
-                    sc, rc, dc = st.columns([6, 1, 1])
+                    sc, ac = st.columns([6, 1], vertical_alignment="center")
                     label = c["title"]
                     short = label if len(label) <= 18 else label[:17] + "…"
                     with sc:
@@ -116,17 +103,18 @@ def render_chat_sidebar() -> None:
                             key=f"pick_{c['id']}",
                             use_container_width=True,
                             disabled=is_active,
+                            type="secondary" if is_active else "tertiary"
                         ):
                             chat_history.set_active(c["id"])
                             st.rerun()
-                    with rc:
-                        if st.button("✏️", key=f"ren_{c['id']}", help="Rename"):
-                            st.session_state["_editing_conv"] = c["id"]
-                            st.rerun()
-                    with dc:
-                        if st.button("✕", key=f"del_{c['id']}", help="Delete"):
-                            chat_history.delete_conversation(c["id"])
-                            st.rerun()
+                    with ac:
+                        with st.popover("⋮", use_container_width=True):
+                            if st.button("✏️ Rename", key=f"ren_{c['id']}", use_container_width=True, type="tertiary"):
+                                st.session_state["_editing_conv"] = c["id"]
+                                st.rerun()
+                            if st.button("🗑️ Delete", key=f"del_{c['id']}", use_container_width=True, type="tertiary"):
+                                chat_history.delete_conversation(c["id"])
+                                st.rerun()
 
             # Pagination Controls
             if total_pages > 1:
@@ -154,26 +142,35 @@ def render_chat_sidebar() -> None:
                         st.session_state.conv_page += 1
                         st.rerun()
 
+        # 3. Settings at the very bottom
+        render_api_settings()
 
-# ── Sync history from backend on first load ────────────────────────────────
-if st.session_state.get("api_key") or st.session_state.get("admin_key"):
-    chat_history.sync_from_backend(_client())
+
 
 render_chat_sidebar()
-
-banner("Chat", "Ask a clinical question — answers cite their source chunks.")
-
+banner("Clinical Chat", "Ask a clinical question — answers cite their source chunks.")
 
 # ---------------------------------------------------------------------------
 # Top control bar — active conv summary
 # ---------------------------------------------------------------------------
 
-active = chat_history.ensure_active(language=st.session_state.get("chat_language", "unknown"))
+active = chat_history.get_active()
+if not active:
+    has_key = bool(st.session_state.get("api_key") or st.session_state.get("admin_key"))
+    has_valid_key = has_any_valid_key()
+
+    if not has_key:
+        st.warning("⚠️ Please provide your API key in the sidebar below to start chatting.")
+    elif not has_valid_key:
+        st.warning("⚠️ Please provide a valid API key in the sidebar to start chatting.")
+    else:
+        st.info("👈 Please select a conversation from the sidebar or click **+ New Chat** to start.")
+    st.stop()
 
 # Lazy-load content if this was synced from backend summary
 if active.get("is_lazy"):
     with st.spinner("Loading conversation..."):
-        chat_history.load_full_session(_client(), active["id"])
+        chat_history.load_full_session(get_current_client(), active["id"])
 
 st.markdown(
     f"**{active['title']}**  "
@@ -189,7 +186,8 @@ st.markdown(
 # ---------------------------------------------------------------------------
 
 for i, msg in enumerate(active["messages"]):
-    with st.chat_message(msg["role"]):
+    avatar = "👤" if msg["role"] == "user" else "🤖"
+    with st.chat_message(msg["role"], avatar=avatar):
         if msg["role"] == "assistant":
             render_message_with_citations(
                 msg.get("content", ""),
@@ -282,11 +280,11 @@ if prompt:
         active["id"],
         {"role": "user", "content": prompt, "ts": time.time()},
     )
-    with st.chat_message("user"):
+    with st.chat_message("user", avatar="👤"):
         st.markdown(prompt)
 
-    client = _client()
-    with st.chat_message("assistant"):
+    client = get_current_client()
+    with st.chat_message("assistant", avatar="🤖"):
         status_placeholder = st.empty()
         try:
             meta: dict = {}

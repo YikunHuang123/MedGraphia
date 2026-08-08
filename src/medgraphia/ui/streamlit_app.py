@@ -74,26 +74,11 @@ from components.sidebar import render_common_sidebar  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-@st.cache_resource
-def get_client(base_url: str, api_key: str, admin_key: str) -> MedGraphiaClient:
-    """Persistent HTTP client (cached by credentials triplet)."""
-    return MedGraphiaClient(
-        base_url=base_url,
-        api_key=api_key,
-        admin_key=admin_key,
-    )
-
-
-def current_client() -> MedGraphiaClient:
-    return get_client(
-        st.session_state["api_base_url"],
-        st.session_state["api_key"],
-        st.session_state["admin_key"],
-    )
-
-
 @st.cache_data(ttl=60, show_spinner=False)
 def _graph_stats_cached(base_url: str, api_key: str, admin_key: str) -> dict[str, int]:
+    # We maintain the parameters for st.cache_data fingerprinting
+    # But we will instantiate the client strictly using the passed args,
+    # which will be empty strings for invalid keys thanks to get_current_client.
     with MedGraphiaClient(base_url=base_url, api_key=api_key, admin_key=admin_key) as client:
         return client.graph_stats()
 
@@ -119,25 +104,38 @@ banner(
 
 # ── Quick stats row ────────────────────────────────────────────────────────
 stats: dict[str, int] = {}
-try:
-    stats = _graph_stats_cached(
-        st.session_state["api_base_url"],
-        st.session_state["api_key"],
-        st.session_state["admin_key"],
-    )
-except Exception as exc:
-    st.warning(
-        f"Could not load graph statistics — verify your API key / connection. Details: {exc}"
-    )
+has_key = bool(st.session_state.get("api_key") or st.session_state.get("admin_key"))
 
-m1, m2, m3 = st.columns(3)
-m1.metric("Graph nodes", f"{stats.get('nodes', 0):,}")
-m2.metric("Relationships", f"{stats.get('relations', 0):,}")
-m3.metric(
-    "Conversations",
-    f"{len(st.session_state.get('conversations', {})):,}",
-    help="Local browser session only.",
-)
+from components.sidebar import get_auth_state, has_any_valid_key, get_current_client
+
+has_key = bool(st.session_state.get("api_key") or st.session_state.get("admin_key"))
+has_valid_keys = has_any_valid_key()
+
+if not has_key:
+    st.info("⚠️ Please provide your API key in the sidebar below to connect to the MedGraphia backend.")
+elif not has_valid_keys:
+    st.warning("⚠️ Please provide a valid API key in the sidebar to view graph statistics and history.")
+else:
+    try:
+        client = get_current_client()
+        stats = _graph_stats_cached(
+            client.base_url,
+            client.api_key,
+            client.admin_key,
+        )
+    except Exception as exc:
+        st.warning(
+            f"Could not load graph statistics. Details: {exc}"
+        )
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Graph nodes", f"{stats.get('nodes', 0):,}")
+    m2.metric("Relationships", f"{stats.get('relations', 0):,}")
+    m3.metric(
+        "Conversations",
+        f"{len(st.session_state.get('conversations', {})):,}",
+        help="Local browser session only.",
+    )
 
 
 # ── Capability tiles ───────────────────────────────────────────────────────
@@ -186,37 +184,41 @@ for col, (title, desc, _page) in zip(cols, _TILES):
         )
 
 # ── Sync history from backend ──────────────────────────────────────────────
-if st.session_state.get("api_key") or st.session_state.get("admin_key"):
-    chat_history.sync_from_backend(current_client())
+if has_valid_keys:
+    chat_history.sync_from_backend(get_current_client())
 
 # ── Recent conversations ───────────────────────────────────────────────────
-convs = chat_history.list_conversations()
-if convs:
-    st.markdown(
-        '<div class="mg-section-title">Recent conversations</div>',
-        unsafe_allow_html=True,
-    )
-    for c in convs[:5]:
-        ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(c["updated_at"]))
-        n_msgs = len(c["messages"])
-        cc1, cc2, cc3 = st.columns([6, 1, 1])
-        with cc1:
-            st.markdown(
-                f"**{c['title']}**  "
-                f"<span style='color:#5A6478;font-size:0.78rem'> · "
-                f"{ts} · {n_msgs} message(s) · lang `{c['language']}`</span>",
-                unsafe_allow_html=True,
-            )
-        with cc2:
-            if st.button("Open", key=f"open_{c['id']}", use_container_width=True):
-                chat_history.set_active(c["id"])
-                st.switch_page("pages/1_Chat.py")
-        with cc3:
-            if st.button("Delete", key=f"del_home_{c['id']}", use_container_width=True):
-                chat_history.delete_conversation(c["id"])
-                st.rerun()
+if not has_valid_keys:
+    # If keys are provided but invalid, don't show the history list
+    pass
 else:
-    st.info("No conversations yet. Open **Chat** in the sidebar to start your first one.")
+    convs = chat_history.list_conversations()
+    if convs:
+        st.markdown(
+            '<div class="mg-section-title">Recent conversations</div>',
+            unsafe_allow_html=True,
+        )
+        for c in convs[:5]:
+            ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(c["updated_at"]))
+            n_msgs = len(c["messages"])
+            cc1, cc2, cc3 = st.columns([6, 1, 1])
+            with cc1:
+                st.markdown(
+                    f"**{c['title']}**  "
+                    f"<span style='color:#5A6478;font-size:0.78rem'> · "
+                    f"{ts} · {n_msgs} message(s) · lang `{c['language']}`</span>",
+                    unsafe_allow_html=True,
+                )
+            with cc2:
+                if st.button("Open", key=f"open_{c['id']}", use_container_width=True):
+                    chat_history.set_active(c["id"])
+                    st.switch_page("pages/1_Chat.py")
+            with cc3:
+                if st.button("Delete", key=f"del_home_{c['id']}", use_container_width=True):
+                    chat_history.delete_conversation(c["id"])
+                    st.rerun()
+    else:
+        st.info("No conversations yet. Open **Chat** in the sidebar to start your first one.")
 
 
 # ── Disclaimer ─────────────────────────────────────────────────────────────

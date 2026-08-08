@@ -32,22 +32,7 @@ banner(
 )
 
 
-# ---------------------------------------------------------------------------
-# Cached search (debounces auto-complete on rerun)
-# ---------------------------------------------------------------------------
-
-
-@st.cache_resource
-def _client_cached(base_url: str, api_key: str, admin_key: str) -> MedGraphiaClient:
-    return MedGraphiaClient(base_url=base_url, api_key=api_key, admin_key=admin_key)
-
-
-def _client() -> MedGraphiaClient:
-    return _client_cached(
-        st.session_state.get("api_base_url", "http://localhost:8058"),
-        st.session_state.get("api_key", ""),
-        st.session_state.get("admin_key", ""),
-    )
+from components.sidebar import get_current_client
 
 
 @st.cache_data(ttl=15, show_spinner=False)
@@ -71,12 +56,37 @@ _LANG_CHOICES = {"en": "English", "zh": "中文", "de": "Deutsch"}
 # Search bar
 # ---------------------------------------------------------------------------
 
+st.markdown("""<style>
+/* Squeeze the bottom padding of the search container */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    padding-bottom: 0 !important;
+    padding-top: 0.5rem !important;
+}
+/* Force the Hops slider label to be inline with the slider track */
+[data-testid="stSlider"] {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    margin-top: 0.5rem;
+}
+[data-testid="stSlider"] > div:first-child {
+    margin-bottom: 0 !important;
+    flex-shrink: 0 !important;
+    width: auto !important;
+}
+[data-testid="stSlider"] [data-testid="stWidgetLabel"] {
+    padding-bottom: 0 !important;
+    white-space: nowrap !important;
+}
+</style>""", unsafe_allow_html=True)
+
 with st.container(border=True):
-    c1, c2, c3, c4, c5 = st.columns([4, 1, 1, 1, 1])
+    c1, c2, c3, c4, c5 = st.columns([4, 1, 1.2, 1, 1], vertical_alignment="center")
     with c1:
         query = st.text_input(
             "Entity name",
-            placeholder="e.g. metformin · 糖尿病 · Bluthochdruck",
+            placeholder="e.g. hypertension · 高血压 · Bluthochdruck",
             help="Minimum two characters; results auto-complete.",
             key="explorer_q",
             label_visibility="collapsed",
@@ -96,7 +106,7 @@ with st.container(border=True):
     with c5:
         # Redundant with Enter, but text_input only reruns on Enter/blur — some
         # users expect an explicit button.
-        st.button("🔍 Search", use_container_width=True)
+        st.button("🔍 Search", use_container_width=True, type="primary")
 
 
 # ---------------------------------------------------------------------------
@@ -108,10 +118,11 @@ if query and len(query.strip()) >= 2:
         st.info("Add a User or Admin API key in the sidebar to query the backend.")
     else:
         try:
+            client = get_current_client()
             results = _search_cached(
-                st.session_state["api_base_url"],
-                st.session_state["api_key"],
-                st.session_state["admin_key"],
+                client.base_url,
+                client.api_key,
+                client.admin_key,
                 q=query.strip(),
                 limit=20,
                 entity_type=None if etype == "(any)" else etype,
@@ -140,7 +151,7 @@ if query and len(query.strip()) >= 2:
                 et = item.get("entity_type") or ""
                 with col:
                     if st.button(
-                        f"{label}  ·  {et}\nCUI: {cui}",
+                        f"**{label}**  ·  `{et}`\n\nCUI: {cui}",
                         key=f"pick_{cui}_{i}",
                         use_container_width=True,
                     ):
@@ -161,7 +172,7 @@ if target_name:
         unsafe_allow_html=True,
     )
     try:
-        payload = _client().get_entity_subgraph(name=target_name, hops=hops, lang=lang)
+        payload = get_current_client().get_entity_subgraph(name=target_name, hops=hops, lang=lang)
     except APIError as exc:
         st.error(f"Subgraph fetch failed: {exc.detail}")
         st.stop()

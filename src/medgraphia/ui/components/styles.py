@@ -82,7 +82,22 @@ header {{ background: transparent !important; }}
     max-width: 1200px;
 }}
 
+/* ── Chat Content Layout ── */
+[data-testid="stChatMessage"],
+[data-testid="stChatInput"] {{
+    max-width: 850px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}}
+
 /* ── Sidebar Reordering & Nav Hide ── */
+[data-testid="stSidebarHeader"] {{
+    padding-top: 1rem !important;
+    padding-bottom: 0 !important;
+}}
+[data-testid="stSidebarUserContent"] {{
+    padding-top: 0 !important;
+}}
 [data-testid="stSidebar"] > div:first-child {{
     display: flex !important;
     flex-direction: column !important;
@@ -97,13 +112,13 @@ header {{ background: transparent !important; }}
 
 /* ── Custom Page Links ── */
 [data-testid="stPageLink"] a {{
-    padding: 0.65rem 1rem !important;
+    padding: 0.4rem 1rem !important;
     border-radius: 10px !important;
     font-weight: 600 !important;
     font-size: 0.95rem !important;
     color: {TEXT_MAIN} !important;
     transition: all 0.2s ease !important;
-    margin: 0.1rem 0 !important;
+    margin: 0 !important;
     border: 1px solid transparent !important;
 }}
 [data-testid="stPageLink"] a:hover {{
@@ -119,30 +134,77 @@ header {{ background: transparent !important; }}
 }}
 
 
+/* ── History Items Pill Styling ── */
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlockBorderWrapper"] {{
+    gap: 0 !important;
+}}
+[data-testid="stSidebar"] [data-testid="stHorizontalBlock"]:has(div[data-testid="stPopover"]) {{
+    border-radius: 8px !important;
+    align-items: center !important;
+    transition: all 0.2s;
+    margin-bottom: 2px;
+    margin-top: -0.6rem !important; /* Pull items closer */
+}}
+/* Inactive hover */
+[data-testid="stSidebar"] [data-testid="stHorizontalBlock"]:has(div[data-testid="stPopover"]):not(:has(button:disabled)):hover {{
+    background-color: rgba(11, 61, 145, 0.05) !important;
+}}
+/* Active bg */
+[data-testid="stSidebar"] [data-testid="stHorizontalBlock"]:has(div[data-testid="stPopover"]):has(button:disabled) {{
+    background-color: rgba(15, 179, 161, 0.15) !important;
+}}
+/* Active text bold */
+[data-testid="stSidebar"] [data-testid="stHorizontalBlock"]:has(div[data-testid="stPopover"]):has(button:disabled) button p {{
+    font-weight: 700 !important;
+    color: {PRIMARY} !important;
+}}
+/* Strip button borders */
+[data-testid="stSidebar"] [data-testid="stHorizontalBlock"]:has(div[data-testid="stPopover"]) button {{
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0.2rem 0.4rem !important;
+    min-height: 2rem !important;
+}}
+/* Hide chevron in popover button completely */
+[data-testid="stSidebar"] div[data-testid="stPopover"] svg {{
+    display: none !important;
+}}
+/* Shrink popover body and buttons */
+[data-testid="stPopoverBody"] {{
+    padding: 0.3rem !important;
+    min-width: 110px !important;
+}}
+[data-testid="stPopoverBody"] button {{
+    padding: 0.1rem 0.5rem !important;
+    min-height: 1.8rem !important;
+    margin: 0 !important;
+    border: none !important;
+}}
+
 /* ── Banner ── */
 .mg-banner {{
     background: linear-gradient(135deg, {PRIMARY} 0%, {PRIMARY_LIGHT} 60%, {ACCENT} 130%);
     color: white;
-    padding: 1.5rem 1.8rem;
-    border-radius: 16px;
-    margin-bottom: 1.5rem;
-    box-shadow: 0 10px 25px rgba(11, 61, 145, 0.15);
+    padding: 0.8rem 1.2rem;
+    border-radius: 12px;
+    margin-bottom: 1rem;
+    box-shadow: 0 4px 12px rgba(11, 61, 145, 0.1);
     position: relative;
     overflow: hidden;
 }}
 .mg-banner::after {{
-    content: ""; position: absolute; top: -30px; right: -30px;
-    width: 150px; height: 150px; border-radius: 50%;
+    content: ""; position: absolute; top: -20px; right: -20px;
+    width: 80px; height: 80px; border-radius: 50%;
     background: rgba(255,255,255,0.06);
 }}
 .mg-banner h1 {{
-    color: white !important; font-size: 1.7rem; margin: 0;
-    font-weight: 800; letter-spacing: -0.02em;
+    color: white !important; font-size: 1.25rem; margin: 0;
+    font-weight: 700; letter-spacing: -0.01em;
 }}
 .mg-banner p {{
-    color: rgba(255,255,255,0.85); margin: 0.4rem 0 0;
-    font-size: 0.95rem; max-width: 800px;
-    line-height: 1.5;
+    color: rgba(255,255,255,0.85); margin: 0.2rem 0 0;
+    font-size: 0.8rem; max-width: 800px;
 }}
 
 /* ── Brand ── */
@@ -150,7 +212,8 @@ header {{ background: transparent !important; }}
     display: flex; align-items: center; gap: 12px;
     padding: 0.5rem 1.4rem 1rem;
     border-bottom: 1px solid {BORDER};
-    margin-bottom: 1rem;
+    margin-top: -2.5rem;
+    margin-bottom: 0.2rem;
     position: relative;
 }}
 .mg-brand-logo {{
@@ -193,7 +256,7 @@ header {{ background: transparent !important; }}
 .mg-section {{
     font-size: 0.65rem; font-weight: 700; letter-spacing: 1.8px;
     text-transform: uppercase; color: {TEXT_MUTED};
-    margin: 0.75rem 1.4rem 0.6rem;
+    margin: 0.2rem 1.4rem 0.6rem;
 }}
 
 /* ── Custom Cards ── */
@@ -373,10 +436,9 @@ header {{ background: transparent !important; }}
 
 /* ── Disclaimer ── */
 .mg-disclaimer {{
-    background: #FFFBEB; border-left: 4px solid {WARN};
-    padding: 0.8rem 1rem; font-size: 0.85rem;
-    color: #92400E; border-radius: 8px; margin-top: 0.8rem;
-    line-height: 1.5;
+    font-size: 0.8rem; color: {TEXT_MUTED};
+    margin-top: 0.1rem; margin-bottom: 0.2rem;
+    text-align: left;
 }}
 
 /* ── Entity result chips (Graph Explorer) ── */

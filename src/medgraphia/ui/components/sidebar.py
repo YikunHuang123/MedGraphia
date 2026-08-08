@@ -4,6 +4,7 @@ Shared sidebar components for MedGraphia.
 
 from __future__ import annotations
 
+import html
 import os
 import time
 from typing import Any
@@ -23,7 +24,7 @@ def _check_health_cached(base_url: str, api_key: str, admin_key: str) -> dict[st
         return client.health_ready()
 
 
-def render_common_sidebar() -> None:
+def render_common_sidebar(include_settings: bool = True) -> None:
     """Render the standard top-level sidebar sections."""
     # Ensure core state exists (required for all pages)
     defaults = {
@@ -80,7 +81,6 @@ def render_common_sidebar() -> None:
         st.caption("⏳ Checking connectivity...")
 
     # 4. Navigation
-    st.markdown('<div class="mg-section">Workspaces</div>', unsafe_allow_html=True)
     st.page_link("streamlit_app.py", label="Home", icon=":material/home:")
     st.page_link("pages/1_Chat.py", label="Clinical Chat", icon=":material/chat:")
     st.page_link(
@@ -88,32 +88,133 @@ def render_common_sidebar() -> None:
     )
     st.page_link("pages/4_Admin.py", label="Admin Console", icon=":material/admin_panel_settings:")
 
-    # 5. Account
-    st.markdown('<div class="mg-section">Account</div>', unsafe_allow_html=True)
-    with st.container(border=False):
-        st.session_state["api_key"] = st.text_input(
+    if include_settings:
+        render_api_settings()
+
+
+def _validate_keys():
+    from api_client import MedGraphiaClient
+    base_url = st.session_state.get("api_base_url", "http://localhost:8058")
+
+    # Validate User Key
+    if st.session_state.get("api_key") and not st.session_state.get("_api_key_validated"):
+        try:
+            with MedGraphiaClient(base_url=base_url, api_key=st.session_state["api_key"]) as client:
+                client.graph_stats()
+            st.session_state["_api_key_validated"] = True
+            st.session_state.pop("api_error", None)
+        except Exception as e:
+            st.session_state["api_error"] = str(e)
+            st.session_state.pop("_api_key_validated", None)
+
+    # Validate Admin Key
+    if st.session_state.get("admin_key") and not st.session_state.get("_admin_key_validated"):
+        try:
+            with MedGraphiaClient(base_url=base_url, admin_key=st.session_state["admin_key"]) as client:
+                client.admin_graph_stats()
+            st.session_state["_admin_key_validated"] = True
+            st.session_state.pop("admin_error", None)
+        except Exception as e:
+            st.session_state["admin_error"] = str(e)
+            st.session_state.pop("_admin_key_validated", None)
+
+
+def get_auth_state() -> tuple[bool, bool, bool, bool]:
+    """Returns (has_api_error, has_admin_error, api_key_valid, admin_key_valid)"""
+    _validate_keys()
+    has_api_error = bool(st.session_state.get("api_error"))
+    has_admin_error = bool(st.session_state.get("admin_error"))
+    api_key_valid = bool(st.session_state.get("api_key")) and not has_api_error
+    admin_key_valid = bool(st.session_state.get("admin_key")) and not has_admin_error
+    return has_api_error, has_admin_error, api_key_valid, admin_key_valid
+
+
+def has_any_valid_key() -> bool:
+    """Returns True if the user has at least one valid key (User or Admin)."""
+    _, _, api_valid, admin_valid = get_auth_state()
+    return api_valid or admin_valid
+
+@st.cache_resource
+def _client_cached(base_url: str, api_key: str, admin_key: str) -> MedGraphiaClient:
+    return MedGraphiaClient(base_url=base_url, api_key=api_key, admin_key=admin_key)
+
+
+def get_current_client() -> MedGraphiaClient:
+    """
+    Returns a configured MedGraphiaClient using ONLY valid keys.
+    If a key is marked as error in the UI, it is stripped out so the
+    backend client does not attempt to use it (and thus fail 403).
+
+    Cached by credentials triplet so repeated calls across reruns reuse the
+    same httpx connection pool instead of leaking a new one each time.
+    """
+    _, _, api_valid, admin_valid = get_auth_state()
+
+    base_url = st.session_state.get("api_base_url", "http://localhost:8058")
+    api_key = st.session_state.get("api_key", "") if api_valid else ""
+    admin_key = st.session_state.get("admin_key", "") if admin_valid else ""
+
+    return _client_cached(base_url, api_key, admin_key)
+
+def render_api_settings() -> None:
+    """Render the API keys expander at the bottom of the sidebar."""
+    st.markdown("<br>", unsafe_allow_html=True)
+    def _sync_api_key():
+        st.session_state["api_key"] = st.session_state["sidebar_user_key"]
+        st.session_state.pop("_history_synced", None)
+        st.session_state.pop("api_error", None)
+        st.session_state.pop("_api_key_validated", None)
+        st.session_state["conversations"] = {}
+        st.session_state["active_conv_id"] = None
+
+    def _sync_admin_key():
+        st.session_state["admin_key"] = st.session_state["sidebar_admin_key"]
+        st.session_state.pop("_history_synced", None)
+        st.session_state.pop("_admin_key_validated", None)
+        st.session_state.pop("admin_error", None)
+        st.session_state["conversations"] = {}
+        st.session_state["active_conv_id"] = None
+
+    with st.expander("🔑 API Settings", expanded=False):
+        st.text_input(
             "User API Key",
-            value=st.session_state["api_key"],
+            value=st.session_state.get("api_key", ""),
             type="password",
             placeholder="Paste User API Key...",
             help="Required for clinical Q&A and graph search.",
             key="sidebar_user_key",
+            on_change=_sync_api_key,
         )
-        st.session_state["api_key"] = st.session_state["sidebar_user_key"]
 
-        st.session_state["admin_key"] = st.text_input(
+        st.text_input(
             "Admin API Key",
-            value=st.session_state["admin_key"],
+            value=st.session_state.get("admin_key", ""),
             type="password",
             placeholder="Paste Admin Key...",
             help="Optional. Required for pipeline management and stats.",
             key="sidebar_admin_key",
+            on_change=_sync_admin_key,
         )
-        st.session_state["admin_key"] = st.session_state["sidebar_admin_key"]
 
-    if st.session_state["admin_key"]:
-        st.caption("🔒 **Admin Mode** enabled")
-    elif st.session_state["api_key"]:
+    has_api_error, has_admin_error, api_key_valid, admin_key_valid = get_auth_state()
+
+    # Display User Key Status (Hide error if Admin Key is valid)
+    if has_api_error and not admin_key_valid:
+        st.markdown(
+            f"<div style='font-size:0.8rem; color:#ef4444; padding:6px 10px; border-radius:6px; background:rgba(239,68,68,0.1); margin-bottom:4px; line-height:1.4;'>❌ <b>User Key Error:</b> {html.escape(st.session_state['api_error'])}</div>",
+            unsafe_allow_html=True,
+        )
+    elif api_key_valid:
         st.caption("✅ **Standard Access** enabled")
-    else:
+
+    # Display Admin Key Status (Hide error if User Key is valid)
+    if has_admin_error and not api_key_valid:
+        st.markdown(
+            f"<div style='font-size:0.8rem; color:#ef4444; padding:6px 10px; border-radius:6px; background:rgba(239,68,68,0.1); margin-bottom:4px; line-height:1.4;'>❌ <b>Admin Key Error:</b> {html.escape(st.session_state['admin_error'])}</div>",
+            unsafe_allow_html=True,
+        )
+    elif admin_key_valid:
+        st.caption("🔒 **Admin Access** enabled")
+
+    if not st.session_state.get("api_key") and not st.session_state.get("admin_key"):
         st.caption("⚠️ Please provide an API key to start.")
