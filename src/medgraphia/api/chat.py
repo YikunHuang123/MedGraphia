@@ -177,6 +177,11 @@ async def _chat_impl(
 ) -> ChatResponse:
     t0 = time.monotonic()
     session = await create_or_get_session(body.session_id)
+    # Session.user_id defaults to "anonymous" and is never set from the
+    # authenticated principal otherwise — without this, every session gets
+    # persisted under the literal string "anonymous", so the user-scoped
+    # list/get/delete endpoints (which query by principal id) can never find it.
+    session.user_id = principal.get("id", "anonymous")
     request_id: str = request.state.request_id if hasattr(request.state, "request_id") else ""
     langfuse = get_langfuse_client()
 
@@ -310,6 +315,11 @@ async def chat_stream(
     """
     Stream the answer token-by-token as Server-Sent Events."""
     session = await create_or_get_session(body.session_id)
+    # Session.user_id defaults to "anonymous" and is never set from the
+    # authenticated principal otherwise — without this, every session gets
+    # persisted under the literal string "anonymous", so the user-scoped
+    # list/get/delete endpoints (which query by principal id) can never find it.
+    session.user_id = principal.get("id", "anonymous")
     request_id: str = request.state.request_id if hasattr(request.state, "request_id") else ""
     langfuse = get_langfuse_client()
 
