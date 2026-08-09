@@ -17,6 +17,11 @@ from components.styles import (
     connection_pill,
     render_brand,
 )
+from streamlit_cookies_controller import CookieController
+
+_API_KEY_COOKIE = "mg_api_key"
+_ADMIN_KEY_COOKIE = "mg_admin_key"
+_KEY_COOKIE_MAX_AGE_SECONDS = 365 * 86400
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -27,11 +32,16 @@ def _check_health_cached(base_url: str, api_key: str, admin_key: str) -> dict[st
 
 def render_common_sidebar(include_settings: bool = True) -> None:
     """Render the standard top-level sidebar sections."""
+    # Keys typed into the sidebar are only saved to st.session_state, which
+    # Streamlit wipes on a full page refresh — persist them in a first-party
+    # cookie (same approach as guest_id.py) so a refresh doesn't log you out.
+    _key_cookies = CookieController(key="mg_cookie_controller_keys")
+    saved_api_key = _key_cookies.get(_API_KEY_COOKIE) or ""
+    saved_admin_key = _key_cookies.get(_ADMIN_KEY_COOKIE) or ""
+
     # Ensure core state exists (required for all pages)
     defaults = {
         "api_base_url": os.getenv("API_BASE_URL", "http://localhost:8058"),
-        "api_key": os.getenv("MEDGRAPHIA_API_KEY", ""),
-        "admin_key": os.getenv("MEDGRAPHIA_ADMIN_KEY", ""),
         "conversations": {},
         "active_conv_id": None,
         "last_subgraph": None,
@@ -43,6 +53,18 @@ def render_common_sidebar(include_settings: bool = True) -> None:
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
+
+    # api_key/admin_key are handled separately from the loop above: the cookie
+    # component's value resolves asynchronously, so on a session's first-ever
+    # script run saved_api_key/saved_admin_key may still read back "" even
+    # though the cookie holds a real value — a Streamlit rerun fires once the
+    # component actually resolves. Re-checking on every rerun (instead of only
+    # when the key is absent from session_state) means that follow-up rerun
+    # still picks up the real value instead of locking in an empty default.
+    if not st.session_state.get("api_key"):
+        st.session_state["api_key"] = os.getenv("MEDGRAPHIA_API_KEY", "") or saved_api_key
+    if not st.session_state.get("admin_key"):
+        st.session_state["admin_key"] = os.getenv("MEDGRAPHIA_ADMIN_KEY", "") or saved_admin_key
 
     # 1. Asynchronous-like Health Check Trigger
     now = time.time()
@@ -160,8 +182,10 @@ def get_current_client() -> MedGraphiaClient:
 def render_api_settings() -> None:
     """Render the API keys expander at the bottom of the sidebar."""
     st.markdown("<br>", unsafe_allow_html=True)
+
     def _sync_api_key():
         st.session_state["api_key"] = st.session_state["sidebar_user_key"]
+        st.session_state["_api_key_dirty"] = True
         st.session_state.pop("_history_synced", None)
         st.session_state.pop("api_error", None)
         st.session_state.pop("_api_key_validated", None)
@@ -170,6 +194,7 @@ def render_api_settings() -> None:
 
     def _sync_admin_key():
         st.session_state["admin_key"] = st.session_state["sidebar_admin_key"]
+        st.session_state["_admin_key_dirty"] = True
         st.session_state.pop("_history_synced", None)
         st.session_state.pop("_admin_key_validated", None)
         st.session_state.pop("admin_error", None)
@@ -196,6 +221,28 @@ def render_api_settings() -> None:
             key="sidebar_admin_key",
             on_change=_sync_admin_key,
         )
+
+    # Persist key changes to the cookie here in the main script body — custom
+    # components (CookieController) can't be invoked from inside the on_change
+    # callbacks above, since callbacks run outside the normal render context.
+    # Gated on the "_dirty" flags (set only by an actual user edit above) rather
+    # than diffing against session_state directly: on a session's first-ever
+    # script run, the cookie *read* in render_common_sidebar() may not have
+    # resolved yet (component round-trip is async), so session_state["admin_key"]
+    # can still be "" even though the cookie holds a real saved value — writing
+    # unconditionally in that window would clobber the saved key with "".
+    api_key_dirty = st.session_state.pop("_api_key_dirty", False)
+    admin_key_dirty = st.session_state.pop("_admin_key_dirty", False)
+    if api_key_dirty or admin_key_dirty:
+        _key_cookies = CookieController(key="mg_cookie_controller_keys_settings")
+        if api_key_dirty:
+            _key_cookies.set(
+                _API_KEY_COOKIE, st.session_state.get("api_key", ""), max_age=_KEY_COOKIE_MAX_AGE_SECONDS
+            )
+        if admin_key_dirty:
+            _key_cookies.set(
+                _ADMIN_KEY_COOKIE, st.session_state.get("admin_key", ""), max_age=_KEY_COOKIE_MAX_AGE_SECONDS
+            )
 
     has_api_error, has_admin_error, api_key_valid, admin_key_valid = get_auth_state()
 
