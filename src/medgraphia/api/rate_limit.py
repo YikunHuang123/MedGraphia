@@ -37,6 +37,11 @@ async def enforce_daily_rate_limit(
     not the visitor's — X-Client-ID is the only signal that actually varies
     per browser in that deployment shape. A direct API caller with no
     X-Client-ID (curl, another client) still gets a real per-IP limit.
+
+    A key can also carry its own daily_limit (set via /admin/keys), enforced
+    as a fourth bucket keyed by key prefix — e.g. a shared "public_test" key
+    can be capped in aggregate across every visitor using it, independent of
+    each visitor's own per-client cap.
     """
     cfg = get_settings()
     if not cfg.rate_limit_enabled or principal.get("role") == "admin":
@@ -74,5 +79,19 @@ async def enforce_daily_rate_limit(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="You've reached today's request limit for this demo. Please try again tomorrow.",
         )
+
+    key_daily_limit = principal.get("daily_limit")
+    if key_daily_limit is not None:
+        key_prefix = principal.get("prefix", "")
+        key_bucket_key = f"ratelimit:key:{key_prefix}:{day}"
+        key_count = await redis.incr(key_bucket_key)
+        if key_count == 1:
+            await redis.expire(key_bucket_key, _SECONDS_IN_DAY)
+        if key_count > key_daily_limit:
+            logger.warning("rate_limit_key_exceeded", key_prefix=key_prefix, count=key_count)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="This API key has reached its daily request limit. Please try again tomorrow.",
+            )
 
     return principal

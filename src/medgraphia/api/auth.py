@@ -52,9 +52,11 @@ def generate_api_key() -> str:
     return secrets.token_urlsafe(32)
 
 
-async def register_key(key: str, role: str = "user") -> None:
+async def register_key(key: str, role: str = "user", daily_limit: int | None = None) -> None:
     """Add a key to the database (admin only)."""
-    await create_api_key_node(key_hash=_hash_key(key), prefix=key[:8], role=role)
+    await create_api_key_node(
+        key_hash=_hash_key(key), prefix=key[:8], role=role, daily_limit=daily_limit
+    )
 
 
 async def require_api_key(

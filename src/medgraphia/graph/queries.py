@@ -807,24 +807,33 @@ async def reinforce_qa_memory(user_id: str, qa_ids: list[str], cuis: list[str], 
 # ---------------------------------------------------------------------------
 
 
-async def create_api_key_node(key_hash: str, prefix: str, role: str) -> None:
-    """Persist a hashed API key and its metadata."""
+async def create_api_key_node(
+    key_hash: str, prefix: str, role: str, daily_limit: int | None = None
+) -> None:
+    """Persist a hashed API key and its metadata.
+
+    daily_limit: optional per-key daily request cap (see api/rate_limit.py) —
+    None means "no key-specific cap, just the global/per-visitor ones".
+    """
     cypher = """
     MERGE (k:ApiKey {key_hash: $key_hash})
     SET k.prefix = $prefix,
         k.role   = $role,
+        k.daily_limit = $daily_limit,
         k.active = True,
         k.created_at = datetime()
     """
     async with get_session() as session:
-        await session.run(cypher, key_hash=key_hash, prefix=prefix, role=role)
+        await session.run(
+            cypher, key_hash=key_hash, prefix=prefix, role=role, daily_limit=daily_limit
+        )
 
 
 async def get_api_key_node(key_hash: str) -> dict[str, Any] | None:
     """Retrieve key metadata by its hash."""
     cypher = """
     MATCH (k:ApiKey {key_hash: $key_hash, active: True})
-    RETURN k.role AS role, k.prefix AS prefix
+    RETURN k.role AS role, k.prefix AS prefix, k.daily_limit AS daily_limit
     """
     async with get_session() as session:
         result = await session.run(cypher, key_hash=key_hash)
@@ -836,7 +845,7 @@ async def list_api_keys() -> list[dict[str, Any]]:
     """List all active API key metadata (redacted)."""
     cypher = """
     MATCH (k:ApiKey {active: True})
-    RETURN k.prefix AS prefix, k.role AS role
+    RETURN k.prefix AS prefix, k.role AS role, k.daily_limit AS daily_limit
     ORDER BY k.created_at DESC
     """
     keys = []
@@ -845,6 +854,24 @@ async def list_api_keys() -> list[dict[str, Any]]:
         async for record in result:
             keys.append(dict(record))
     return keys
+
+
+async def set_api_key_daily_limit(prefix: str, daily_limit: int | None) -> int:
+    """Update the daily request cap for active key(s) matching a prefix.
+
+    daily_limit=None clears the key-specific cap (falls back to the global
+    default). Returns the number of keys updated.
+    """
+    cypher = """
+    MATCH (k:ApiKey {active: True})
+    WHERE k.prefix STARTS WITH $prefix
+    SET k.daily_limit = $daily_limit
+    RETURN count(k) AS cnt
+    """
+    async with get_session() as session:
+        result = await session.run(cypher, prefix=prefix, daily_limit=daily_limit)
+        record = await result.single()
+        return record["cnt"] if record else 0
 
 
 async def delete_api_keys_by_prefix(prefix: str) -> int:

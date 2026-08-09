@@ -35,6 +35,7 @@ from medgraphia.graph.queries import (
     get_graph_stats,
     get_pipeline_status,
     list_api_keys,
+    set_api_key_daily_limit,
     upsert_pipeline_status,
 )
 from medgraphia.logger import get_logger
@@ -180,15 +181,28 @@ async def admin_graph_stats(
 )
 async def create_api_key(
     role: str = "user",
+    daily_limit: int | None = None,
+    custom_key: str | None = None,
     principal: dict = Depends(require_admin),
-) -> dict[str, str]:
-    new_key = generate_api_key()
-    await register_key(new_key, role=role)
-    logger.info("api_key_created", prefix=new_key[:8], by=principal.get("id", "admin"))
+) -> dict[str, Any]:
+    if custom_key:
+        if len(custom_key) < 6:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="custom_key must be at least 6 characters.",
+            )
+        new_key = custom_key
+    else:
+        new_key = generate_api_key()
+    await register_key(new_key, role=role, daily_limit=daily_limit)
+    logger.info(
+        "api_key_created", prefix=new_key[:8], by=principal.get("id", "admin"), daily_limit=daily_limit
+    )
     return {
         "api_key": new_key,
         "role": role,
         "prefix": new_key[:8],
+        "daily_limit": daily_limit,
         "note": "Store this key securely — it cannot be retrieved again.",
     }
 
@@ -204,9 +218,35 @@ async def create_api_key(
 )
 async def list_api_keys_endpoint(
     principal: dict = Depends(require_admin),
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     keys = await list_api_keys()
-    return [{"prefix": k["prefix"] + "…", "role": k["role"]} for k in keys]
+    return [
+        {"prefix": k["prefix"] + "…", "role": k["role"], "daily_limit": k.get("daily_limit")}
+        for k in keys
+    ]
+
+
+# ---------------------------------------------------------------------------
+# PATCH /admin/keys/{prefix}/limit — set or clear a key's daily request cap
+# ---------------------------------------------------------------------------
+
+
+@router.patch(
+    "/keys/{prefix}/limit",
+    summary="Set (or clear, with daily_limit omitted) a key's daily request cap",
+)
+async def update_api_key_limit(
+    prefix: str = Path(..., min_length=8, max_length=8),
+    daily_limit: int | None = None,
+    principal: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    count = await set_api_key_daily_limit(prefix, daily_limit)
+    if count == 0:
+        raise HTTPException(status_code=404, detail="Key prefix not found.")
+    logger.info(
+        "api_key_limit_updated", prefix=prefix, daily_limit=daily_limit, by=principal.get("id", "admin")
+    )
+    return {"status": "updated", "prefix": prefix, "daily_limit": daily_limit, "count": count}
 
 
 # ---------------------------------------------------------------------------

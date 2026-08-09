@@ -178,14 +178,33 @@ with tab_keys:
         unsafe_allow_html=True,
     )
 
-    cc1, cc2, _ = st.columns([1, 1, 2])
+    cc1, cc2 = st.columns([1, 1])
     role = cc1.selectbox("Role", ["user", "admin"], index=0)
-    if cc2.button("Generate", type="primary", use_container_width=True):
+    new_key_limit = cc2.number_input(
+        "Daily limit (0 = no key-specific cap)",
+        min_value=0,
+        value=0,
+        step=1,
+        help="Extra per-key daily request cap, enforced in addition to the global/per-visitor "
+        "limits — e.g. cap a shared demo key's total usage across everyone using it.",
+    )
+    custom_key = st.text_input(
+        "Custom key value (optional — leave blank for a random one)",
+        placeholder="e.g. a memorable string for a shared/public key like public_test",
+        help="At least 6 characters. Useful for a shared key you want people to type/remember, "
+        "as opposed to a random per-person key.",
+    )
+    if st.button("Generate", type="primary", use_container_width=True):
         try:
-            new = _client().create_api_key(role=role)
+            new = _client().create_api_key(
+                role=role, daily_limit=new_key_limit or None, custom_key=custom_key or None
+            )
             st.success("Key created — copy it now, it cannot be retrieved again.")
             st.code(new.get("api_key", ""), language=None)
-            st.caption(f"Role: `{new.get('role')}`  ·  Prefix: `{new.get('prefix')}`")
+            limit_caption = new.get("daily_limit") or "none"
+            st.caption(
+                f"Role: `{new.get('role')}`  ·  Prefix: `{new.get('prefix')}`  ·  Daily limit: `{limit_caption}`"
+            )
         except APIError as exc:
             st.error(f"Could not create key: {exc.detail}")
 
@@ -206,13 +225,30 @@ with tab_keys:
         for k in keys:
             prefix_full = k.get("prefix", "")
             prefix_clean = prefix_full.rstrip("…")
-            r1, r2, r3 = st.columns([2, 1, 1])
+            current_limit = k.get("daily_limit")
+            r1, r2, r3, r4, r5 = st.columns([2, 1, 1, 1, 1])
             r1.markdown(f"**`{prefix_full}`**")
             r2.markdown(
                 status_badge(k.get("role", "user"), "info"),
                 unsafe_allow_html=True,
             )
-            if r3.button("Revoke", key=f"revoke_{prefix_clean}", use_container_width=True):
+            new_limit = r3.number_input(
+                "Daily limit",
+                min_value=0,
+                value=current_limit or 0,
+                step=1,
+                key=f"limit_{prefix_clean}",
+                label_visibility="collapsed",
+                help="0 = no key-specific cap",
+            )
+            if r4.button("Save", key=f"save_limit_{prefix_clean}", use_container_width=True):
+                try:
+                    _client().update_api_key_limit(prefix_clean[:8], new_limit or None)
+                    st.success("Limit updated.")
+                    st.rerun()
+                except APIError as exc:
+                    st.error(f"Update failed: {exc.detail}")
+            if r5.button("Revoke", key=f"revoke_{prefix_clean}", use_container_width=True):
                 try:
                     res = _client().revoke_api_key(prefix_clean[:8])
                     st.success(f"Revoked {res.get('count', 0)} key(s).")

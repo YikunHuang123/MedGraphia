@@ -265,11 +265,22 @@ class MedGraphiaClient:
     # Admin — API Keys
     # ------------------------------------------------------------------
 
-    def create_api_key(self, role: str = "user") -> dict[str, str]:
-        return self._request("POST", "/admin/keys", admin=True, params={"role": role})
+    def create_api_key(
+        self, role: str = "user", daily_limit: int | None = None, custom_key: str | None = None
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"role": role}
+        if daily_limit is not None:
+            params["daily_limit"] = daily_limit
+        if custom_key:
+            params["custom_key"] = custom_key
+        return self._request("POST", "/admin/keys", admin=True, params=params)
 
-    def list_api_keys(self) -> list[dict[str, str]]:
+    def list_api_keys(self) -> list[dict[str, Any]]:
         return self._request("GET", "/admin/keys", admin=True) or []
+
+    def update_api_key_limit(self, prefix: str, daily_limit: int | None) -> dict[str, Any]:
+        params: dict[str, Any] = {} if daily_limit is None else {"daily_limit": daily_limit}
+        return self._request("PATCH", f"/admin/keys/{prefix}/limit", admin=True, params=params)
 
     def revoke_api_key(self, prefix: str) -> dict[str, Any]:
         return self._request("DELETE", f"/admin/keys/{prefix}", admin=True)
