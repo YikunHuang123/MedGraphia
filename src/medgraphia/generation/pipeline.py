@@ -127,20 +127,23 @@ class GenerationPipeline:
 
         evidence_lines = []
         new_chunks = []
+        fused_items = []
         async for gap_ev in self._maybe_complete_gaps(
             question, context_str, entity_labels or {}, unlinked_mentions or [], lm, target_lang
         ):
             if gap_ev["type"] == "gap_result":
                 evidence_lines = gap_ev.get("evidence", [])
                 new_chunks = gap_ev.get("chunks", [])
+                fused_items = gap_ev.get("fused_items", [])
 
-        if new_chunks:
+        if new_chunks or fused_items:
             # Rebuild the numbered context so newly-fetched passages get a
             # real [N] citation number the model can reference, instead of
             # being appended as unnumbered raw text.
             from medgraphia.retrieval.fusion import chunk_to_fused_item
 
             retrieved_items.extend(chunk_to_fused_item(c) for c in new_chunks)
+            retrieved_items.extend(fused_items)  # already FusedItem-shaped — see agentic_completion._fetch_connecting_evidence
             context_str = build_numbered_context(retrieved_items)
         if evidence_lines:
             context_str += "\n\n[Additional evidence found for this query]\n" + "\n".join(evidence_lines)
@@ -274,6 +277,7 @@ class GenerationPipeline:
         
         evidence_lines = []
         new_chunks = []
+        fused_items = []
         async for gap_ev in self._maybe_complete_gaps(
             question, context_str, entity_labels or {}, unlinked_mentions or [], lm, target_lang
         ):
@@ -283,11 +287,13 @@ class GenerationPipeline:
             elif gap_ev["type"] == "gap_result":
                 evidence_lines = gap_ev.get("evidence", [])
                 new_chunks = gap_ev.get("chunks", [])
+                fused_items = gap_ev.get("fused_items", [])
 
-        if new_chunks:
+        if new_chunks or fused_items:
             from medgraphia.retrieval.fusion import chunk_to_fused_item
 
             retrieved_items.extend(chunk_to_fused_item(c) for c in new_chunks)
+            retrieved_items.extend(fused_items)  # already FusedItem-shaped — see agentic_completion._fetch_connecting_evidence
             context_str = build_numbered_context(retrieved_items)
         if evidence_lines:
             context_str += "\n\n[Additional evidence found for this query]\n" + "\n".join(evidence_lines)

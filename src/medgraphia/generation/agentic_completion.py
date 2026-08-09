@@ -37,6 +37,8 @@ class CompletionState(TypedDict, total=False):
     tool_calls_made: int
     gap_evidence: list[str]
     gap_chunks: list[Any]
+    gap_fused_items: list[Any]  # FusedItem — already-fused, citable content (see _fetch_connecting_evidence)
+    attempted_pairs: list[tuple[str, ...]]  # (entity_a, entity_b) already searched this run, order-independent
     needs_completion: bool
     entity_a: str
     entity_b: str
@@ -123,24 +125,80 @@ async def _assess_gap_node(state: CompletionState) -> CompletionState:
         return {**state, "needs_completion": False}
 
 
+async def _fetch_connecting_evidence(cui_a: str, cui_b: str, limit: int = 3) -> list[Any]:
+    """
+    Pull a few already-ingested chunks connecting two CUIs and wrap them as
+    citable FusedItems.
+
+    Used when a gap is "resolved" without a fresh PubMed fetch (the
+    idempotency guards in _execute_tool_node below) so the generator still
+    gets something concrete to cite instead of a bare assertion like "these
+    are already connected" — text it can't attach a [N] marker to, and which
+    its own citation rules then correctly refuse to rely on.
+    """
+    from medgraphia.retrieval.fusion import FusedItem, RetrievalSource
+    from medgraphia.retrieval.graph_retriever import GraphRetriever
+
+    try:
+        result = await GraphRetriever.from_settings().retrieve([cui_a, cui_b], hops=1)
+    except Exception as exc:
+        logger.warning("fetch_connecting_evidence_failed", cui_a=cui_a, cui_b=cui_b, error=str(exc))
+        return []
+
+    return [
+        FusedItem(
+            item_id=hit.chunk_id,
+            text=hit.text,
+            source=RetrievalSource.GRAPH,
+            rrf_score=hit.score,
+            metadata={"chunk_id": hit.chunk_id, "doc_id": hit.doc_id, "section_path": hit.section_path},
+        )
+        for hit in result.hits[:limit]
+    ]
+
+
 async def _execute_tool_node(state: CompletionState) -> CompletionState:
     from medgraphia.config import get_settings
 
     entity_a, entity_b = state["entity_a"], state["entity_b"]
     tool_calls_made = state.get("tool_calls_made", 0) + 1
+    cui_map = state.get("entity_cui_map", {})
+    cui_a, cui_b = cui_map.get(entity_a), cui_map.get(entity_b)
+
+    # Idempotency guard: the assessor's own judgment of "is this satisfied yet"
+    # isn't reliable — it can re-request a pair it just fetched evidence for
+    # (seen in production: identical PubMed query run twice in one turn).
+    # Order-independent so (A, B) and (B, A) count as the same search.
+    pair_key = tuple(sorted(p.lower() for p in (entity_a, entity_b) if p))
+    attempted = state.get("attempted_pairs", [])
+    if pair_key in attempted:
+        evidence = f"Already searched for {entity_a}" + (f" and {entity_b}" if entity_b else "") + " earlier in this turn."
+        fused_items = await _fetch_connecting_evidence(cui_a, cui_b) if (cui_a and cui_b) else []
+        return {
+            **state,
+            "gap_evidence": state.get("gap_evidence", []) + [evidence],
+            "gap_fused_items": state.get("gap_fused_items", []) + fused_items,
+            "tool_calls_made": tool_calls_made,
+            "needs_completion": False,
+        }
 
     # Idempotency guard: if both entities are already linked CUIs and a real
     # path already connects them, don't re-fetch — just record that.
-    cui_map = state.get("entity_cui_map", {})
-    cui_a, cui_b = cui_map.get(entity_a), cui_map.get(entity_b)
     if cui_a and cui_b:
         from medgraphia.retrieval.graph_retriever import GraphRetriever
 
         already_connected = await GraphRetriever.from_settings().check_path_exists(cui_a, cui_b)
         if already_connected:
             evidence = f"{entity_a} and {entity_b} are already connected in the knowledge graph."
-            gap_evidence = state.get("gap_evidence", []) + [evidence]
-            return {**state, "gap_evidence": gap_evidence, "tool_calls_made": tool_calls_made, "needs_completion": False}
+            fused_items = await _fetch_connecting_evidence(cui_a, cui_b)
+            return {
+                **state,
+                "gap_evidence": state.get("gap_evidence", []) + [evidence],
+                "gap_fused_items": state.get("gap_fused_items", []) + fused_items,
+                "tool_calls_made": tool_calls_made,
+                "attempted_pairs": attempted + [pair_key],
+                "needs_completion": False,
+            }
 
     from medgraphia.retrieval.query_time_completion import complete_gap, complete_single_entity_gap
 
@@ -149,10 +207,17 @@ async def _execute_tool_node(state: CompletionState) -> CompletionState:
         evidence_str, new_chunks = await complete_single_entity_gap(entity_a, pubmed_limit=cfg.gap_completion_pubmed_limit)
     else:
         evidence_str, new_chunks = await complete_gap(entity_a, entity_b, pubmed_limit=cfg.gap_completion_pubmed_limit)
-        
+
     gap_evidence = state.get("gap_evidence", []) + [evidence_str]
     gap_chunks = state.get("gap_chunks", []) + new_chunks
-    return {**state, "gap_evidence": gap_evidence, "gap_chunks": gap_chunks, "tool_calls_made": tool_calls_made, "needs_completion": False}
+    return {
+        **state,
+        "gap_evidence": gap_evidence,
+        "gap_chunks": gap_chunks,
+        "tool_calls_made": tool_calls_made,
+        "attempted_pairs": attempted + [pair_key],
+        "needs_completion": False,
+    }
 
 
 def _route_after_assess(state: CompletionState) -> str:
@@ -237,6 +302,8 @@ async def run_gap_completion(
         "tool_calls_made": 0,
         "gap_evidence": [],
         "gap_chunks": [],
+        "gap_fused_items": [],
+        "attempted_pairs": [],
     }
 
     final_state = dict(initial_state)
@@ -255,4 +322,5 @@ async def run_gap_completion(
         "type": "gap_result",
         "evidence": final_state.get("gap_evidence", []),
         "chunks": final_state.get("gap_chunks", []),
+        "fused_items": final_state.get("gap_fused_items", []),
     }
