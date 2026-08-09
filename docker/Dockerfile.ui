@@ -26,6 +26,7 @@ RUN pip install --no-cache-dir \
 
 # Copy the full source tree so all medgraphia.* imports resolve correctly
 COPY src/ /app/src/
+COPY .streamlit/ /app/.streamlit/
 
 # src-layout: tell Python where to find the medgraphia package
 ENV PYTHONPATH=/app/src

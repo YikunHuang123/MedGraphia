@@ -4,3 +4,8 @@ backgroundColor="#FFFFFF"
 secondaryBackgroundColor="#F8FAFC"
 textColor="#0F172A"
 font="sans serif"
+
+[client]
+# Hides the "Deploy" button and the "Fork/GitHub/hamburger" menu items that
+# only make sense for Streamlit Community Cloud, not a self-hosted deployment.
+toolbarMode = "minimal"
