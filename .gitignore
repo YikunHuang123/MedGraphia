@@ -35,6 +35,9 @@ Readme_ZH.md
 AGENTS.md
 
 *.log
+*.pid
+logs/
+*.sh
 .mcp.json
 .playwright-mcp/
 

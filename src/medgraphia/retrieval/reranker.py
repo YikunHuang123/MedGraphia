@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from medgraphia.config import settings
-from medgraphia.domain.base import QueryType
+from medgraphia.domain.base import Language, QueryType
 from medgraphia.generation.llm_router import ModelTier
 from medgraphia.logger import get_logger
 from medgraphia.retrieval.fusion import FusedItem, FusionResult
@@ -40,6 +40,8 @@ class RerankedResult:
         query            — Original query text.
         reranked         — True if reranking actually ran; False if it was skipped.
         query_type       — The intent classified by the router (useful for generation).
+        response_language— DSPy-assessed answer language from the rewriter; None means
+                           the caller's originally-resolved language should be used.
         complexity_tier  — DSPy-assessed routing tier from the rewriter; None means
                            the router will fall back to the static QueryType→tier table.
     """
@@ -48,6 +50,7 @@ class RerankedResult:
     query: str = ""
     reranked: bool = False
     query_type: QueryType = QueryType.PATIENT_FAQ
+    response_language: Language | None = None  # None means: use the caller's original language
     linked_cuis: list[str] = field(default_factory=list)
     unlinked_mentions: list[str] = field(default_factory=list)
     entity_labels: dict[str, str] = field(default_factory=dict)  # cui -> label, linked entities only

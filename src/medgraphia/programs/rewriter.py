@@ -8,6 +8,7 @@ from pathlib import Path
 
 import dspy
 
+from medgraphia.domain.base import Language
 from medgraphia.generation.llm_router import ModelTier
 from medgraphia.logger import get_logger
 from medgraphia.prompts import ROUTING_RUBRIC, QueryRewritingWithTier
@@ -33,15 +34,18 @@ class RewriterModule(dspy.Module):
         )
 
         tier = _parse_tier(prediction.complexity_tier)
+        response_language = _parse_language(prediction.response_language)
 
-        # Expose tier as a top-level field on the returned Prediction so callers
-        # can access it as prediction.tier without touching the raw string.
+        # Expose tier/language as top-level fields on the returned Prediction so
+        # callers can access prediction.tier / prediction.response_language
+        # without touching the raw strings.
         return dspy.Prediction(
             is_standalone=prediction.is_standalone,
             rewritten_query=prediction.rewritten_query,
             complexity_reasoning=prediction.complexity_reasoning,
             complexity_tier=prediction.complexity_tier,
             tier=tier,
+            response_language=response_language,
         )
 
 
@@ -65,6 +69,21 @@ def _parse_tier(raw: str) -> ModelTier:
             fallback=ModelTier.LARGE.value,
         )
         return ModelTier.LARGE
+
+
+def _parse_language(raw: str) -> Language | None:
+    """
+    Convert the model's raw response_language output to a Language enum.
+
+    Returns None on any unrecognised value so callers can fall back to the
+    already-resolved request language instead of silently forcing English.
+    """
+    clean = raw.strip().lower()
+    mapping = {"english": Language.EN, "chinese": Language.ZH, "german": Language.DE}
+    lang = mapping.get(clean)
+    if lang is None:
+        logger.warning("response_language_parse_failed", raw_value=raw)
+    return lang
 
 
 def get_rewriter() -> RewriterModule:

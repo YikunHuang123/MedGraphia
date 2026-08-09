@@ -31,17 +31,22 @@ class QueryRewriter:
         query: str,
         history: list[Message],
         language: Language = Language.EN,
-    ) -> tuple[str, ModelTier]:
+    ) -> tuple[str, ModelTier, Language]:
         """
-        Rewrite the query and score its complexity tier.
+        Rewrite the query, score its complexity tier, and resolve the response language.
 
         Returns
         -------
-        (rewritten_query, complexity_tier)
-            rewritten_query : standalone, coreference-resolved query string.
-            complexity_tier : ModelTier enum (SMALL / MEDIUM / LARGE).
-                              Falls back to LARGE on any DSPy error to ensure
-                              medical safety is never compromised.
+        (rewritten_query, complexity_tier, response_language)
+            rewritten_query   : standalone, coreference-resolved query string.
+            complexity_tier   : ModelTier enum (SMALL / MEDIUM / LARGE).
+                                 Falls back to LARGE on any DSPy error to ensure
+                                 medical safety is never compromised.
+            response_language : language the answer should be generated in — normally
+                                 the query's language, but honors an explicit in-message
+                                 request (e.g. "answer in English") when DSPy detects one.
+                                 Falls back to the `language` argument on any DSPy error
+                                 or unparseable output.
 
         Note: This method always runs — even when history is empty — because
         complexity assessment depends on the question itself, not the history.
@@ -68,6 +73,7 @@ class QueryRewriter:
 
             rewritten = prediction.rewritten_query
             tier: ModelTier = prediction.tier
+            response_language: Language = prediction.response_language or language
 
             logger.info(
                 "query_rewrite_completed",
@@ -75,10 +81,11 @@ class QueryRewriter:
                 rewritten=rewritten,
                 complexity_reasoning=getattr(prediction, "complexity_reasoning", "N/A"),
                 complexity_tier=tier.value,
+                response_language=response_language.value,
             )
-            return rewritten, tier
+            return rewritten, tier, response_language
 
         except Exception as exc:
             logger.warning("query_rewrite_failed", error=str(exc))
             # Graceful degradation: original query + LARGE tier (medical safety first)
-            return query, ModelTier.LARGE
+            return query, ModelTier.LARGE, language

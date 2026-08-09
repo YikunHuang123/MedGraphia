@@ -321,6 +321,9 @@ async def chat_stream(
     logger.info("query_received", language=language.value, stream=True)
 
     async def _event_stream() -> AsyncIterator[str]:
+        # Rebound after retrieval to the DSPy-resolved response language (see below);
+        # declared nonlocal up front since `language` is read before that point too.
+        nonlocal language
         with langfuse.trace(
             "chat_stream",
             session_id=session.session_id,
@@ -366,6 +369,9 @@ async def chat_stream(
                 items = getattr(reranked, "items", [])
                 query_type: QueryType = getattr(reranked, "query_type", QueryType.PATIENT_FAQ)
                 complexity_tier = getattr(reranked, "complexity_tier", None)
+                # DSPy-resolved response language (honors an explicit in-message request,
+                # e.g. "answer in English") — falls back to the original resolved language.
+                language = getattr(reranked, "response_language", None) or language
                 retrieval_paths = list({item.source.value for item in items})
                 span.end(output=f"{len(items)} items")
 
@@ -623,6 +629,9 @@ async def _run_full_pipeline(
         items = getattr(reranked, "items", [])
         query_type: QueryType = getattr(reranked, "query_type", QueryType.PATIENT_FAQ)
         complexity_tier = getattr(reranked, "complexity_tier", None)
+        # DSPy-resolved response language (honors an explicit in-message request,
+        # e.g. "answer in English") — falls back to the original resolved language.
+        language = getattr(reranked, "response_language", None) or language
         retrieval_paths = list({item.source.value for item in items})
         span.end(output=f"{len(items)} items")
 

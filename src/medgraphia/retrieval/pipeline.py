@@ -122,7 +122,7 @@ class RetrievalPipeline:
 
         yield "Assessing complexity and rewriting query (Rewriting)..."
         complexity_tier: ModelTier | None = None
-        search_query, complexity_tier = await self.rewriter.rewrite(
+        search_query, complexity_tier, response_language = await self.rewriter.rewrite(
             query=query, history=history or [], language=language or Language.EN
         )
         if history:
@@ -186,6 +186,7 @@ class RetrievalPipeline:
             yield RerankedResult(
                 query=search_query,
                 query_type=plan.query_type,
+                response_language=response_language,
                 complexity_tier=complexity_tier,
                 is_chitchat=True,
             )
@@ -367,6 +368,7 @@ class RetrievalPipeline:
             e.cui: e.label for e in plan.query_entities.entities if not e.cui.startswith("MENTION:")
         }
         final_result.complexity_tier = complexity_tier
+        final_result.response_language = response_language
         final_result.qa_memories = memory_result.memories if memory_result else []
 
         logger.info(

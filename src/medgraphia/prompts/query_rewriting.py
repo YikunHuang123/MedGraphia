@@ -46,6 +46,9 @@ class QueryRewritingWithTier(dspy.Signature):
     4. Work through the rubric STEP-BY-STEP and write the scores in complexity_reasoning before
        deciding complexity_tier — never guess the tier without computing E and I first.
     5. complexity_tier MUST be exactly one of the three strings: SMALL, MEDIUM, LARGE.
+    6. response_language is normally the SAME language as latest_message. If — and only if —
+       the user explicitly asks for the answer in a different language (e.g. a mostly-Chinese
+       message ending with "answer in English"), honor that explicit request instead.
     """
 
     rubric = dspy.InputField(
@@ -68,6 +71,11 @@ class QueryRewritingWithTier(dspy.Signature):
         desc="Scoring trace, e.g. 'E=2 (metformin + contrast agent), I=3 (contraindication in CKD → Total=5'"
     )
     complexity_tier = dspy.OutputField(desc="Must be exactly one of: SMALL, MEDIUM, LARGE")
+    response_language = dspy.OutputField(
+        desc="The language the ANSWER should be written in. Must be exactly one of: English, "
+        "Chinese, German. Same as latest_message's language UNLESS the user explicitly requested "
+        "a different response language."
+    )
 
 
 class RewritingJudge(dspy.Signature):
