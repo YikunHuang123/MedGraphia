@@ -102,9 +102,16 @@ def append_message(conv_id: str, message: dict[str, Any]) -> None:
 def sync_from_backend(client: Any) -> None:
     """
     Fetch the list of sessions from the backend and populate st.session_state.
-    Only does this once per browser session unless forced.
+
+    Re-syncs whenever the client's identity (client_id) changes rather than a
+    plain one-shot flag: on a fresh session, get_guest_id() hands out a
+    temporary, unpersisted id for one rerun while its cookie read resolves
+    (see components/guest_id.py) — if this ran and synced against that
+    temporary identity, a one-shot flag would permanently lock in an empty
+    history even after the real guest_id becomes available.
     """
-    if st.session_state.get("_history_synced"):
+    client_id = getattr(client, "client_id", "")
+    if st.session_state.get("_history_synced_for") == client_id:
         return
 
     try:
@@ -139,7 +146,7 @@ def sync_from_backend(client: Any) -> None:
                     "updated_at": updated_at,
                     "is_lazy": True,  # Flag indicating messages need fetching
                 }
-        st.session_state["_history_synced"] = True
+        st.session_state["_history_synced_for"] = client_id
         st.session_state.pop("api_error", None)
     except Exception as e:
         st.session_state["api_error"] = str(e)

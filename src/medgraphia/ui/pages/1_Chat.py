@@ -37,14 +37,19 @@ inject_theme()
 
 from components.sidebar import render_api_settings, render_common_sidebar, has_any_valid_key, get_current_client  # noqa: E402
 
-# ── Sync history from backend on first load / API key input ────────────────
-if st.session_state.get("api_key") or st.session_state.get("admin_key"):
-    chat_history.sync_from_backend(get_current_client())
-
 def render_chat_sidebar() -> None:
     with st.sidebar:
         # 1. Standard Sidebar Sections (No Settings Yet)
+        # Must run before the history sync below: this is what resolves
+        # api_key/admin_key from their cookie (see sidebar.py). Syncing
+        # history first (the original order) used whatever key state existed
+        # at the very top of the script — one script-run stale — so history
+        # only ever appeared after some later, unrelated rerun.
         render_common_sidebar(include_settings=False)
+
+        # ── Sync history from backend on first load / API key input ────────
+        if st.session_state.get("api_key") or st.session_state.get("admin_key"):
+            chat_history.sync_from_backend(get_current_client())
 
         # 2. Conversations Section
         has_valid_key = has_any_valid_key()

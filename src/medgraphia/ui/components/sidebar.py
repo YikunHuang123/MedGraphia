@@ -22,6 +22,8 @@ from streamlit_cookies_controller import CookieController
 _API_KEY_COOKIE = "mg_api_key"
 _ADMIN_KEY_COOKIE = "mg_admin_key"
 _KEY_COOKIE_MAX_AGE_SECONDS = 365 * 86400
+_KEY_COOKIE_RESOLVE_RETRIES = 10
+_KEY_COOKIE_RETRY_DELAY_SECONDS = 0.3
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -36,8 +38,15 @@ def render_common_sidebar(include_settings: bool = True) -> None:
     # Streamlit wipes on a full page refresh — persist them in a first-party
     # cookie (same approach as guest_id.py) so a refresh doesn't log you out.
     _key_cookies = CookieController(key="mg_cookie_controller_keys")
-    saved_api_key = _key_cookies.get(_API_KEY_COOKIE) or ""
-    saved_admin_key = _key_cookies.get(_ADMIN_KEY_COOKIE) or ""
+    try:
+        saved_api_key = _key_cookies.get(_API_KEY_COOKIE) or ""
+        saved_admin_key = _key_cookies.get(_ADMIN_KEY_COOKIE) or ""
+    except Exception:
+        # Component's cookie dict is None until its browser round-trip
+        # resolves (streamlit_cookies_controller doesn't guard this itself) —
+        # treat as "not resolved yet", same as guest_id.py's handling.
+        saved_api_key = ""
+        saved_admin_key = ""
 
     # Ensure core state exists (required for all pages)
     defaults = {
@@ -57,14 +66,26 @@ def render_common_sidebar(include_settings: bool = True) -> None:
     # api_key/admin_key are handled separately from the loop above: the cookie
     # component's value resolves asynchronously, so on a session's first-ever
     # script run saved_api_key/saved_admin_key may still read back "" even
-    # though the cookie holds a real value — a Streamlit rerun fires once the
-    # component actually resolves. Re-checking on every rerun (instead of only
-    # when the key is absent from session_state) means that follow-up rerun
-    # still picks up the real value instead of locking in an empty default.
+    # though the cookie holds a real value. Passively waiting for "some later
+    # rerun" to pick up the resolved value (the original approach) leaves the
+    # page rendered against an empty key until an unrelated interaction
+    # happens to trigger a rerun — force one explicitly (bounded by a retry
+    # counter, same pattern as guest_id.py) so the page never renders against
+    # an unresolved cookie in the first place.
+    env_api_key = os.getenv("MEDGRAPHIA_API_KEY", "")
+    env_admin_key = os.getenv("MEDGRAPHIA_ADMIN_KEY", "")
+    api_unresolved = not st.session_state.get("api_key") and not env_api_key and not saved_api_key
+    admin_unresolved = not st.session_state.get("admin_key") and not env_admin_key and not saved_admin_key
+    if api_unresolved and admin_unresolved:
+        retries = st.session_state.get("_saved_keys_retries", 0)
+        if retries < _KEY_COOKIE_RESOLVE_RETRIES:
+            st.session_state["_saved_keys_retries"] = retries + 1
+            time.sleep(_KEY_COOKIE_RETRY_DELAY_SECONDS)
+            st.rerun()
     if not st.session_state.get("api_key"):
-        st.session_state["api_key"] = os.getenv("MEDGRAPHIA_API_KEY", "") or saved_api_key
+        st.session_state["api_key"] = env_api_key or saved_api_key
     if not st.session_state.get("admin_key"):
-        st.session_state["admin_key"] = os.getenv("MEDGRAPHIA_ADMIN_KEY", "") or saved_admin_key
+        st.session_state["admin_key"] = env_admin_key or saved_admin_key
 
     # 1. Asynchronous-like Health Check Trigger
     now = time.time()
@@ -186,7 +207,7 @@ def render_api_settings() -> None:
     def _sync_api_key():
         st.session_state["api_key"] = st.session_state["sidebar_user_key"]
         st.session_state["_api_key_dirty"] = True
-        st.session_state.pop("_history_synced", None)
+        st.session_state.pop("_history_synced_for", None)
         st.session_state.pop("api_error", None)
         st.session_state.pop("_api_key_validated", None)
         st.session_state["conversations"] = {}
@@ -195,7 +216,7 @@ def render_api_settings() -> None:
     def _sync_admin_key():
         st.session_state["admin_key"] = st.session_state["sidebar_admin_key"]
         st.session_state["_admin_key_dirty"] = True
-        st.session_state.pop("_history_synced", None)
+        st.session_state.pop("_history_synced_for", None)
         st.session_state.pop("_admin_key_validated", None)
         st.session_state.pop("admin_error", None)
         st.session_state["conversations"] = {}
@@ -235,14 +256,22 @@ def render_api_settings() -> None:
     admin_key_dirty = st.session_state.pop("_admin_key_dirty", False)
     if api_key_dirty or admin_key_dirty:
         _key_cookies = CookieController(key="mg_cookie_controller_keys_settings")
-        if api_key_dirty:
-            _key_cookies.set(
-                _API_KEY_COOKIE, st.session_state.get("api_key", ""), max_age=_KEY_COOKIE_MAX_AGE_SECONDS
-            )
-        if admin_key_dirty:
-            _key_cookies.set(
-                _ADMIN_KEY_COOKIE, st.session_state.get("admin_key", ""), max_age=_KEY_COOKIE_MAX_AGE_SECONDS
-            )
+        try:
+            if api_key_dirty:
+                _key_cookies.set(
+                    _API_KEY_COOKIE, st.session_state.get("api_key", ""), max_age=_KEY_COOKIE_MAX_AGE_SECONDS
+                )
+            if admin_key_dirty:
+                _key_cookies.set(
+                    _ADMIN_KEY_COOKIE, st.session_state.get("admin_key", ""), max_age=_KEY_COOKIE_MAX_AGE_SECONDS
+                )
+        except Exception:
+            # Component not resolved yet — re-set the dirty flags so the next
+            # rerun (once resolved) retries the write instead of losing it.
+            if api_key_dirty:
+                st.session_state["_api_key_dirty"] = True
+            if admin_key_dirty:
+                st.session_state["_admin_key_dirty"] = True
 
     has_api_error, has_admin_error, api_key_valid, admin_key_valid = get_auth_state()
 
