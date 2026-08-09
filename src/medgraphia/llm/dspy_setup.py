@@ -22,6 +22,7 @@ def get_lm(
     provider_override: str | None = None,
     model_override: str | None = None,
     temperature: float | None = None,
+    max_tokens: int | None = None,
 ) -> dspy.LM:
     """
     Get a dspy.LM instance for a specific task based on configuration.
@@ -57,7 +58,8 @@ def get_lm(
         base_url = cfg.vllm_small_base_url if model == cfg.llm_small_model else cfg.vllm_medium_base_url
         get_sleep_manager().ensure_awake_sync(base_url)
 
-    cache_key = f"{provider}/{model}/{task}/{temperature}"
+    resolved_max_tokens = max_tokens if max_tokens is not None else cfg.llm_max_tokens
+    cache_key = f"{provider}/{model}/{task}/{temperature}/{resolved_max_tokens}"
     if cache_key in _LM_CACHE:
         return _LM_CACHE[cache_key]
 
@@ -94,7 +96,7 @@ def get_lm(
             api_base = cfg.vllm_medium_base_url
 
     try:
-        kwargs = {"max_tokens": cfg.llm_max_tokens}
+        kwargs = {"max_tokens": resolved_max_tokens}
         if api_key:
             kwargs["api_key"] = api_key
         if api_base:

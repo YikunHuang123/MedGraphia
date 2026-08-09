@@ -92,7 +92,13 @@ class Settings(BaseSettings):
     default_llm_provider: Literal["deepseek", "openai", "anthropic", "gemini", "groq", "ollama", "vllm", "local", "cerebras", "siliconflow", "fireworks_ai"] = "ollama"
     default_llm_model: str = "qwen3:14b"
     llm_base_url: str = "http://localhost:11434"
+    # Output budget for the generator/rewriter LM call, scaled by the query's
+    # complexity tier (see generation/llm_router.py ModelTier) — a LARGE-tier
+    # answer citing a dozen+ sources needs far more room than a SMALL one, and
+    # a cap that's too tight truncates the structured JSON output mid-answer.
     llm_max_tokens: int = 2048
+    llm_max_tokens_medium: int = 4096
+    llm_max_tokens_large: int = 8192
     llm_temperature: float = 0.1
 
     # vLLM has its own base_url field — llm_base_url is shared with DeepSeek's

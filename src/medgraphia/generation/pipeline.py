@@ -28,6 +28,17 @@ from medgraphia.prompts import (
 logger = get_logger(__name__)
 
 
+def _max_tokens_for_tier(tier: ModelTier | None) -> int | None:
+    """LARGE-tier answers cite far more sources than SMALL ones and need a bigger output budget to avoid truncation."""
+    from medgraphia.config import get_settings
+
+    cfg = get_settings()
+    return {
+        ModelTier.MEDIUM: cfg.llm_max_tokens_medium,
+        ModelTier.LARGE: cfg.llm_max_tokens_large,
+    }.get(tier)
+
+
 def _build_memory_context(qa_memories: list[Any]) -> str:
     """Format QA memories with a relative-time label so the generator can reason about recency itself."""
     if not qa_memories:
@@ -108,6 +119,7 @@ class GenerationPipeline:
             task="default",
             provider_override=routing.provider.value,
             model_override=routing.model_name,
+            max_tokens=_max_tokens_for_tier(complexity_tier),
         )
 
         # 2.5. Agentic gap completion — same lm as final generation, runs before it
@@ -175,10 +187,21 @@ class GenerationPipeline:
                 )
                 ans_data: MedicalAnswer = prediction.result
 
-                # ── Auto-Stitching: Ensure JSON citations are reflected in text ──
-                # This fixes "Format Drift" where LLMs omit [N] markers when a
-                # separate citations field is present in the schema.
-                if ans_data.citations:
+                if not ans_data.answer.strip():
+                    # Empty answer with a populated citations list means the LM's
+                    # output got cut off (usually max_tokens truncation) before any
+                    # prose was written — stitching citations onto "" below would
+                    # otherwise render as a bare wall of [N] markers with no text.
+                    logger.error("generation_empty_answer", citations=ans_data.citations)
+                    ans_data.answer = (
+                        "Sorry, I couldn't generate a complete answer for this question. "
+                        "Please try again."
+                    )
+                    ans_data.citations = []
+                elif ans_data.citations:
+                    # ── Auto-Stitching: Ensure JSON citations are reflected in text ──
+                    # This fixes "Format Drift" where LLMs omit [N] markers when a
+                    # separate citations field is present in the schema.
                     missing = [c for c in ans_data.citations if f"[{c}]" not in ans_data.answer]
                     if missing:
                         ans_data.answer += " " + "".join([f"[{c}]" for c in missing])
@@ -243,6 +266,7 @@ class GenerationPipeline:
             task="default",
             provider_override=routing.provider.value,
             model_override=routing.model_name,
+            max_tokens=_max_tokens_for_tier(complexity_tier),
         )
 
         target_lang = language.full_name if language else Language.EN.full_name
@@ -310,8 +334,18 @@ class GenerationPipeline:
                 ans_text = prediction.result.answer
                 explicit_cits = prediction.result.citations
 
-                # ── Auto-Stitching: Ensure JSON citations are reflected in text ──
-                if explicit_cits:
+                if not ans_text.strip():
+                    # See the matching guard in generate() — an empty answer with
+                    # populated citations means the LM output was truncated before
+                    # any prose was written; don't stitch bare [N] markers onto "".
+                    logger.error("generation_empty_answer", citations=explicit_cits)
+                    ans_text = (
+                        "Sorry, I couldn't generate a complete answer for this question. "
+                        "Please try again."
+                    )
+                    explicit_cits = []
+                elif explicit_cits:
+                    # ── Auto-Stitching: Ensure JSON citations are reflected in text ──
                     missing = [c for c in explicit_cits if f"[{c}]" not in ans_text]
                     if missing:
                         ans_text += " " + "".join([f"[{c}]" for c in missing])
