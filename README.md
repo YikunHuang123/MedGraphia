@@ -27,6 +27,49 @@ to roughly 10 seconds of added latency), so the graph keeps getting stronger the
 
 ---
 
+## 🔗Website: [https://yikunhuang.tech/medgraphia/](https://yikunhuang.tech/medgraphia/)
+
+> This website is a personal website, only for the study and testing of this project
+
+### User API Key
+```
+k3tqiS4XH5T1NECP5wv2dihQyoPTssButcJYl3wkuzc
+```
+Set it in the '🔑 API Settings' -> 'User API Key'.
+
+### Current limit setting: 
+Since this website uses the real llm api for deployment, each user is limited to asking questions **up to 4 times a day**, and all users can only ask questions up to 80 times a day.
+
+### Concurrency setting: 
+Due to limited computing resources, this website **currently handles up to two issues** at the same time. When there are more than two issues at the same time, it will be queued.
+
+### Demonstration
+
+#### 1. Multilingual Q&A (EN, ZH, DE supported)
+
+On medical questions with complex reasoning, the system can also answer correctly, and no illusion.
+
+<img width="1483" height="1903" alt="image" src="https://github.com/user-attachments/assets/b74e2eed-036f-454b-9780-16563c4e308e" />
+
+> In the second round of Chinese answers, the system was rigorous and there was no direct alternative to aspirin.
+> But then in the third round, asked in German ‘Can you take this alternative medicine with omeprazole?’ At the time, the system's Knowledge Graph automatically equated the ‘aspirin substitute for myocardial infarction’ with Clopidogrel at the bottom, and directly gave a professional drug conflict analysis.
+> Proves that the system is not doing simple literal text matching, but doing real medical conceptual reasoning in the multi-dimensional space of the Knowledge Graph.
+
+#### 2. Agentic tool - Paper search (Pubmed supported)
+
+When the LLM detects that insufficient evidence within the local Knowledge Graph to answer questions, it autonomously triggers the agent tool and search for the most relevant papers of the required entity pairs in 'Pubmed', write the results to the system database and answer the questions.
+
+https://github.com/user-attachments/assets/e98c0d36-4687-44bf-8899-999475c2197a
+
+> The process of searching for Pubmed and storage to Neo4j and Qdrant takes about 8s on the GPU, and about 15s on the CPU.
+
+#### 3. Knowledge Graph query
+
+You can check the relationship between all existing medical entities (support fuzzy query)
+
+<img width="1744" height="1746" alt="image" src="https://github.com/user-attachments/assets/1b0f346b-1df8-4c12-9757-0715ce91df5f" />
+
+
 ## 📋 Table of Contents
 
 - [Features](#-features)
